@@ -1,0 +1,9 @@
+spacy
+sentence_transformers
+google.generativeai
+groq
+PyMuPDF 
+sentence-transformers
+fastapi
+bertopic
+datasets
