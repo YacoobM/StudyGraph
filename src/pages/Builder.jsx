@@ -4,7 +4,7 @@ import { useAuth } from '../auth.jsx'
 import {
   listDocuments, uploadDocument, deleteDocument, generateGraph,
 } from '../services/api'
-import GraphViewerPlaceholder from '../components/GraphViewerPlaceholder.jsx'
+import GraphViewer from '../components/GraphViewer.jsx'
 import ChatPanel from '../components/ChatPanel.jsx'
 import ModelPicker from '../components/ModelPicker.jsx'
 import './Builder.css'
@@ -16,7 +16,7 @@ import './Builder.css'
  *  Generate / Delete / Preview controls.
  *
  *  It talks to the backend ONLY through ../services/api (the stubbed layer).
- *  The actual graph render is delegated to <GraphViewerPlaceholder>, which
+ *  The actual graph render is delegated to <GraphViewer>, which
  *  the visualization teammate will replace.
  * ========================================================================== */
 
@@ -29,6 +29,11 @@ export default function Builder() {
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
+<<<<<<< HEAD
+=======
+  const [graphData, setGraphData] = useState({ nodes: [], edges: [] })
+  const [chatOpen, setChatOpen] = useState(false)
+>>>>>>> 2d8de0d48e7a35199716ff2164ea78b7d28e5469
   const [drag, setDrag] = useState(false)
   const fileRef = useRef(null)
 
@@ -59,7 +64,9 @@ export default function Builder() {
     setBusy(true)
     try {
       const ids = selected.size ? Array.from(selected) : docs.map(d => d.id)
-      await generateGraph(ids, modelSel.provider, modelSel.model)
+      const result = await generateGraph(ids, modelSel.provider, modelSel.model)
+      setGraphData({ nodes: result?.nodes || [], edges: result?.edges || [] })
+      console.log(result)
       await loadDocs()
       // Keep users on the generation page so the embedded Q&A panel is immediately available.
     } catch (e) {
@@ -300,7 +307,11 @@ export default function Builder() {
 
       {/* graph viewer — INTEGRATION POINT #2 (visualization teammate) */}
       {graphOpen && (
-        <GraphViewerPlaceholder onClose={() => setGraphOpen(false)} />
+        <GraphViewer
+          nodes={graphData.nodes}
+          edges={graphData.edges}
+          onClose={() => setGraphOpen(false)}
+        />
       )}
 
       {/* Q&A RAG panel now lives directly on the generation page. */}
