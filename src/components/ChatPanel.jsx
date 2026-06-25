@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { askQuestion } from '../services/api'
 import './ChatPanel.css'
 
-export default function ChatPanel({ onClose }) {
+export default function ChatPanel({ onClose, embedded = false }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -52,7 +52,7 @@ export default function ChatPanel({ onClose }) {
   }
 
   return (
-    <div className="chat-drawer">
+    <div className={embedded ? "chat-drawer chat-panel-embedded" : "chat-drawer"}>
       <div className="chat-head">
         <div className="chat-head-title">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -60,7 +60,7 @@ export default function ChatPanel({ onClose }) {
           </svg>
           <span>Ask StudyGraph</span>
         </div>
-        <button className="chat-close" onClick={onClose}>×</button>
+        {!embedded && <button className="chat-close" onClick={onClose}>×</button>}
       </div>
 
       <div className="chat-body">
