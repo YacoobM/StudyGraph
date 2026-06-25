@@ -810,6 +810,19 @@ Only return valid JSON."""
         chunk_embeddings = np.array([c["embedding"] for c in self.chunk_store])
         similarities     = cosine_similarity(query_embedding, chunk_embeddings)[0]
         top_indices      = np.argsort(similarities)[-top_k:][::-1]
+        
+        print(
+            [
+            {
+                "text":       self.chunk_store[i]["text"],
+                "pages":      self.chunk_store[i]["pages"],
+                "similarity": round(float(similarities[i]), 3),
+            }
+            for i in top_indices
+            if similarities[i] > 0.4
+        ]
+        )
+        
         return [
             {
                 "text":       self.chunk_store[i]["text"],

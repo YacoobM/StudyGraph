@@ -95,7 +95,8 @@ export async function generateGraph(_docIds, _provider, _model) {
   // Closest real equivalent to "generate graph" is /api/fuse, which fuses
   // everything uploaded so far. Backend has no per-document scoping or
   // per-call model override, so those args are accepted but unused.
-  return safeFetchJson(`${API_BASE_URL}/api/fuse`, { method: 'POST' })
+
+  return safeFetchJson(`${API_BASE_URL}/api/graph`, { method: 'GET' })
 }
 
 function buildGraphPayload(raw) {
