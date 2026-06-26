@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
 import json
@@ -39,7 +39,18 @@ embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 engine = None
 
+class Relationship(BaseModel):
+    from_: str = Field(..., alias="from")
+    to: str
+    relation: str
 
+    class Config:
+        populate_by_name = True
+
+class ExtractionResult(BaseModel):
+    concepts: list[str]
+    relationships: list[Relationship]
+    
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
     try:
@@ -478,180 +489,152 @@ Only return valid JSON, no other text."""
         Performs three sub-operations:
         1. Entity Merging: Merge semantically identical nodes
         2. Conflict Resolution: Select accurate relations for multi-edge scenarios
-        3. Path Inference: Add inferred transitive relationships
         """
         print("Starting Global Knowledge Fusion...")
         self._merge_entities()
         self._resolve_conflicts()
-        self._infer_transitive_paths()
 
         print(f"Fusion complete. Canonical nodes: {len(self.canonical_nodes)}, "
               f"Fused edges: {len(self.fused_edges)}, Inferred edges: {len(self.inferred_edges)}")
 
     def _merge_entities(self):
         """
-        Entity Merging: Use LLM to identify semantically identical nodes and merge them.
+        Entity Merging: Use cosine similarity to identify and merge semantically identical nodes.
+        No LLM call — deterministic, fast, reproducible.
         """
         if not self.concepts:
             return
 
         node_names = [c["name"] for c in self.concepts]
+        if len(node_names) < 2:
+            return
 
-        merge_prompt = f"""Identify semantically identical or equivalent concepts in this list.
-Group synonyms and different names for the same concept together.
-Return JSON with canonical forms:
-{{"merges": [{{"canonical": "canonical_name", "variants": ["var1", "var2"]}}]}}
+        # Encode all concept names
+        embeddings = self.model.encode(node_names)
+        
+        # Track which nodes have been merged
+        merged = set()
+        threshold = 0.80  # tune this based on false positives you see
+        
+        for i in range(len(node_names)):
+            if node_names[i] in merged:
+                continue
+            
+            # Find all similar nodes to this one
+            sims = cosine_similarity([embeddings[i]], embeddings)[0]
+            
+            for j in range(i + 1, len(node_names)):
+                if node_names[j] in merged:
+                    continue
+                
+                if sims[j] >= threshold:
+                    # Merge j into i (i is canonical)
+                    self.canonical_nodes[node_names[j]] = node_names[i]
+                    merged.add(node_names[j])
 
-Concept list: {json.dumps(node_names)}
-
-Only return valid JSON."""
-
-        try:
-            response = client.chat.completions.create(
-                messages=[{"role": "user", "content": merge_prompt}],
-                model="llama-3.3-70b-versatile",
-                response_format={"type": "json_object"},
-            )
-            merge_data = json.loads(response.choices[0].message.content)
-
-            for merge_group in merge_data.get("merges", []):
-                canonical = merge_group.get("canonical", "").lower().strip()
-                if canonical:
-                    for variant in merge_group.get("variants", []):
-                        variant_lower = variant.lower().strip()
-                        if variant_lower != canonical:
-                            self.canonical_nodes[variant_lower] = canonical
-
-            print(f"Entity merging: {len(self.canonical_nodes)} mappings created")
-        except Exception as e:
-            print(f"Error during entity merging: {e}")
+        print(f"Entity merging: {len(self.canonical_nodes)} merges via cosine similarity (threshold={threshold})")
+        
+    def _normalize_relation(self, relation):
+        """
+        Normalize relation labels to a fixed vocabulary.
+        Handles common LLM output variance without an LLM call.
+        """
+        r = relation.lower().strip()
+        
+        # Define synonym groups → canonical form
+        synonyms = {
+            # prerequisite family
+            "prerequisite": ["prerequisite", "prerequisite for", "prerequisite_for", "requires", "required for", "depends on"],
+            # causation family
+            "causes": ["causes", "cause", "leads to", "results in", "produces"],
+            # composition family
+            "part_of": ["part of", "part_of", "component of", "composed of", "comprises"],
+            # relation/connection family
+            "related_to": ["related to", "related_to", "associated with", "connected to", "linked to", "relates to"],
+            # explanation family
+            "explains": ["explains", "explain", "defined as", "describes", "clarifies"],
+            # enabling/facilitation
+            "enables": ["enables", "enable", "allows", "permits", "facilitates"],
+        }
+        
+        for canonical, variants in synonyms.items():
+            if r in variants:
+                return canonical
+        
+        # Fallback: return as-is if not in map
+        return r
 
     def _resolve_conflicts(self):
         """
-        Conflict Resolution: When multiple edges exist between the same two nodes
-        with different relation labels, use LLM to select the most accurate relation.
+        Conflict Resolution: When multiple edges exist between the same two nodes,
+        normalize relation labels and select the first edge (conflicts are rare after normalization).
+        No LLM call — all done via deterministic string normalization.
         """
+        if not self.edges:
+            return
+
         edge_groups = {}
+        
+        # Group edges by canonical node pairs
         for edge in self.edges:
             from_node = self.canonical_nodes.get(edge["from"], edge["from"])
             to_node = self.canonical_nodes.get(edge["to"], edge["to"])
+            
+            # Normalize the relation label
+            normalized_relation = self._normalize_relation(edge["relation"])
+            
             key = (from_node, to_node)
             if key not in edge_groups:
                 edge_groups[key] = []
-            edge_groups[key].append(edge)
+            
+            edge_groups[key].append({
+                "from": from_node,
+                "to": to_node,
+                "relation": normalized_relation,
+                "source": edge.get("source", "unknown"),
+                "original_relation": edge["relation"]  # keep for debugging
+            })
 
+        # Process each edge group
         for (from_node, to_node), edges in edge_groups.items():
             if len(edges) == 1:
-                self.fused_edges.append(edges[0])
-            else:
-                relations = [e["relation"] for e in edges]
-                sources = [e["source"] for e in edges]
-
-                if len(set(relations)) > 1:
-                    conflict_prompt = f"""Given these relationships between '{from_node}' and '{to_node}':
-Relations: {relations}
-Sources: {sources}
-
-Select the SINGLE most accurate and general relation that captures the true connection.
-Return JSON: {{"best_relation": "relation_name"}}"""
-
-                    try:
-                        response = client.chat.completions.create(
-                            messages=[{"role": "user", "content": conflict_prompt}],
-                            model="llama-3.3-70b-versatile",
-                            response_format={"type": "json_object"},
-                        )
-                        conflict_data = json.loads(response.choices[0].message.content)
-                        best_relation = conflict_data.get("best_relation", relations[0]).lower().strip()
-                    except Exception as e:
-                        print(f"Error resolving conflict for {from_node}->{to_node}: {e}")
-                        best_relation = relations[0]
-                else:
-                    best_relation = relations[0]
-
+                # Single edge, keep as-is
                 self.fused_edges.append({
-                    "from": from_node,
-                    "to": to_node,
-                    "relation": best_relation,
-                    "source": sources[0],
-                    "conflict_resolved": len(edges) > 1
+                    "from": edges[0]["from"],
+                    "to": edges[0]["to"],
+                    "relation": edges[0]["relation"],
+                    "source": edges[0]["source"],
+                    "conflict_resolved": False
                 })
+            else:
+                # Multiple edges between same nodes
+                relations = [e["relation"] for e in edges]
+                
+                if len(set(relations)) == 1:
+                    # All have the same (normalized) relation — just one edge needed
+                    self.fused_edges.append({
+                        "from": from_node,
+                        "to": to_node,
+                        "relation": relations[0],
+                        "source": edges[0]["source"],
+                        "conflict_resolved": True,  # flag that we collapsed multiple edges
+                        "original_count": len(edges)  # how many we merged
+                    })
+                else:
+                    # Different relations even after normalization — rare, pick the first
+                    # (Could log this for inspection if needed)
+                    self.fused_edges.append({
+                        "from": from_node,
+                        "to": to_node,
+                        "relation": relations[0],
+                        "source": edges[0]["source"],
+                        "conflict_resolved": True,
+                        "original_count": len(edges),
+                        "conflicting_relations": relations  # log what the conflict was
+                    })
 
         print(f"Conflict resolution: Processed {len(edge_groups)} edge groups, "
-              f"created {len(self.fused_edges)} fused edges")
-
-    def _infer_transitive_paths(self):
-        """
-        Path Inference: Use LLM to infer and add missing transitive relationships.
-        """
-        if len(self.fused_edges) < 2:
-            return
-
-        graph_dict = {}
-        for edge in self.fused_edges:
-            from_node = edge["from"]
-            to_node = edge["to"]
-            relation = edge["relation"]
-            if from_node not in graph_dict:
-                graph_dict[from_node] = []
-            graph_dict[from_node].append((to_node, relation))
-
-        candidate_paths = []
-        for from_node, neighbors in graph_dict.items():
-            for intermediate, rel1 in neighbors:
-                if intermediate in graph_dict:
-                    for to_node, rel2 in graph_dict[intermediate]:
-                        if from_node != to_node:
-                            direct_exists = any(
-                                e["from"] == from_node and e["to"] == to_node
-                                for e in self.fused_edges
-                            )
-                            if not direct_exists:
-                                candidate_paths.append({
-                                    "from": from_node,
-                                    "to": to_node,
-                                    "path": f"{from_node} --[{rel1}]--> {intermediate} --[{rel2}]--> {to_node}"
-                                })
-
-        if not candidate_paths:
-            return
-
-        paths_batch = candidate_paths[:10]
-        paths_str = "\n".join([f"{i+1}. {p['path']}" for i, p in enumerate(paths_batch)])
-
-        infer_prompt = f"""For each 2-hop path, determine if a direct relationship should be inferred.
-Return a JSON array indicating which should be added (true/false) and the inferred relation:
-{{"inferred": [{{"index": 0, "should_infer": true, "relation": "relation_name"}}, ...]}}
-
-Paths:
-{paths_str}
-
-Only return valid JSON."""
-
-        try:
-            response = client.chat.completions.create(
-                messages=[{"role": "user", "content": infer_prompt}],
-                model="llama-3.3-70b-versatile",
-                response_format={"type": "json_object"},
-            )
-            infer_data = json.loads(response.choices[0].message.content)
-
-            for inference in infer_data.get("inferred", []):
-                if inference.get("should_infer", False):
-                    idx = inference.get("index", 0)
-                    if 0 <= idx < len(paths_batch):
-                        path_info = paths_batch[idx]
-                        self.inferred_edges.append({
-                            "from": path_info["from"],
-                            "to": path_info["to"],
-                            "relation": inference.get("relation", "related_to").lower().strip(),
-                            "source": "inferred_transitive",
-                            "path": path_info["path"]
-                        })
-
-            print(f"Transitive inference: Added {len(self.inferred_edges)} inferred edges")
-        except Exception as e:
-            print(f"Error during transitive inference: {e}")
+            f"created {len(self.fused_edges)} fused edges")
 
     def find_best_node(self, query):
         if not self.concepts:
@@ -902,7 +885,6 @@ Only return valid JSON."""
                 graph_lines.append("Concept Connections:")
                 for e in subgraph.get("edges", [])[:10]:
                     edge_type = "→" if not e.get("conflict_resolved") else "→*"
-                    marker = " (INFERRED)" if e.get("source") == "inferred_transitive" else ""
                     graph_lines.append(f"  {e['from']} {edge_type} [{e['relation']}] {e['to']}{marker}")
 
             graph_section = "\n".join(graph_lines) + "\n"
@@ -1102,8 +1084,7 @@ async def get_graph():
             "target": e["to"].replace(" ", "_"),
             "label": e["relation"],
             "relation": e["relation"],
-            "conflict_resolved": e.get("conflict_resolved", False),
-            "is_inferred": e.get("source") == "inferred_transitive"
+            "conflict_resolved": e.get("conflict_resolved", False)
         }
         for e in working_edges
         if e["from"].replace(" ", "_") in valid_node_ids and e["to"].replace(" ", "_") in valid_node_ids
@@ -1190,8 +1171,6 @@ async def fuse_knowledge_graph():
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
 
 if __name__ == "__main__":
     import uvicorn
