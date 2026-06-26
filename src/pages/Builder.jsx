@@ -65,7 +65,7 @@ export default function Builder() {
       setGraphData({ nodes: result?.nodes || [], edges: result?.edges || [] })
       console.log(result)
       await loadDocs()
-      setGraphOpen(true)
+      // Keep users on the generation page so the embedded Q&A panel is immediately available.
     } catch (e) {
       alert(e?.response?.data?.error || 'Graph generation failed')
     } finally {
@@ -132,7 +132,7 @@ export default function Builder() {
           </div>
         </div>
         <div className="topbar-right">
-          <button className="icon-btn" title="Open chat" onClick={() => setChatOpen(true)}>
+          <button className="icon-btn" title="Ask StudyGraph" onClick={() => document.querySelector('.rag-pane')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
@@ -204,8 +204,9 @@ export default function Builder() {
             </div>
           </div>
 
-          <div className="docs-table-wrap">
-            <table className="docs-table">
+          <div className="workspace-grid">
+            <section className="docs-table-wrap">
+              <table className="docs-table">
               <thead>
                 <tr>
                   <th style={{ width: 40 }}>
@@ -264,16 +265,21 @@ export default function Builder() {
                   ))
                 )}
               </tbody>
-            </table>
+              </table>
 
-            <div className="table-footer">
+              <div className="table-footer">
               <span className="ft-info">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
                 </svg>
                 Running in standalone mode — uploads &amp; graphs are mocked until the backend module is connected.
               </span>
-            </div>
+              </div>
+            </section>
+
+            <aside className="rag-pane">
+              <ChatPanel embedded />
+            </aside>
           </div>
 
           <div className="bottom-bar">
@@ -305,20 +311,7 @@ export default function Builder() {
         />
       )}
 
-      {/* chat panel */}
-      {chatOpen && (
-        <ChatPanel onClose={() => setChatOpen(false)} />
-      )}
-
-      {/* floating chat button (bottom-left) */}
-      {!chatOpen && (
-        <button className="fab-chat" onClick={() => setChatOpen(true)}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <span>Ask StudyGraph</span>
-        </button>
-      )}
+      {/* Q&A RAG panel now lives directly on the generation page. */}
     </div>
   )
 }

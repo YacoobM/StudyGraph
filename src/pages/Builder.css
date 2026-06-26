@@ -387,3 +387,37 @@
   background: var(--accent-hover);
   transform: translateY(-2px);
 }
+
+/* ----- generation workspace: table + embedded RAG Q&A ----- */
+.workspace-grid {
+  margin: 20px 28px;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+}
+
+.workspace-grid .docs-table-wrap {
+  margin: 0;
+  min-width: 0;
+}
+
+.rag-pane {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+@media (max-width: 1100px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-pane {
+    min-height: 420px;
+  }
+}
