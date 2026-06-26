@@ -14,9 +14,11 @@ from datetime import datetime
 import time
 from bertopic import BERTopic
 from sklearn.feature_extraction.text import CountVectorizer
+import asyncio
 
 load_dotenv()
 
+# globals
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -38,6 +40,8 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 engine = None
+
+EXTRACTION_SEMAPHORE = asyncio.Semaphore(5)
 
 class Relationship(BaseModel):
     from_: str = Field(..., alias="from")
@@ -149,10 +153,7 @@ class StudyGraphEngine:
         Records timing and method used for benchmarking.
         """
         start = time.time()
-        if self.seed_method == "bertopic":
-            self._generate_seeds_bertopic(all_pages)
-        else:
-            self._generate_seeds_llm(all_pages)
+        self._generate_seeds_llm(all_pages)
         self.seed_generation_time = round(time.time() - start, 3)
         self.seed_generation_method = self.seed_method
         print(f"Seed generation ({self.seed_method}): {self.seed_generation_time}s")
@@ -427,42 +428,62 @@ Only return the JSON object, no other text."""
         self.index_chunks(chunks)
         return chunks
 
-    def extract_knowledge(self, text_batch):
+    async def extract_knowledge(self, text_batch):
         """
-        Extract concepts and relationships, with a focus on seed entities if available.
+        Extract concepts and relationships asynchronously.
+        Validates output against schema before returning.
         """
-        if self.seed_entities:
-            seed_list = ", ".join(self.seed_entities[:10])
-            prompt = f"""Extract COMPREHENSIVE academic concepts and relationships, PRIORITIZING these key entities: {seed_list}.
-Focus on relationships that directly involve these seeds or their immediate dependencies.
-Extract ALL meaningful concepts and relationships in the text - be thorough and find multiple connections.
-Relationship types: prerequisite, related_to, causes, enables, influences, composes, explains, contradicts, etc.
-Return strict JSON:
-{{"concepts": [], "relationships": [{{"from": "", "to": "", "relation": ""}}]}}
-Only return valid JSON, no other text."""
-        else:
-            prompt = """Extract COMPREHENSIVE academic concepts and relationships from the text.
-Find and include ALL meaningful concepts and relationships - be thorough.
-Include various relationship types: prerequisite, related_to, causes, enables, influences, composes, explains, contradicts, etc.
-Return JSON:
-{"concepts": [], "relationships": [{"from": "", "to": "", "relation": ""}]}
-Only return valid JSON, no other text."""
+        async with EXTRACTION_SEMAPHORE:
+            if self.seed_entities:
+                seed_list = ", ".join(self.seed_entities[:10])
+                prompt = f"""Extract COMPREHENSIVE academic concepts and relationships, PRIORITIZING these key entities: {seed_list}.
+    Focus on relationships that directly involve these seeds or their immediate dependencies.
+    Extract ALL meaningful concepts and relationships in the text - be thorough and find multiple connections.
+    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+    Return strict JSON:
+    {{"concepts": [], "relationships": [{{"from": "", "to": "", "relation": ""}}]}}
+    Only return valid JSON, no other text."""
+            else:
+                prompt = """Extract COMPREHENSIVE academic concepts and relationships from the text.
+    Find and include ALL meaningful concepts and relationships - be thorough.
+    Include relationship types: prerequisite, causes, part_of, explains, enables, related_to
+    Return JSON:
+    {"concepts": [], "relationships": [{"from": "", "to": "", "relation": ""}]}
+    Only return valid JSON, no other text."""
 
-        try:
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": text_batch},
-                ],
-                model="llama-3.3-70b-versatile",
-                response_format={"type": "json_object"},
-            )
-            graph_json = json.loads(chat_completion.choices[0].message.content)
-            self.graph = graph_json
-            return graph_json
-        except Exception as e:
-            print(f"Error calling Groq: {e}")
-            return {"concepts": [], "relationships": []}
+            try:
+                # Run sync Groq call in thread pool
+                def call_groq():
+                    return client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": text_batch},
+                        ],
+                        model="llama-3.3-70b-versatile",
+                        response_format={"type": "json_object"},
+                    )
+                
+                chat_completion = await asyncio.to_thread(call_groq)
+                raw_data = json.loads(chat_completion.choices[0].message.content)
+                
+                # Validate against schema
+                validated = ExtractionResult(**raw_data)
+                
+                return {
+                    "concepts": validated.concepts,
+                    "relationships": [
+                        {"from": r.from_, "to": r.to, "relation": r.relation}
+                        for r in validated.relationships
+                    ]
+                }
+            except ValueError as e:
+                print(f"Extraction validation error: {e}")
+                print(f"Raw data was: {raw_data}")
+                return {"concepts": [], "relationships": []}
+            except Exception as e:
+                print(f"Error calling Groq: {e}")
+                print(f"Raw data was: {raw_data if 'raw_data' in locals() else 'N/A'}")
+                return {"concepts": [], "relationships": []}
 
     def add_to_graph(self, raw_data, doc_name):
         if not raw_data:
@@ -794,18 +815,6 @@ Only return valid JSON, no other text."""
         similarities     = cosine_similarity(query_embedding, chunk_embeddings)[0]
         top_indices      = np.argsort(similarities)[-top_k:][::-1]
         
-        print(
-            [
-            {
-                "text":       self.chunk_store[i]["text"],
-                "pages":      self.chunk_store[i]["pages"],
-                "similarity": round(float(similarities[i]), 3),
-            }
-            for i in top_indices
-            if similarities[i] > 0.4
-        ]
-        )
-        
         return [
             {
                 "text":       self.chunk_store[i]["text"],
@@ -813,7 +822,7 @@ Only return valid JSON, no other text."""
                 "similarity": round(float(similarities[i]), 3),
             }
             for i in top_indices
-            if similarities[i] > 0.4
+            if similarities[i] > 0.2  # lowered threshold from 0.4
         ]
 
     @staticmethod
@@ -828,15 +837,15 @@ Only return valid JSON, no other text."""
 
     def rag_query(self, query, context=None):
         """
-        Global Perspective RAG Query: Combines vector-based chunk retrieval with
-        multi-hop graph search and fused knowledge graph context.
+        RAG Query: Retrieves text chunks and optionally uses graph context.
+        Returns concise, well-cited answers.
         """
         retrieved = self.retrieve_chunks(query, top_k=3)
-        multi_hop_result = self.multi_hop_search(query, depth=2)
-
-        if not retrieved and not multi_hop_result.get("nodes"):
+        
+        # If no text chunks found, return early
+        if not retrieved:
             return {
-                "answer": "I couldn't find relevant information in your documents.",
+                "answer": "No relevant text chunks found in your documents. Try a different query.",
                 "citations": [],
                 "citation_label": "",
                 "chunks_used": 0,
@@ -845,70 +854,55 @@ Only return valid JSON, no other text."""
                 "graph_search_depth": 0
             }
 
+        # Build context from retrieved chunks with visible citations
         context_blocks, all_cited_pages = [], []
         for r in retrieved:
             citation = self.format_citation(r["pages"])
-            header   = f"[{citation}]" if citation else "[unknown page]"
-            context_blocks.append(f"{header}\n{r['text']}")
+            header = f"[{citation}]" if citation else "[unknown page]"
+            # Truncate chunk text to keep prompt reasonable
+            chunk_text = r["text"][:400]
+            context_blocks.append(f"{header}\n{chunk_text}")
             all_cited_pages.extend(r["pages"])
 
-        context_text = "\n\n".join(context_blocks) if context_blocks else "[No direct text chunks found]"
-        unique_pages = sorted(set(all_cited_pages)) if all_cited_pages else []
+        context_text = "\n\n".join(context_blocks)
+        unique_pages = sorted(set(all_cited_pages))
 
+        # Optional: add graph context if available
+        graph_section = ""
         working_edges = self.fused_edges if self.fused_edges else self.edges
-
-        if working_edges and self.fused_edges:
+        if working_edges:
+            multi_hop_result = self.multi_hop_search(query, depth=2)
             subgraph = {
                 "nodes": multi_hop_result.get("nodes", []),
                 "edges": multi_hop_result.get("edges", []),
-                "is_fused": True
+                "is_fused": bool(self.fused_edges)
             }
-        else:
-            original_subgraph = self.get_relevant_subgraph(query)
-            subgraph = {
-                "nodes": original_subgraph.get("nodes", []),
-                "edges": original_subgraph.get("edges", []),
-                "is_fused": False
-            }
-
-        graph_section = ""
-        if subgraph.get("edges"):
-            graph_lines = ["FUSED KNOWLEDGE GRAPH STRUCTURE:"]
-            graph_lines.append("Related Concepts:")
-
-            seed_nodes = [n for n in subgraph.get("nodes", []) if n.get("is_seed")]
-            if seed_nodes:
-                seed_names = ", ".join([n["name"] for n in seed_nodes])
-                graph_lines.append(f"  Key Seeds: {seed_names}")
-
+            
             if subgraph.get("edges"):
-                graph_lines.append("Concept Connections:")
-                for e in subgraph.get("edges", [])[:10]:
-                    edge_type = "→" if not e.get("conflict_resolved") else "→*"
-                    graph_lines.append(f"  {e['from']} {edge_type} [{e['relation']}] {e['to']}{marker}")
+                graph_lines = ["Related concepts from the graph:"]
+                for e in subgraph.get("edges", [])[:5]:  # limit to 5 edges
+                    graph_lines.append(f"  {e['from']} [{e['relation']}] {e['to']}")
+                graph_section = "\n".join(graph_lines)
+        else:
+            subgraph = {"nodes": [], "edges": [], "is_fused": False}
 
-            graph_section = "\n".join(graph_lines) + "\n"
+        system_prompt = """You are a concise study assistant. Answer questions directly and briefly.
 
-        system_prompt = """You are an advanced study assistant powered by a Global Knowledge Graph.
-Your task is to answer using BOTH the provided text chunks AND the graph structure.
+    CITATION RULES:
+    - ALWAYS cite page numbers for facts from the text
+    - Format: [p. 5] for single page, [pp. 3-5] for ranges
+    - Put citations immediately after each claim
+    - Keep answers to 2-3 sentences maximum
+    - If graph information is relevant, mention it but don't rely on it if text is available"""
 
-Instructions:
-1. Answer using the RELEVANT_TEXT_CHUNKS when available for primary information
-2. Use the FUSED_SUBGRAPH_STRUCTURE to explain HOW concepts are connected
-3. Cite page references inline from text chunks
-4. Explicitly mention concept relationships from the graph where relevant
-5. If text is insufficient, use graph connections to provide context
+        user_prompt = f"""TEXT FROM DOCUMENTS (cite these):
+    {context_text}
 
-Format citations as: [p. 3] or [pp. 4-5]"""
+    {f"Related graph connections:" + chr(10) + graph_section if graph_section else ""}
 
-        user_prompt = f"""RELEVANT_TEXT_CHUNKS:
-{context_text}
+    QUESTION: {query}
 
-{graph_section}
-
-QUESTION: {query}
-
-Provide a comprehensive answer using both text content and concept relationships."""
+    Answer directly and briefly. Always cite the page numbers."""
 
         try:
             response = client.chat.completions.create(
@@ -924,25 +918,21 @@ Provide a comprehensive answer using both text content and concept relationships
             answer = "Error processing query"
 
         return {
-            "answer":         answer,
-            "citations":      unique_pages,
+            "answer": answer,
+            "citations": unique_pages,
             "citation_label": self.format_citation(unique_pages),
-            "chunks_used":    len(retrieved),
+            "chunks_used": len(retrieved),
             "chunks": [
                 {
-                    "text":       r["text"][:200] + "..." if len(r["text"]) > 200 else r["text"],
-                    "pages":      r["pages"],
-                    "citation":   self.format_citation(r["pages"]),
+                    "text": r["text"][:200] + "..." if len(r["text"]) > 200 else r["text"],
+                    "pages": r["pages"],
+                    "citation": self.format_citation(r["pages"]),
                     "similarity": r["similarity"],
                 }
                 for r in retrieved
             ],
-            "subgraph": {
-                "nodes": subgraph.get("nodes", []),
-                "edges": subgraph.get("edges", []),
-                "is_fused": subgraph.get("is_fused", False)
-            },
-            "graph_search_depth": 2 if self.fused_edges else 0,
+            "subgraph": subgraph,
+            "graph_search_depth": 2 if working_edges else 0,
             "fusion_status": "fused" if self.fused_edges else "raw"
         }
 
@@ -975,19 +965,22 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
         file_bytes = await file.read()
         pages = engine.extract_text(file_bytes, file.filename)
 
-        # BATCH-STREAM-BATCH PIPELINE
-        # Phase 1: BATCH — Run both seed methods, benchmark both, use requested one
         benchmark_results = None
-        if not engine.seed_entities:
-            benchmark_results = engine._run_both_seed_methods(pages)
+        engine.generate_seeds(pages)
+        save_seed_entities(engine.seed_entities)
 
-        # Phase 2: STREAM — Process chunks with seed-focused extraction
         chunks = engine.get_chunks(pages)
 
-        for i, chunk in enumerate(chunks[:15]):
-            data = engine.extract_knowledge(chunk["text"])
+        extraction_tasks = [
+            engine.extract_knowledge(chunk["text"])
+            for chunk in chunks[:15]
+        ]
+        results = await asyncio.gather(*extraction_tasks)
+
+        # Add to graph sequentially (order doesn't matter here)
+        for i, data in enumerate(results):
             engine.add_to_graph(data, file.filename)
-            print(f"Processed chunk {i + 1}/{min(15, len(chunks))}")
+            print(f"Processed chunk {i + 1}/{len(results)}")
 
         # Save current graph state
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
@@ -1026,7 +1019,7 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
                 "note": "Seeds already generated from previous upload; benchmark skipped.",
             }
 
-        return {
+            return {
             "status": "success",
             "message": f"Processed {len(pages)} pages, {min(15, len(chunks))} chunks extracted",
             "chunks": len(chunks),
@@ -1037,7 +1030,6 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
             "graph_saved_to": graph_save_path,
             "total_concepts": len(engine.concepts),
             "total_edges": len(working_edges),
-            "benchmark": benchmark_block,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1070,7 +1062,7 @@ async def get_graph():
             nodes.append({
                 "id": canonical_name.replace(" ", "_"),
                 "name": canonical_name,
-                "source": c["source"],
+                "source": [{"file": c["source"]}],  # format as object with file
                 "description": "; ".join(concept_relations.get(canonical_name, []))[:150] or canonical_name,
                 "is_canonical": canonical_name in engine.canonical_nodes.values()
             })
