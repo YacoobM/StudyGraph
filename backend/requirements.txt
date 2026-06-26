@@ -8,3 +8,5 @@ fastapi
 bertopic
 datasets
 python-dotenv
+python-multipart
+uvicorn
