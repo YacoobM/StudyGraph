@@ -29,11 +29,8 @@ export default function Builder() {
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
-<<<<<<< HEAD
-=======
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] })
   const [chatOpen, setChatOpen] = useState(false)
->>>>>>> 2d8de0d48e7a35199716ff2164ea78b7d28e5469
   const [drag, setDrag] = useState(false)
   const fileRef = useRef(null)
 

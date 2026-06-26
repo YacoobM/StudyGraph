@@ -7,3 +7,4 @@ sentence-transformers
 fastapi
 bertopic
 datasets
+python-dotenv
