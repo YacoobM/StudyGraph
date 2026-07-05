@@ -5,8 +5,8 @@ groq
 PyMuPDF 
 sentence-transformers
 fastapi
-bertopic
 datasets
 python-dotenv
 python-multipart
 uvicorn
+chromadb

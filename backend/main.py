@@ -1,6 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
 import json
@@ -12,11 +11,16 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 import time
-from bertopic import BERTopic
-from sklearn.feature_extraction.text import CountVectorizer
 import asyncio
+from chromadb import Client
+from schemas import *
 
 load_dotenv()
+
+chroma = Client()
+
+if not os.getenv("GROQ_API_KEY"):
+    raise RuntimeError("GROQ_API_KEY is not configured!")
 
 # globals
 OUTPUT_DIR = Path(__file__).parent / "outputs"
@@ -41,18 +45,6 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 engine = None
 
 EXTRACTION_SEMAPHORE = asyncio.Semaphore(5)
-
-class Relationship(BaseModel):
-    from_: str = Field(..., alias="from")
-    to: str
-    relation: str
-
-    class Config:
-        populate_by_name = True
-
-class ExtractionResult(BaseModel):
-    concepts: list[str]
-    relationships: list[Relationship]
     
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
@@ -70,26 +62,6 @@ def save_seed_entities(seed_entities):
     except Exception as e:
         print(f"Error saving seed entities: {e}")
         return None
-
-
-def save_benchmark_results(method_name, timing, seeds):
-    """Save benchmark results to text file"""
-    try:
-        output_file = OUTPUT_DIR / f"seed_generation_{method_name}.txt"
-        with open(output_file, "w") as f:
-            f.write(f"Method: {method_name.upper()}\n")
-            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-            f.write(f"Execution Time: {timing} seconds\n")
-            f.write(f"Seeds Generated: {len(seeds)}\n")
-            f.write(f"\nSeeds:\n")
-            for i, seed in enumerate(seeds, 1):
-                f.write(f"{i}. {seed}\n")
-        print(f"Saved {method_name} benchmark results to {output_file}")
-        return str(output_file)
-    except Exception as e:
-        print(f"Error saving benchmark results: {e}")
-        return None
-
 
 def save_graph_json(nodes, edges, fusion_stats=None):
     """Save complete graph JSON to graph_json.json"""
@@ -112,26 +84,14 @@ def save_graph_json(nodes, edges, fusion_stats=None):
     except Exception as e:
         print(f"Error saving graph JSON: {e}")
         return None
-
-
-class QueryRequest(BaseModel):
-    query: str
-
-class RAGResponse(BaseModel):
-    answer: str
-    citations: list[int]
-    citation_label: str
-    chunks_used: int
-    chunks: list[dict]
-    subgraph: dict
-
-class GraphResponse(BaseModel):
-    nodes: list[dict]
-    edges: list[dict]
-
-
+    
+def get_collection(project_id, user_id="default"):
+    return chroma.get_or_create_collection(
+        name=f"user_{user_id}_project_{project_id}"
+    )
+    
 class StudyGraphEngine:
-    def __init__(self, seed_method="llm"):
+    def __init__(self, collections):
         self.concepts = []
         self.edges = []
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -141,10 +101,9 @@ class StudyGraphEngine:
         self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
         self.fused_edges = []           # Edges after conflict resolution (post-fusion)
         self.inferred_edges = []        # Transitive edges inferred during fusion
-        self.seed_method = seed_method  # "llm" or "bertopic"
         self.seed_generation_time = None        # float, seconds
-        self.seed_generation_method = None      # string, records which method was actually used
         self.upload_latency = None              # float, total time for entire upload endpoint
+        self.collections = collections
 
     def generate_seeds(self, all_pages):
         """
@@ -154,8 +113,6 @@ class StudyGraphEngine:
         start = time.time()
         self._generate_seeds_llm(all_pages)
         self.seed_generation_time = round(time.time() - start, 3)
-        self.seed_generation_method = self.seed_method
-        print(f"Seed generation ({self.seed_method}): {self.seed_generation_time}s")
 
     def _generate_seeds_llm(self, all_pages):
         """
@@ -186,65 +143,10 @@ Only return the JSON object, no other text."""
             print(f"Error generating seeds (LLM): {e}")
             self.seed_entities = []
 
-    def _clean_sentences_for_bertopic(self, sentences):
-        """
-        Remove noise sentences before BERTopic clustering.
-        Strips citations, references, headers, page numbers, and other
-        PDF extraction artefacts that pollute topic modelling.
-        """
-        import re
-        cleaned = []
-        for s in sentences:
-            # Drop sentences that are mostly digits (page numbers, years, table data)
-            if sum(c.isdigit() for c in s) / max(len(s), 1) > 0.3:
-                continue
-            # Drop sentences containing common reference/citation noise
-            if re.search(
-                r'\b(pp\.|arxiv|doi|proceedings|conference|vol\.|isbn|http|www\.|et al|ibid)\b',
-                s, re.IGNORECASE
-            ):
-                continue
-            # Drop sentences that are fewer than 6 words (too short to be meaningful)
-            if len(s.split()) < 6:
-                continue
-            # Drop sentences that are mostly uppercase (headers, section titles)
-            alpha_chars = [c for c in s if c.isalpha()]
-            if alpha_chars and sum(c.isupper() for c in alpha_chars) / len(alpha_chars) > 0.5:
-                continue
-            # Drop sentences that look like author lists or affiliations
-            if re.search(r'\b(university|institute|department|laboratory|corp\.|inc\.)\b', s, re.IGNORECASE):
-                continue
-            cleaned.append(s)
-        print(f"BERTopic sentence cleaning: {len(sentences)} → {len(cleaned)} sentences")
-        return cleaned
-
-    def _clean_seed_tokens(self, seeds):
-        """
-        Remove junk tokens from the raw seed list after BERTopic extraction.
-        Kills single characters, letter-space fragments like 'p', 'revenge p',
-        and any token that is too short to be a meaningful concept.
-        """
-        import re
-        cleaned = []
-        for s in seeds:
-            s = s.lower().strip()
-            # Drop single characters
-            if len(s) <= 3:
-                continue
-            # Drop tokens that are just a letter followed by a space and more (e.g. "p 45", "revenge p")
-            if re.match(r'^[a-z]\s', s) or re.search(r'\s[a-z]$', s):
-                continue
-            # Drop tokens that are purely numeric or punctuation
-            if re.match(r'^[\d\s\.\,\-]+$', s):
-                continue
-            cleaned.append(s)
-        return cleaned
-
     def _deduplicate_seeds_semantically(self, seeds, threshold=0.85):
         """
         Remove semantically redundant seeds using cosine similarity.
         Prevents variants like 'deep fake', 'deep fakes', 'deepfake' all surviving.
-        Keeps the first (highest-scored by BERTopic) representative of each cluster.
         """
         if not seeds:
             return seeds
@@ -262,141 +164,6 @@ Only return the JSON object, no other text."""
                 kept_embeddings.append(embeddings[i])
         print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
-
-    def _generate_seeds_bertopic(self, all_pages):
-        """
-        BERTopic-based seed generation: Uses topic modeling for seed extraction.
-        Applies sentence cleaning before clustering and seed cleaning after
-        to remove PDF noise and semantically redundant terms.
-        Falls back to LLM if document is too short for meaningful clustering.
-        """
-
-        # Split all page text into individual sentences
-        raw_sentences = []
-        for page in all_pages:
-            text = page.get("text", "")
-            raw_sentences.extend([s.strip() for s in text.split(".") if len(s.strip()) > 20])
-
-        # Clean sentences to remove PDF noise before clustering
-        sentences = self._clean_sentences_for_bertopic(raw_sentences)
-
-        # Fallback to LLM if not enough clean sentences remain
-        if len(sentences) < 10:
-            print("Warning: too few clean sentences for BERTopic, falling back to LLM")
-            self._generate_seeds_llm(all_pages)
-            return
-
-        try:
-            # Custom vectorizer: removes stopwords, captures bigrams, requires min frequency
-            vectorizer = CountVectorizer(
-                stop_words="english",
-                ngram_range=(1, 2),  # captures both unigrams and bigrams like "neural network"
-                min_df=2             # term must appear in at least 2 sentences to be considered
-            )
-
-            # Reuse self.model — do NOT load a second SentenceTransformer
-            topic_model = BERTopic(
-                embedding_model=self.model,
-                vectorizer_model=vectorizer,
-                nr_topics=20
-            )
-            topics, _ = topic_model.fit_transform(sentences)
-
-            # Extract top 3 representative words/phrases per topic (prefer bigrams)
-            raw_seeds = []
-            topic_info = topic_model.get_topic_info()
-            for topic_id in topic_info["Topic"].values:
-                if topic_id == -1:  # BERTopic uses -1 for outlier sentences
-                    continue
-                topic_words = topic_model.get_topic(topic_id)
-                # Prefer multi-word terms (bigrams) first, then unigrams
-                bigrams = [w for w, _ in topic_words[:6] if " " in w]
-                unigrams = [w for w, _ in topic_words[:6] if " " not in w]
-                top_words = (bigrams + unigrams)[:3]
-                raw_seeds.extend(top_words)
-
-            # Step 1: Remove junk tokens (single chars, fragments, punctuation)
-            cleaned_seeds = self._clean_seed_tokens(raw_seeds)
-
-            # Step 2: Deduplicate exact strings
-            deduped_seeds = list(set(cleaned_seeds))
-
-            # Step 3: Semantic deduplication to remove near-duplicate variants
-            final_seeds = self._deduplicate_seeds_semantically(deduped_seeds)[:20]
-
-            self.seed_entities = final_seeds
-            print(f"BERTopic generated {len(self.seed_entities)} seeds: {self.seed_entities}")
-        except Exception as e:
-            print(f"Error in BERTopic generation: {e}")
-            print("Falling back to LLM method")
-            self._generate_seeds_llm(all_pages)
-
-    def _run_both_seed_methods(self, all_pages):
-        """
-        Run both LLM and BERTopic seed generation on the same pages,
-        record timing for each, write benchmark files, and return results.
-        Called automatically on every upload.
-        """
-        results = {}
-
-        # --- LLM method ---
-        print("\n=== Benchmarking LLM seed method ===")
-        llm_temp = StudyGraphEngine(seed_method="llm")
-        llm_temp.generate_seeds(all_pages)
-        llm_file = save_benchmark_results("llm", llm_temp.seed_generation_time, llm_temp.seed_entities)
-        results["llm"] = {
-            "seeds": llm_temp.seed_entities,
-            "time_seconds": llm_temp.seed_generation_time,
-            "seed_count": len(llm_temp.seed_entities),
-            "output_file": llm_file,
-        }
-
-        # --- BERTopic method ---
-        print("\n=== Benchmarking BERTopic seed method ===")
-        bertopic_temp = StudyGraphEngine(seed_method="bertopic")
-        bertopic_temp.generate_seeds(all_pages)
-        bertopic_file = save_benchmark_results("bertopic", bertopic_temp.seed_generation_time, bertopic_temp.seed_entities)
-        results["bertopic"] = {
-            "seeds": bertopic_temp.seed_entities,
-            "time_seconds": bertopic_temp.seed_generation_time,
-            "seed_count": len(bertopic_temp.seed_entities),
-            "output_file": bertopic_file,
-        }
-
-        # --- Assign seeds from requested method to this engine ---
-        chosen = results[self.seed_method]
-        self.seed_entities = chosen["seeds"]
-        self.seed_generation_time = chosen["time_seconds"]
-        self.seed_generation_method = self.seed_method
-        save_seed_entities(self.seed_entities)
-
-        # --- Compute comparison metrics ---
-        llm_set = set(results["llm"]["seeds"])
-        bert_set = set(results["bertopic"]["seeds"])
-        common = llm_set & bert_set
-        denom = max(len(llm_set), len(bert_set))
-        bert_time = results["bertopic"]["time_seconds"]
-        llm_time = results["llm"]["time_seconds"]
-
-        if bert_time > 0 and llm_time > 0:
-            speedup_val = round(llm_time / bert_time, 2)
-            if speedup_val > 1:
-                speedup_str = f"BERTopic is {speedup_val}x faster"
-            else:
-                speedup_str = f"LLM is {round(1 / speedup_val, 2)}x faster"
-        else:
-            speedup_str = "N/A"
-
-        results["comparison"] = {
-            "common_seeds": list(common),
-            "only_llm": list(llm_set - bert_set),
-            "only_bertopic": list(bert_set - llm_set),
-            "common_count": len(common),
-            "overlap_percentage": round(len(common) / denom * 100, 1) if denom > 0 else 0,
-            "speedup": speedup_str,
-        }
-
-        return results
 
     def extract_text(self, file_bytes, filename=None):
         doc = fitz.open(stream=file_bytes, filetype="pdf")
@@ -791,38 +558,34 @@ Only return the JSON object, no other text."""
         }
 
     def index_chunks(self, chunks):
-        self.chunk_store = []
-        texts, pages_list = [], []
-        for chunk in chunks:
-            if isinstance(chunk, dict):
-                texts.append(chunk["text"])
-                pages_list.append(chunk.get("pages", [chunk["page"]] if "page" in chunk else []))
-            else:
-                texts.append(chunk)
-                pages_list.append([])
+        #store into the vector database
+        texts = [chunk["text"] for chunk in chunks]
 
-        embeddings = self.model.encode(texts, show_progress_bar=True)
-        for text, pages, embedding in zip(texts, pages_list, embeddings):
-            self.chunk_store.append({"text": text, "pages": pages, "embedding": embedding})
-        print(f"Indexed {len(self.chunk_store)} chunks")
+        embeddings = self.model.encode(texts)
+        
+        self.collections.add(
+            ids=[f"chunk_{i}" for i in range(len(texts))],
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=[{"pages": chunk["pages"]} for chunk in chunks]
+        )
 
     def retrieve_chunks(self, query, top_k=3):
-        if not self.chunk_store:
-            return []
         query_embedding  = self.model.encode([query.lower()])
-        chunk_embeddings = np.array([c["embedding"] for c in self.chunk_store])
-        similarities     = cosine_similarity(query_embedding, chunk_embeddings)[0]
-        top_indices      = np.argsort(similarities)[-top_k:][::-1]
+        
+        results = self.collections.query(
+            query_embeddings=query_embedding,
+            n_results=top_k
+        )
         
         return [
-            {
-                "text":       self.chunk_store[i]["text"],
-                "pages":      self.chunk_store[i]["pages"],
-                "similarity": round(float(similarities[i]), 3),
-            }
-            for i in top_indices
-            if similarities[i] > 0.2  # lowered threshold from 0.4
-        ]
+        {
+            "text": doc,
+            "pages": meta["pages"],
+            "similarity": 1 - dist
+        }
+        for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0])
+    ]
 
     @staticmethod
     def format_citation(pages):
@@ -937,20 +700,17 @@ Only return the JSON object, no other text."""
 
 
 # API Endpoints
-
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}, 200
+    return {"status": "ok"}
 
 
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
+async def upload_pdf(file: UploadFile = File(...)):
     """
     Upload a PDF and extract knowledge graph with Global Perspective pipeline.
     On every upload, BOTH seed methods are benchmarked and results written to
-    outputs/seed_generation_llm.txt and outputs/seed_generation_bertopic.txt.
-    The seed_method parameter controls which method's seeds are actually used
-    for the knowledge extraction pipeline.
+    outputs/seed_generation_llm.txt.
     """
     # in case of unconfigured groq api key
     if not os.getenv("GROQ_API_KEY"):
@@ -964,12 +724,11 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
 
     if engine is None:
         #instantitate a new instance of the studygraph class
-        engine = StudyGraphEngine(seed_method=seed_method)
+        engine = StudyGraphEngine(get_collection(1))
     try:
         file_bytes = await file.read()
         pages = engine.extract_text(file_bytes, file.filename)
 
-        benchmark_results = None
         engine.generate_seeds(pages)
         save_seed_entities(engine.seed_entities)
 
@@ -996,45 +755,19 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
         # Record total upload latency
         engine.upload_latency = round(time.time() - upload_start, 3)
 
-        # Build benchmark block for response
-        if benchmark_results:
-            benchmark_block = {
-                "seed_method_used": engine.seed_generation_method,
-                "seed_generation_time_seconds": engine.seed_generation_time,
-                "overall_latency_seconds": engine.upload_latency,
-                "llm": {
-                    "time_seconds": benchmark_results["llm"]["time_seconds"],
-                    "seed_count": benchmark_results["llm"]["seed_count"],
-                    "output_file": benchmark_results["llm"]["output_file"],
-                },
-                "bertopic": {
-                    "time_seconds": benchmark_results["bertopic"]["time_seconds"],
-                    "seed_count": benchmark_results["bertopic"]["seed_count"],
-                    "output_file": benchmark_results["bertopic"]["output_file"],
-                },
-                "comparison": benchmark_results["comparison"],
-            }
-        else:
-            # Seeds were already populated from a prior upload in this session
-            benchmark_block = {
-                "seed_method_used": engine.seed_generation_method,
-                "seed_generation_time_seconds": engine.seed_generation_time,
-                "overall_latency_seconds": engine.upload_latency,
-                "note": "Seeds already generated from previous upload; benchmark skipped.",
-            }
-
-            return {
-            "status": "success",
-            "message": f"Processed {len(pages)} pages, {min(15, len(chunks))} chunks extracted",
-            "chunks": len(chunks),
-            "filename": file.filename,
-            "seeds_generated": len(engine.seed_entities),
-            "seed_entities": engine.seed_entities,
-            "pipeline_phase": "stream",
-            "graph_saved_to": graph_save_path,
-            "total_concepts": len(engine.concepts),
-            "total_edges": len(working_edges),
+        return {
+        "status": "success",
+        "message": f"Processed {len(pages)} pages, {min(15, len(chunks))} chunks extracted",
+        "chunks": len(chunks),
+        "filename": file.filename,
+        "seeds_generated": len(engine.seed_entities),
+        "seed_entities": engine.seed_entities,
+        "pipeline_phase": "stream",
+        "graph_saved_to": graph_save_path,
+        "raw_concepts": len(engine.concepts),
+        "total_edges": len(working_edges)
         }
+        
     except HTTPException as e:
         if e.status_code in [401, 402, 403, 429]:
             # This is an error on our end while accessing the groq api
@@ -1047,8 +780,13 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
                 status_code=413, 
                 detail="The file size is too large, consider uploading the file in different batches."
             )
-
-
+    
+    except Exception as e:
+        print(f"Upload error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+            
 @app.get("/api/graph")
 async def get_graph():
     """Get current knowledge graph (uses fused graph if available)"""

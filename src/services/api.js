@@ -34,7 +34,6 @@ function _docFromUploadResponse(file, uploadResult) {
     model: 'llama-3.3-70b-versatile',
     nodes: uploadResult?.total_concepts ?? 0,
     relationships: uploadResult?.total_edges ?? 0,
-    seed_method_used: uploadResult?.benchmark?.seed_method_used ?? null,
     raw: uploadResult,
   }
 }
@@ -76,7 +75,7 @@ export async function uploadDocument(file, seedMethod = 'llm') {
   formData.append('file', file)
 
   // seed_method is a query param on the backend, not a form field
-  const url = `${API_BASE_URL}/api/upload?seed_method=${encodeURIComponent(seedMethod)}`
+  const url = `${API_BASE_URL}/api/upload`
   const uploadResult = await safeFetchJson(url, { method: 'POST', body: formData })
 
   const doc = _docFromUploadResponse(file, uploadResult)
