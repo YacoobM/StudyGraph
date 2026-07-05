@@ -37,7 +37,6 @@ app.add_middleware(
 )
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 engine = None
 
@@ -937,13 +936,11 @@ Only return the JSON object, no other text."""
         }
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+# API Endpoints
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok"}, 200
 
 
 @app.post("/api/upload")
@@ -955,12 +952,19 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
     The seed_method parameter controls which method's seeds are actually used
     for the knowledge extraction pipeline.
     """
+    # in case of unconfigured groq api key
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="The AI Service is temporarily down. Please try again later."
+        )
+    
     global engine
     upload_start = time.time()
 
     if engine is None:
+        #instantitate a new instance of the studygraph class
         engine = StudyGraphEngine(seed_method=seed_method)
-
     try:
         file_bytes = await file.read()
         pages = engine.extract_text(file_bytes, file.filename)
@@ -1031,8 +1035,18 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm"):
             "total_concepts": len(engine.concepts),
             "total_edges": len(working_edges),
         }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException as e:
+        if e.status_code in [401, 402, 403, 429]:
+            # This is an error on our end while accessing the groq api
+            raise HTTPException(
+                status_code=503, 
+                detail="The service is temporarily down. Please try again soon."
+                )
+        elif e.status_code in [413]:
+            raise HTTPException(
+                status_code=413, 
+                detail="The file size is too large, consider uploading the file in different batches."
+            )
 
 
 @app.get("/api/graph")
@@ -1118,15 +1132,27 @@ async def get_graph():
 @app.post("/api/query")
 async def query_rag(request: QueryRequest):
     """Query the knowledge graph with RAG"""
+    # in case of unconfigured groq api key
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="The AI Service is temporarily down. Please try again later."
+        ) 
     global engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
-
+    
+    # need to review this section again (status codes)
     try:
         result = engine.rag_query(request.query)
         return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException as e:
+        # This is an error on our end while accessing the groq api
+        if e.status_code in [401, 402, 403, 429]:
+            raise HTTPException(
+                status_code=503, 
+                detail="The service is temporarily down. Please try again soon."
+                )
 
 
 @app.post("/api/fuse")
