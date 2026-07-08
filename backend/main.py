@@ -1,10 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 import os
 import json
 import fitz
-from groq import Groq
+from groq import Groq, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -25,6 +26,8 @@ if not os.getenv("GROQ_API_KEY"):
 # globals
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR = OUTPUT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(
     title="StudyGraph API",
@@ -44,7 +47,7 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 engine = None
 
-EXTRACTION_SEMAPHORE = asyncio.Semaphore(5)
+EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
     
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
@@ -61,6 +64,29 @@ def save_seed_entities(seed_entities):
         return str(output_file)
     except Exception as e:
         print(f"Error saving seed entities: {e}")
+        return None
+
+def save_extraction_result(timings, nodes, edges):
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = OUTPUT_DIR / f"result_{timestamp}.json"
+        
+        data = {
+            "timestamp": timestamp,
+            "nodes": nodes,
+            "edges": edges,
+            "stats": {
+                "total_nodes": len(nodes),
+                "total_edges": len(edges),
+                "timings": timings
+            }
+        }
+        
+        with open(output_file, 'w') as f:
+            json.dump(data,f,indent=2)
+        return str(output_file)
+    except Exception as e:
+        print(f"Error saving file: {e}")
         return None
 
 def save_graph_json(nodes, edges, fusion_stats=None):
@@ -170,7 +196,7 @@ Only return the JSON object, no other text."""
         pages = [{"page": i + 1, "text": p.get_text()} for i, p in enumerate(doc)]
         return pages
 
-    def get_chunks(self, pages, size=2000, overlap=400):
+    def get_chunks(self, pages, source="unknown", size=2000, overlap=400):
         chunks = []
         full_text = ""
         position_to_page = []
@@ -188,7 +214,7 @@ Only return the JSON object, no other text."""
             end = min(start + size, len(full_text))
             chunk_text = full_text[start:end]
             spanned_pages = sorted(set(position_to_page[start:end]))
-            chunks.append({"text": chunk_text, "pages": spanned_pages})
+            chunks.append({"text": chunk_text, "pages": spanned_pages, "source": source})
             start += step
 
         self.index_chunks(chunks)
@@ -234,7 +260,7 @@ Only return the JSON object, no other text."""
                 
                 # Validate against schema
                 validated = ExtractionResult(**raw_data)
-                
+                print("Done")
                 return {
                     "concepts": validated.concepts,
                     "relationships": [
@@ -567,7 +593,7 @@ Only return the JSON object, no other text."""
             ids=[f"chunk_{i}" for i in range(len(texts))],
             embeddings=embeddings,
             documents=texts,
-            metadatas=[{"pages": chunk["pages"]} for chunk in chunks]
+            metadatas=[{"pages": chunk["pages"], "source": chunk.get("source", "unknown")} for chunk in chunks]
         )
 
     def retrieve_chunks(self, query, top_k=3):
@@ -578,10 +604,14 @@ Only return the JSON object, no other text."""
             n_results=top_k
         )
         
+        if not results["documents"] or not results["documents"][0]:
+            return [] # case of failed chunk retrieval
+        
         return [
         {
             "text": doc,
             "pages": meta["pages"],
+            "source": meta.get("source", "unknown"),
             "similarity": 1 - dist
         }
         for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0])
@@ -617,7 +647,7 @@ Only return the JSON object, no other text."""
             }
 
         # Build context from retrieved chunks with visible citations
-        context_blocks, all_cited_pages = [], []
+        context_blocks, all_cited_pages, sources = [], [], []
         for r in retrieved:
             citation = self.format_citation(r["pages"])
             header = f"[{citation}]" if citation else "[unknown page]"
@@ -625,6 +655,11 @@ Only return the JSON object, no other text."""
             chunk_text = r["text"][:400]
             context_blocks.append(f"{header}\n{chunk_text}")
             all_cited_pages.extend(r["pages"])
+            sources.append({
+                "fileName": r.get("source") or "document.pdf",
+                "page_number": r["pages"][0] if r.get("pages") else 1,
+                "snippet": (r["text"][:120] + "...") if len(r["text"]) > 120 else r["text"],
+            })
 
         context_text = "\n\n".join(context_blocks)
         unique_pages = sorted(set(all_cited_pages))
@@ -683,6 +718,7 @@ Only return the JSON object, no other text."""
             "answer": answer,
             "citations": unique_pages,
             "citation_label": self.format_citation(unique_pages),
+            "sources": sources,
             "chunks_used": len(retrieved),
             "chunks": [
                 {
@@ -698,6 +734,20 @@ Only return the JSON object, no other text."""
             "fusion_status": "fused" if self.fused_edges else "raw"
         }
 
+async def extract_with_exp_backoff(text, retries=5):
+    """
+    Helper method to extract concepts and relationships with exponential
+    backoff.
+    """
+    delay = 5
+    
+    for attempt in range(retries):
+        try:
+            return await(engine.extract_knowledge(text))
+        except RateLimitError as e:
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise Exception("Maximum retries exceeded!")
 
 # API Endpoints
 @app.get("/health")
@@ -727,18 +777,26 @@ async def upload_pdf(file: UploadFile = File(...)):
         engine = StudyGraphEngine(get_collection(1))
     try:
         file_bytes = await file.read()
-        pages = engine.extract_text(file_bytes, file.filename)
+        safe_name = Path(file.filename).name
+        upload_path = UPLOAD_DIR / safe_name
+        upload_path.write_bytes(file_bytes)
+
+        pages = engine.extract_text(file_bytes, safe_name)
 
         engine.generate_seeds(pages)
         save_seed_entities(engine.seed_entities)
 
-        chunks = engine.get_chunks(pages)
+        chunks = engine.get_chunks(pages, source=safe_name)
 
         extraction_tasks = [
-            engine.extract_knowledge(chunk["text"])
-            for chunk in chunks[:15]
+            extract_with_exp_backoff(chunk["text"])
+            for chunk in chunks
         ]
+                
         results = await asyncio.gather(*extraction_tasks)
+        
+        # Record total upload latency (make it a class variable if needed later)
+        upload_latency = round(time.time() - upload_start, 3)
 
         # Add to graph sequentially (order doesn't matter here)
         for i, data in enumerate(results):
@@ -751,13 +809,20 @@ async def upload_pdf(file: UploadFile = File(...)):
             [{"name": c["name"], "source": c["source"]} for c in engine.concepts],
             working_edges
         )
-
-        # Record total upload latency
-        engine.upload_latency = round(time.time() - upload_start, 3)
-
+                
+        save_extraction_result(
+            {
+                "number of chunks": len(chunks),
+                "latency": upload_latency,
+                "time per chunk": upload_latency/len(chunks)
+            },
+            engine.concepts,
+            working_edges
+        )
+        
         return {
         "status": "success",
-        "message": f"Processed {len(pages)} pages, {min(15, len(chunks))} chunks extracted",
+        "message": f"Processed {len(pages)} pages, {len(chunks)} chunks extracted",
         "chunks": len(chunks),
         "filename": file.filename,
         "seeds_generated": len(engine.seed_entities),
@@ -787,6 +852,18 @@ async def upload_pdf(file: UploadFile = File(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
             
+@app.get("/api/files/{filename}")
+async def serve_uploaded_file(filename: str):
+    safe_name = Path(filename).name
+    upload_path = UPLOAD_DIR / safe_name
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        upload_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=\"{safe_name}\""},
+    )
+
 @app.get("/api/graph")
 async def get_graph():
     """Get current knowledge graph (uses fused graph if available)"""
@@ -891,7 +968,12 @@ async def query_rag(request: QueryRequest):
                 status_code=503, 
                 detail="The service is temporarily down. Please try again soon."
                 )
-
+    except Exception as e:
+        #general error (need to make this more full proof)
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.post("/api/fuse")
 async def fuse_knowledge_graph():

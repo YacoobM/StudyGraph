@@ -80,6 +80,34 @@
 .md-line strong { font-weight: 700; color: var(--accent); }
 .bubble-user .md-line strong { color: inherit; }
 
+.citation-chip {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 1px 6px;
+  border: 1px solid rgba(120, 203, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(120, 203, 255, 0.14);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease;
+}
+.citation-chip:hover,
+.citation-link:hover {
+  transform: translateY(-1px);
+  background: rgba(120, 203, 255, 0.22);
+}
+.src-item-clickable {
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease;
+}
+.src-item-clickable:hover {
+  transform: translateY(-1px);
+  background: rgba(120, 203, 255, 0.08);
+}
+
 .bubble-sources {
   margin-top: 12px;
   padding-top: 10px;
