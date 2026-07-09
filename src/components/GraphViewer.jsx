@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import GraphCanvas from './GraphCanvas'
 import NodeDetails from './NodeDetails'
+import GraphLegend from './GraphLegend'
+import { fetchConcept, fetchConceptSubgraph } from '../services/api.js'
 import './GraphViewer.css'
 
 /*
@@ -12,10 +14,13 @@ import './GraphViewer.css'
  * nodes, edges - graph data, shape: see GraphCanvas
  * onClose - closes the modal
  */
-export default function GraphViewer({ nodes = [], edges = [], onClose }) {
+export default function GraphViewer({ nodes = [], edges = [], legend = null, onClose }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedNode, setSelectedNode] = useState(null)
   const [filterLevel, setFilterLevel] = useState(3)
+  const [conceptDetails, setConceptDetails] = useState(null)
+  const [conceptSubgraph, setConceptSubgraph] = useState(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
 
   const getConnections = () => {
     if (!selectedNode) return []
@@ -45,6 +50,28 @@ export default function GraphViewer({ nodes = [], edges = [], onClose }) {
           strength: l.strength,
         }
       })
+  }
+
+  const handleNodeSelect = (node) => {
+    setSelectedNode(node)
+    setConceptDetails(null) // Clear previous details
+    setConceptSubgraph(null)
+    if (node) {
+      setDetailsLoading(true)
+      Promise.all([
+        fetchConcept(node.name),
+        node.appears_in_weeks > 1 ? fetchConceptSubgraph(node.name) : Promise.resolve(null),
+      ])
+        .then(([details, subgraph]) => {
+          setConceptDetails(details)
+          setConceptSubgraph(subgraph)
+        })
+        .catch(() => {
+          setConceptDetails(null) // Ensure it's null on failure
+          setConceptSubgraph(null)
+        })
+        .finally(() => setDetailsLoading(false))
+    }
   }
 
   return (
@@ -81,13 +108,17 @@ export default function GraphViewer({ nodes = [], edges = [], onClose }) {
               filterLevel={filterLevel}
               searchTerm={searchTerm}
               selectedNode={selectedNode}
-              onNodeSelect={setSelectedNode}
+              onNodeSelect={handleNodeSelect}
             />
           )}
+          {legend && <GraphLegend legend={legend} />}
           <NodeDetails
             node={selectedNode}
             onClose={() => setSelectedNode(null)}
             connections={getConnections()}
+            conceptDetails={conceptDetails}
+            conceptSubgraph={conceptSubgraph}
+            detailsLoading={detailsLoading}
           />
         </div>
       </div>
