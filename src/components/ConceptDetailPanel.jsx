@@ -1,7 +1,18 @@
 import React from 'react'
 import EvolutionGraph from './EvolutionGraph'
 
-export default function ConceptDetailPanel({ conceptName, details, subgraph, loading, onClose }) {
+/*
+ * ConceptDetailPanel
+ * Two cost tiers: `description` (one cheap LLM call, earliest-week
+ * summary) loads automatically on node click and is always shown once
+ * loaded. `evolution` (every week's summary + every week-to-week
+ * comparison + the timeline) is the expensive tier — it only loads when
+ * the user presses "Show Concept Evolution", never automatically.
+ */
+export default function ConceptDetailPanel({
+  conceptName, description, descriptionLoading,
+  evolution, evolutionLoading, onShowEvolution, onClose,
+}) {
   if (!conceptName) {
     return (
       <aside className="concept-detail-panel is-empty">
@@ -20,54 +31,69 @@ export default function ConceptDetailPanel({ conceptName, details, subgraph, loa
         <button onClick={onClose} className="close-btn">×</button>
       </header>
       <div className="panel-content">
-        {loading ? (
-          <div className="loading-overlay">Loading concept details...</div>
-        ) : !details ? (
+        {descriptionLoading ? (
+          <div className="loading-overlay">Loading concept description...</div>
+        ) : !description ? (
           <div className="error-state">Could not load details for this concept.</div>
         ) : (
           <>
             <div className="detail-section">
-              <h4>Overall Evolution</h4>
-              <p>{details.comparison}</p>
+              <h4>Description</h4>
+              <p>{description.summary}</p>
             </div>
 
-            <div className="detail-section">
-              <h4>Evolution Timeline</h4>
-              <div className="subgraph-container">
-                {subgraph ? (
-                  <EvolutionGraph nodes={subgraph.nodes} edges={subgraph.edges} onNodeClick={() => {}} />
-                ) : (
-                  <div>No subgraph data.</div>
-                )}
-              </div>
-            </div>
+            {!evolution && (
+              <button className="show-evolution-btn" onClick={onShowEvolution} disabled={evolutionLoading}>
+                {evolutionLoading ? 'Loading concept evolution…' : 'Show Concept Evolution'}
+              </button>
+            )}
 
-            {details.consecutive_comparisons?.map((comp, i) => (
-              <div className="detail-section" key={i}>
-                <h4>{comp.from_week} → {comp.to_week}</h4>
-                <p>{comp.comparison}</p>
-              </div>
-            ))}
+            {evolution && (
+              <>
+                <div className="detail-section">
+                  <h4>Overall Evolution</h4>
+                  <p>{evolution.details.comparison}</p>
+                </div>
 
-            <div className="detail-section">
-              <h4>Weekly Summary</h4>
-              <ul className="week-summary-list">
-                {details.weeks_data?.map(week => (
-                  <li key={week.week}>
-                    <strong>{week.week}:</strong> {week.summary}
-                  </li>
+                <div className="detail-section">
+                  <h4>Evolution Timeline</h4>
+                  <div className="subgraph-container">
+                    {evolution.subgraph ? (
+                      <EvolutionGraph nodes={evolution.subgraph.nodes} edges={evolution.subgraph.edges} onNodeClick={() => {}} />
+                    ) : (
+                      <div>No subgraph data.</div>
+                    )}
+                  </div>
+                </div>
+
+                {evolution.details.consecutive_comparisons?.map((comp, i) => (
+                  <div className="detail-section" key={i}>
+                    <h4>{comp.from_week} → {comp.to_week}</h4>
+                    <p>{comp.comparison}</p>
+                  </div>
                 ))}
-              </ul>
-            </div>
 
-            <div className="detail-section">
-              <h4>Related Concepts</h4>
-              <div className="related-concepts">
-                {details.related_concepts?.map(rel => (
-                  <span key={rel} className="related-tag">{rel}</span>
-                ))}
-              </div>
-            </div>
+                <div className="detail-section">
+                  <h4>Weekly Summary</h4>
+                  <ul className="week-summary-list">
+                    {evolution.details.weeks_data?.map(week => (
+                      <li key={week.week}>
+                        <strong>{week.week}:</strong> {week.summary}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="detail-section">
+                  <h4>Related Concepts</h4>
+                  <div className="related-concepts">
+                    {evolution.details.related_concepts?.map(rel => (
+                      <span key={rel} className="related-tag">{rel}</span>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

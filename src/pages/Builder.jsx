@@ -33,6 +33,7 @@ export default function Builder() {
   const [chatOpen, setChatOpen] = useState(false)
   const [drag, setDrag] = useState(false)
   const [maxNodes, setMaxNodes] = useState('')
+  const [minMentions, setMinMentions] = useState('2')
   const [processingMessage, setProcessingMessage] = useState('')
   const fileRef = useRef(null)
 
@@ -54,7 +55,7 @@ export default function Builder() {
           if (status.stage === 'running') {
             setProcessingMessage(`Processing ${file.name} — extracting concepts and generating summaries…`)
           }
-        })
+        }, minMentions ? Number(minMentions) : null)
       }
       await loadDocs()
     } catch (e) {
@@ -211,6 +212,26 @@ export default function Builder() {
             />
             <div className="sidebar-hint">
               Caps concepts extracted per document. Lower this if you're hitting API rate limits.
+            </div>
+          </div>
+
+          {/* "Key concept" threshold: drops concepts mentioned fewer than
+              this many times, unless they're a curated seed concept. Cuts
+              noisy/low-value nodes AND the LLM calls they'd otherwise cost
+              for evolution summaries and comparisons. */}
+          <div className="sidebar-section">
+            <div className="sidebar-label">Min Mentions to Keep a Concept</div>
+            <input
+              type="number"
+              min="1"
+              placeholder="2"
+              value={minMentions}
+              onChange={(e) => setMinMentions(e.target.value)}
+              className="max-nodes-input"
+            />
+            <div className="sidebar-hint">
+              Drops concepts below this mention count. Raise it for a
+              cleaner graph and fewer API calls; set to 1 to keep everything.
             </div>
           </div>
         </aside>

@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import GraphCanvas from './GraphCanvas'
 import NodeDetails from './NodeDetails'
 import GraphLegend from './GraphLegend'
-import { fetchConcept, fetchConceptSubgraph } from '../services/api.js'
+import { fetchConceptDescription } from '../services/api.js'
 import './GraphViewer.css'
 
 /*
@@ -15,11 +16,11 @@ import './GraphViewer.css'
  * onClose - closes the modal
  */
 export default function GraphViewer({ nodes = [], edges = [], legend = null, onClose }) {
+  const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedNode, setSelectedNode] = useState(null)
   const [filterLevel, setFilterLevel] = useState(3)
-  const [conceptDetails, setConceptDetails] = useState(null)
-  const [conceptSubgraph, setConceptSubgraph] = useState(null)
+  const [conceptDescription, setConceptDescription] = useState(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
 
   const getConnections = () => {
@@ -54,24 +55,21 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
 
   const handleNodeSelect = (node) => {
     setSelectedNode(node)
-    setConceptDetails(null) // Clear previous details
-    setConceptSubgraph(null)
+    setConceptDescription(null) // Clear previous description
     if (node) {
       setDetailsLoading(true)
-      Promise.all([
-        fetchConcept(node.name),
-        node.appears_in_weeks > 1 ? fetchConceptSubgraph(node.name) : Promise.resolve(null),
-      ])
-        .then(([details, subgraph]) => {
-          setConceptDetails(details)
-          setConceptSubgraph(subgraph)
-        })
-        .catch(() => {
-          setConceptDetails(null) // Ensure it's null on failure
-          setConceptSubgraph(null)
-        })
+      fetchConceptDescription(node.name)
+        .then(setConceptDescription)
+        .catch(() => setConceptDescription(null)) // Ensure it's null on failure
         .finally(() => setDetailsLoading(false))
     }
+  }
+
+  // Full evolution (all weeks + comparisons) is deliberately not fetched
+  // here — it's the expensive tier, gated behind the dedicated Evolution
+  // page instead of firing on every general-graph node click.
+  const handleViewEvolution = (name) => {
+    navigate(`/evolution?concept=${encodeURIComponent(name)}`)
   }
 
   return (
@@ -116,9 +114,9 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
             node={selectedNode}
             onClose={() => setSelectedNode(null)}
             connections={getConnections()}
-            conceptDetails={conceptDetails}
-            conceptSubgraph={conceptSubgraph}
+            conceptDescription={conceptDescription}
             detailsLoading={detailsLoading}
+            onViewEvolution={handleViewEvolution}
           />
         </div>
       </div>

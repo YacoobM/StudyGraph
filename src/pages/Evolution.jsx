@@ -1,25 +1,32 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { fetchGraphData, fetchConcept, fetchConceptSubgraph } from '../services/api'
+import { fetchGraphData, fetchConceptDescription, fetchConcept, fetchConceptSubgraph } from '../services/api'
 import ConceptDetailPanel from '../components/ConceptDetailPanel'
 import EvolutionGraph from '../components/EvolutionGraph'
+import GraphLegend from '../components/GraphLegend'
 import './Evolution.css'
 
 export default function Evolution() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] })
+  const [legend, setLegend] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selectedConceptName, setSelectedConceptName] = useState(null)
-  const [selectedConceptData, setSelectedConceptData] = useState(null)
-  const [selectedConceptSubgraph, setSelectedConceptSubgraph] = useState(null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const [description, setDescription] = useState(null)
+  const [descriptionLoading, setDescriptionLoading] = useState(false)
+  // Full evolution (all weeks + comparisons + timeline) is the expensive
+  // tier — only fetched when the user explicitly asks via the "Show
+  // Concept Evolution" button, not on a plain node click.
+  const [evolution, setEvolution] = useState(null)
+  const [evolutionLoading, setEvolutionLoading] = useState(false)
 
   useEffect(() => {
     async function loadInitialData() {
       try {
         const data = await fetchGraphData()
         setGraphData(data)
+        setLegend(data.legend || null)
       } catch (error) {
         console.error('Failed to fetch evolution graph data:', error)
       } finally {
@@ -32,27 +39,41 @@ export default function Evolution() {
   const handleNodeClick = useCallback(async (node) => {
     if (!node || node.concept_name === selectedConceptName) {
       setSelectedConceptName(null)
-      setSelectedConceptData(null)
-      setSelectedConceptSubgraph(null)
+      setDescription(null)
+      setEvolution(null)
       return
     }
 
     setSelectedConceptName(node.concept_name)
-    setDetailLoading(true)
+    setDescription(null)
+    setEvolution(null)
+    setDescriptionLoading(true)
 
     try {
-      const [details, subgraph] = await Promise.all([
-        fetchConcept(node.concept_name),
-        fetchConceptSubgraph(node.concept_name),
-      ])
-      setSelectedConceptData(details)
-      setSelectedConceptSubgraph(subgraph)
+      const desc = await fetchConceptDescription(node.concept_name)
+      setDescription(desc)
     } catch (error) {
-      console.error(`Failed to fetch details for ${node.concept_name}:`, error)
-      setSelectedConceptData(null)
-      setSelectedConceptSubgraph(null)
+      console.error(`Failed to fetch description for ${node.concept_name}:`, error)
+      setDescription(null)
     } finally {
-      setDetailLoading(false)
+      setDescriptionLoading(false)
+    }
+  }, [selectedConceptName])
+
+  const handleShowEvolution = useCallback(async () => {
+    if (!selectedConceptName) return
+    setEvolutionLoading(true)
+    try {
+      const [details, subgraph] = await Promise.all([
+        fetchConcept(selectedConceptName),
+        fetchConceptSubgraph(selectedConceptName),
+      ])
+      setEvolution({ details, subgraph })
+    } catch (error) {
+      console.error(`Failed to fetch evolution for ${selectedConceptName}:`, error)
+      setEvolution(null)
+    } finally {
+      setEvolutionLoading(false)
     }
   }, [selectedConceptName])
 
@@ -64,7 +85,7 @@ export default function Evolution() {
       const nodeToSelect = graphData.nodes.find(n => n.concept_name === conceptToSelect)
       if (nodeToSelect) {
         // The click handler only needs an object with a `concept_name` property.
-        // This triggers the full detail-loading flow.
+        // This triggers the description-loading flow (same as a real click).
         handleNodeClick({ concept_name: nodeToSelect.concept_name })
       }
     }
@@ -72,8 +93,8 @@ export default function Evolution() {
 
   const handleCloseDetail = () => {
     setSelectedConceptName(null)
-    setSelectedConceptData(null)
-    setSelectedConceptSubgraph(null)
+    setDescription(null)
+    setEvolution(null)
   }
 
   return (
@@ -96,8 +117,17 @@ export default function Evolution() {
           ) : (
             <EvolutionGraph nodes={graphData.nodes} edges={graphData.edges} onNodeClick={handleNodeClick} selectedConceptName={selectedConceptName} />
           )}
+          {!loading && <GraphLegend legend={legend} />}
         </div>
-        <ConceptDetailPanel conceptName={selectedConceptName} details={selectedConceptData} subgraph={selectedConceptSubgraph} loading={detailLoading} onClose={handleCloseDetail} />
+        <ConceptDetailPanel
+          conceptName={selectedConceptName}
+          description={description}
+          descriptionLoading={descriptionLoading}
+          evolution={evolution}
+          evolutionLoading={evolutionLoading}
+          onShowEvolution={handleShowEvolution}
+          onClose={handleCloseDetail}
+        />
       </main>
     </div>
   )

@@ -16,10 +16,12 @@ async function safeFetchJson(url, options = {}) {
   return handleResponse(response)
 }
 
-// Backend runs extraction/evolution-precompute as a background task (see
-// backend/main.py's _run_upload_pipeline) so /api/upload itself returns
-// almost immediately with just an acknowledgment — this polls the single
-// status slot until that background work reports done/error.
+// Backend runs extraction as a background task (see backend/main.py's
+// _run_upload_pipeline) so /api/upload itself returns almost immediately
+// with just an acknowledgment — this polls the single status slot until
+// that background work reports done/error. Evolution summaries are not
+// part of this background work — they're generated on demand per concept
+// (see fetchConceptDescription/fetchConcept below).
 export async function getPipelineStatus() {
   return safeFetchJson(`${API_BASE_URL}/api/upload/status`)
 }
@@ -92,19 +94,20 @@ export async function listDocuments() {
   return { documents: _documents }
 }
 
-export async function uploadDocument(file, seedMethod = 'llm', maxNodes = null, onStatus = null) {
+export async function uploadDocument(file, seedMethod = 'llm', maxNodes = null, onStatus = null, minMentions = null) {
   const formData = new FormData()
   formData.append('file', file)
 
-  // seed_method and max_nodes are query params on the backend, not form fields
+  // seed_method, max_nodes, and min_mentions are query params on the backend, not form fields
   const params = new URLSearchParams({ seed_method: seedMethod })
   if (maxNodes) params.set('max_nodes', maxNodes)
+  if (minMentions) params.set('min_mentions', minMentions)
   const url = `${API_BASE_URL}/api/upload?${params.toString()}`
   await safeFetchJson(url, { method: 'POST', body: formData })
 
-  // The request above only acknowledges receipt — extraction and evolution
-  // precompute happen afterward in a background task, so wait for that to
-  // actually finish before treating the upload as done.
+  // The request above only acknowledges receipt — extraction happens
+  // afterward in a background task, so wait for that to actually finish
+  // before treating the upload as done.
   const finalStatus = await pollUntilDone(async () => {
     const status = await getPipelineStatus()
     if (onStatus) onStatus(status)
@@ -207,6 +210,16 @@ export async function fetchGraphData(week = null) {
   return safeFetchJson(url.toString())
 }
 
+// Cheap tier: one grounded summary from the concept's earliest-appearance
+// week only. Use this for a plain node click — it's what backs the
+// "DESCRIPTION" text in both the general graph and the Evolution graph.
+export async function fetchConceptDescription(conceptName) {
+  return safeFetchJson(`${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/description`)
+}
+
+// Full tier: every week's summary plus every week-to-week comparison. Costs
+// one LLM call per week/transition, so only call this from an explicit
+// "show concept evolution" action, not on a plain node click.
 export async function fetchConcept(conceptName) {
   return safeFetchJson(`${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}`)
 }

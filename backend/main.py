@@ -1,7 +1,7 @@
 import os
 import sys
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -572,6 +572,54 @@ Only return the JSON object, no other text."""
                     {"from": from_node, "to": to_node, "relation": relation, "source": doc_name}
                 )
 
+    def prune_low_value_concepts(self, doc_name, week_key, min_mentions=2):
+        """
+        Drop concepts admitted from this doc/week that show no sign of being
+        a "key" concept: mentioned fewer than min_mentions times across this
+        doc's chunks, and not one of the curated seed_entities. Run this
+        before evolution-summary precompute so one-off extraction noise (the
+        "extract ALL concepts" prompt is deliberately over-inclusive)
+        doesn't turn into wasted LLM summary/comparison calls — fewer
+        low-value concepts means fewer Groq calls per upload, which is the
+        main lever against hitting the rate limit.
+
+        Previously this also spared any concept with at least one edge, but
+        the extraction prompt asks the LLM to find "multiple connections"
+        for everything it names, so nearly every concept ends up with an
+        edge — that exemption was swallowing the mention-count filter almost
+        entirely (observed: raising min_mentions from 2 to 3 pruned only a
+        handful of concepts out of dozens). Mention count and seed status
+        are now the only ways to survive; a concept mattering enough to have
+        an edge but not enough to be mentioned more than once is exactly the
+        kind of marginal, thinly-grounded node this filter exists to cut.
+        """
+        doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c["week"] == week_key]
+        if not doc_week_concepts:
+            return
+
+        counts = Counter(c["name"] for c in doc_week_concepts)
+        seeds = set(self.seed_entities)
+
+        dropped = {
+            name for name, count in counts.items()
+            if count < min_mentions and name not in seeds
+        }
+        if not dropped:
+            return
+
+        self.concepts = [
+            c for c in self.concepts
+            if not (c["source"] == doc_name and c["week"] == week_key and c["name"] in dropped)
+        ]
+        self.edges = [
+            e for e in self.edges
+            if not (e["source"] == doc_name and (e["from"] in dropped or e["to"] in dropped))
+        ]
+        if doc_name in self._doc_concept_names:
+            self._doc_concept_names[doc_name] -= dropped
+
+        print(f"Pruned {len(dropped)} low-value concept(s) from {doc_name} ({week_key}): {sorted(dropped)}")
+
     def fuse_graph(self):
         """
         Global Knowledge Fusion: Called after all files are processed.
@@ -1051,14 +1099,19 @@ async def health_check():
     return {"status": "ok"}
 
 
-async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upload_start):
+async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upload_start, min_mentions=2):
     """
     Everything slow and LLM-dependent about an upload: seed generation (first
-    upload only), chunk extraction, graph building, and evolution-summary
-    precompute. Runs as a background task with no HTTP request attached, so
-    Groq rate-limit retries/backoff can take as long as they need without
-    risking a request timeout or leaving the browser hanging on a spinner
-    for minutes — the same freedom a standalone offline script would have.
+    upload only), chunk extraction, and graph building. Runs as a background
+    task with no HTTP request attached, so Groq rate-limit retries/backoff
+    can take as long as they need without risking a request timeout or
+    leaving the browser hanging on a spinner for minutes — the same freedom
+    a standalone offline script would have.
+
+    Evolution summaries/comparisons are NOT precomputed here — they're
+    generated on demand (see evolution_data.get_concept_description and
+    get_concept_detail) the first time a concept is actually clicked, so a
+    concept extracted from this document but never looked at costs nothing.
     """
     try:
         if not engine.seed_entities:  # Only generate seeds on the first upload
@@ -1078,15 +1131,10 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
             engine.add_to_graph(data, filename, week_key, max_nodes_per_doc=max_nodes)
             print(f"Processed chunk {i + 1}/{len(results)}")
 
-        # Precompute evolution summaries eagerly, as part of the pipeline,
-        # so viewing a node in the UI is a pure cache read (no per-click LLM
-        # call, no risk of hitting a rate limit while browsing). Passed as
-        # one batch of (name, week) pairs — not a loop calling
-        # get_concept_detail per concept — so summarize_weeks_batch's
-        # 3-per-call batching actually kicks in instead of degrading into
-        # one LLM call per concept.
-        new_pairs = {(c["name"], c["week"]) for c in engine.concepts if c["source"] == filename and c["week"] == week_key}
-        await evolution_data.precompute_week_summaries(engine, client, new_pairs)
+        # Filter out one-off, unconnected, non-seed concepts before they
+        # ever reach the graph or get a chance to generate an evolution
+        # summary later — see prune_low_value_concepts.
+        engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
 
         # Save current graph state (for debugging/persistence)
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
@@ -1117,7 +1165,7 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
 
 
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm", max_nodes: int = None):
+async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm", max_nodes: int = None, min_mentions: int = 2):
     """
     Upload a PDF. Only the fast, local, deterministic steps (read the file,
     parse its text) happen before this responds — extraction, graph
@@ -1127,9 +1175,14 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm", max
     actual pipeline ends up needing. Poll GET /api/upload/status for
     progress; the response here is just an acknowledgment, not the result.
 
-    max_nodes: optional cap on distinct concepts admitted from this document.
-    Temporary lever for controlling LLM load — fewer concepts means fewer
-    evolution summaries to generate and fewer nodes to click through.
+    max_nodes: optional hard cap on distinct concepts admitted from this
+    document, regardless of quality.
+
+    min_mentions: "key concept" threshold — a concept extracted fewer than
+    this many times from the document, and not one of the curated
+    seed_entities, is dropped before it reaches the graph or generates an
+    evolution summary. Raise this to cut down on low-value nodes and Groq
+    calls further; set to 1 to disable pruning entirely.
     """
     global engine
     upload_start = time.time()
@@ -1154,7 +1207,7 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm", max
         "week": current_week_key, "filename": file.filename, "error": None,
     }
     asyncio.create_task(
-        _run_upload_pipeline(engine, pages, file.filename, current_week_key, max_nodes, upload_start)
+        _run_upload_pipeline(engine, pages, file.filename, current_week_key, max_nodes, upload_start, min_mentions)
     )
 
     return {
@@ -1307,32 +1360,18 @@ async def query_rag(request: QueryRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-async def _run_fuse_comparisons(engine, canonical_names):
-    """
-    Cross-week comparison precompute, backgrounded for the same reason
-    upload's evolution precompute is: it's Groq calls, so it shouldn't hold
-    up an HTTP response or risk a timeout. fuse_graph() itself (entity
-    merging + conflict resolution) has no LLM calls and stays synchronous
-    in fuse_knowledge_graph — only this comparison step is async.
-    """
-    try:
-        for name in canonical_names:
-            await evolution_data.get_concept_detail(engine, name, client)
-        engine.pipeline_status = {"stage": "done", "operation": "fuse", "error": None}
-    except Exception as e:
-        print(f"Background fuse comparison precompute failed: {e}")
-        engine.pipeline_status = {"stage": "error", "operation": "fuse", "error": str(e)}
-
-
 @app.post("/api/fuse")
 async def fuse_knowledge_graph():
     """
     Trigger the Global Knowledge Fusion pipeline (Phase 3 of BATCH-STREAM-BATCH).
     Call this endpoint after all documents are uploaded. Entity merging and
-    conflict resolution (both deterministic, no LLM calls) run synchronously
-    and are reflected in this response; cross-week comparison generation
-    (LLM calls) runs afterward in a background task — poll
-    GET /api/upload/status for its progress.
+    conflict resolution (both deterministic, no LLM calls) are the only work
+    here, so this runs and returns fully synchronously — there's no
+    background phase to poll for anymore. Cross-week comparisons only
+    become meaningful once fusion has decided which raw names are the same
+    canonical concept, but they're no longer precomputed for every concept
+    here; they're generated on demand per-concept when a user explicitly
+    asks to see that concept's evolution (see evolution_data.get_concept_detail).
     """
     global engine
     if engine is None:
@@ -1349,20 +1388,9 @@ async def fuse_knowledge_graph():
             "inferred_edges": len(engine.inferred_edges)
         })
 
-        # Weekly summaries were already precomputed per document at upload
-        # time. Cross-week comparisons only become meaningful once fusion
-        # has decided which raw names are the same canonical concept, so
-        # they're generated here instead, one call per multi-week concept
-        # (comparisons are inherently rare enough — only concepts spanning
-        # >1 week need one at all — that batching them the way weekly
-        # summaries are batched isn't worth the extra complexity).
-        canonical_names = {engine.canonical_nodes.get(c["name"], c["name"]) for c in engine.concepts}
-        engine.pipeline_status = {"stage": "running", "operation": "fuse", "error": None}
-        asyncio.create_task(_run_fuse_comparisons(engine, canonical_names))
-
         return {
             "status": "success",
-            "message": "Knowledge graph fusion complete; comparisons processing in background.",
+            "message": "Knowledge graph fusion complete.",
             "pipeline_phase": "batch_fusion",
             "canonical_nodes_created": len(engine.canonical_nodes),
             "fused_edges": len(engine.fused_edges),
@@ -1381,10 +1409,23 @@ async def get_evolution_graph_data(week: str = None):
     return evolution_data.get_graph_data(engine, week)
 
 
+@app.get("/api/evolution/concept/{concept_name}/description")
+async def get_evolution_concept_description(concept_name: str):
+    """Cheap tier: a single grounded summary from the concept's
+    earliest-appearance week only. Meant to back a plain node click in
+    either graph view — see get_concept_description."""
+    description = await evolution_data.get_concept_description(engine, concept_name, client)
+    if not description:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return description
+
+
 @app.get("/api/evolution/concept/{concept_name}")
 async def get_evolution_concept_detail(concept_name: str):
-    """Get detailed evolution information for a single concept. Generates
-    and caches summaries lazily on first view — see get_concept_detail."""
+    """Full tier: every week's summary plus every week-to-week comparison.
+    Generates and caches lazily on first request — meant to back the
+    explicit "show concept evolution" action, not a plain node click (see
+    get_concept_description for that cheaper tier). See get_concept_detail."""
     details = await evolution_data.get_concept_detail(engine, concept_name, client)
     if not details:
         raise HTTPException(status_code=404, detail="Concept not found")
