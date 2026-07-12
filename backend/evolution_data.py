@@ -1,19 +1,22 @@
 import asyncio
 import json
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from groq import RateLimitError, BadRequestError
 
 # This file contains functions to dynamically generate evolution data from
 # the live StudyGraphEngine instance. The static mock data has been removed.
 #
-# Per-week summaries and week-to-week comparisons are generated eagerly, by
-# main.py's upload/fuse pipeline calling get_concept_detail() for every
-# concept as part of processing, and cached on the engine from then on. By
-# the time a user can click a node in the UI, its details are already
-# cached — viewing a concept never triggers a live LLM call in the normal
-# path.
+# Everything here is generated lazily, on demand, in two cost tiers rather
+# than eagerly at upload/fuse time — a concept nobody ever looks at costs
+# nothing:
+#   - get_concept_description: one cheap LLM call (earliest-week summary
+#     only), for a plain node click in either graph view.
+#   - get_concept_detail: every week's summary plus every week-to-week
+#     comparison, for the explicit "show concept evolution" action.
+# Both cache forever once generated, so re-viewing the same concept (or
+# viewing it in the other tier afterward) is always a pure cache read.
 
 # --- Shared color palette ---
 # Single source of truth for week coloring, used by the main graph
@@ -23,7 +26,7 @@ WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff",
 MULTI_WEEK_COLOR = "#fcf6bd"  # Concepts spanning multiple weeks
 DEFAULT_COLOR = "#d1d5db"     # Concepts with no week data
 
-LLM_MODEL = "llama-3.1-8b-instant"
+LLM_MODEL = "llama-3.3-70b-versatile"
 
 
 def get_week_color_map(engine):
@@ -40,9 +43,13 @@ def get_week_color_map(engine):
 def get_graph_data(engine, week=None):
     """
     Dynamically generates the main evolution graph from the engine's concepts.
+    Colored the same way as /api/graph (see get_week_color_map) — a concept in
+    one week gets that week's color, a concept spanning multiple weeks gets
+    MULTI_WEEK_COLOR — so the Evolution page's graph and its legend agree with
+    the rest of the app instead of rendering every node in one flat color.
     """
     if not engine or not engine.concepts:
-        return {"nodes": [], "edges": []}
+        return {"nodes": [], "edges": [], "legend": {}}
 
     nodes = []
     edges = []
@@ -54,13 +61,23 @@ def get_graph_data(engine, week=None):
         concept_details[name]["weeks"].add(concept["week"])
         concept_details[name]["count"] += 1
 
+    week_color_map = get_week_color_map(engine)
+
     # Create nodes for the evolution graph
     for name, data in concept_details.items():
+        weeks = data["weeks"]
+        if len(weeks) > 1:
+            color = MULTI_WEEK_COLOR
+        elif len(weeks) == 1:
+            color = week_color_map.get(next(iter(weeks)), DEFAULT_COLOR)
+        else:
+            color = DEFAULT_COLOR
         nodes.append({
             "id": name,
             "concept_name": name,
             "importance": data["count"], # Importance is based on frequency
-            "group": "concept"
+            "group": "concept",
+            "color": color,
         })
 
     # Create edges between concepts that appear in the same week
@@ -76,18 +93,28 @@ def get_graph_data(engine, week=None):
                     "label": "related"
                 })
 
-    return {"nodes": nodes, "edges": edges}
+    legend = {
+        "weeks": [{"week": w, "color": c} for w, c in week_color_map.items()],
+        "multi_week": {"label": "Spans multiple weeks", "color": MULTI_WEEK_COLOR},
+        "no_week_data": {"label": "No week data", "color": DEFAULT_COLOR},
+    }
+
+    return {"nodes": nodes, "edges": edges, "legend": legend}
 
 
 MAX_RETRIES = 4
-BATCH_SIZE = 3  # concepts per LLM call. Small on purpose: Groq's on-demand
-                # tier enforces a tokens-PER-MINUTE (TPM) cap that can be far
-                # stricter than the request-rate cap — one 15-concept batch
-                # was ~10,500 tokens against a 6,000 TPM account limit,
+BATCH_SIZE = 6  # concepts per LLM call. Was 3, tuned for llama-3.1-8b-instant's
+                # 6,000 TPM cap — a 15-concept batch there was ~10,500 tokens,
                 # rejected outright (413) no matter how many times it's
                 # retried, since retrying an oversized request just fails
-                # identically. Each 3-concept batch stays comfortably under
-                # even a very tight TPM budget.
+                # identically. LLM_MODEL is now llama-3.3-70b-versatile,
+                # confirmed on console.groq.com/settings/limits at 12,000 TPM
+                # (double llama-3.1-8b-instant's, not lower as once assumed —
+                # see TPM_BUDGET below), so batches can run bigger: a 6-concept
+                # batch still stays comfortably under budget, and halving the
+                # number of calls matters more now since 70b-versatile's daily
+                # request cap (1,000 RPD) is far tighter than 8b-instant's
+                # (14,400 RPD).
 
 # Batches within a single summarize_*_batch() call used to all fire via
 # asyncio.gather with no cap — a course with many concepts could dispatch
@@ -97,14 +124,12 @@ BATCH_SIZE = 3  # concepts per LLM call. Small on purpose: Groq's on-demand
 # This throttles how many of THIS module's requests are in flight at once.
 GROQ_CONCURRENCY = asyncio.Semaphore(2)
 
-# This was budgeted at 10,500 against llama-3.3-70b-versatile's 12,000 TPM
-# limit (per console.groq.com/settings/billing). LLM_MODEL is now
-# llama-3.1-8b-instant, which typically gets a considerably higher TPM
-# ceiling on the same account tier — check the console for its actual
-# limit and raise this to match; 10,500 is left as a safe floor rather
-# than a tuned value; the -1,500 margin below whatever the real cap is
-# accounts for _estimate_tokens being a rough ~4-chars/token heuristic,
-# not an exact tokenizer count.
+# Confirmed on console.groq.com/settings/limits: llama-3.3-70b-versatile is
+# 12,000 TPM (llama-3.1-8b-instant, despite being the smaller model, is only
+# 6,000 TPM on this account — the opposite of what was originally assumed
+# here). 10,500 keeps a -1,500 margin below the real 12,000 cap, since
+# _estimate_tokens is a rough ~4-chars/token heuristic, not an exact
+# tokenizer count.
 TPM_BUDGET = 10500
 
 
@@ -332,11 +357,15 @@ async def summarize_comparisons_batch(client, requests):
 
     results = {}
     system_prompt = (
-        "You are a study assistant. For each concept below, compare how it was presented in "
-        "two different weeks of course material. Write 1-3 sentences per concept describing "
-        "concretely how it changed, deepened, or was extended between the two weeks, grounded "
-        "only in the excerpts given — do not invent information that isn't there. If the "
-        "excerpts show no real change, say so briefly. "
+        "You are a study assistant. For each concept below, contrast how it was presented in "
+        "two different weeks of course material. Your answer must name the CONCRETE DIFFERENCE "
+        "between the weeks — e.g. what specific detail, example, formula, scope, or nuance is "
+        "new, dropped, or expanded in the later week compared to the earlier one. Do not write "
+        "vague continuity statements like 'it continued to be discussed' or 'it was reinforced' "
+        "without saying what actually changed. Write 1-3 sentences per concept, grounded only in "
+        "the excerpts given — do not invent information that isn't there. If the excerpts truly "
+        "show no difference in how the concept is treated, say so explicitly and name what stayed "
+        "the same (e.g. 'both weeks give the same definition, with no new detail added'). "
         'Respond with JSON: {"items": [{"key": "<the exact KEY given>", "text": "<the comparison>"}, ...]}, '
         "one entry per concept below, in the same order."
     )
@@ -372,7 +401,7 @@ async def summarize_comparisons_batch(client, requests):
     return results
 
 
-async def precompute_week_summaries(engine, client, raw_week_pairs):
+async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pairs=None):
     """
     Given a set of (raw_concept_name, week) pairs, retrieves/caches their
     source excerpts (no LLM) and generates any missing weekly summaries.
@@ -384,6 +413,18 @@ async def precompute_week_summaries(engine, client, raw_week_pairs):
     (e.g. in a loop) defeats that: each call would only ever have that one
     concept's own 1-2 weeks to batch, turning what should be a handful of
     3-at-a-time LLM calls into one call per concept.
+
+    `summary_pairs`, if given, restricts which pairs actually get a *new*
+    summary generated — retrieval still runs for every pair in
+    raw_week_pairs regardless (it's free/local). Defaults to raw_week_pairs
+    itself. get_concept_detail passes a deduped subset here: several raw
+    spellings that fuse into one canonical concept can share a week (e.g.
+    "ML" and "Machine Learning" both in Week 1), but only one spelling's
+    summary is ever displayed for that week, so requesting a fresh LLM
+    summary for every spelling would waste tokens on text nothing shows.
+    The per-document upload pipeline has no such grouping yet (fusion
+    hasn't run), so it leaves this at the default — there, distinct raw
+    pairs are genuinely distinct concepts, not spelling variants of one.
     """
     if not raw_week_pairs:
         return
@@ -395,10 +436,11 @@ async def precompute_week_summaries(engine, client, raw_week_pairs):
             query = f"Detailed explanation and definition of {raw}, not just a passing mention"
             engine.concept_week_chunks[(raw, week)] = engine.retrieve_chunks_for_week(query, week, top_k=3)
 
+    target_pairs = summary_pairs if summary_pairs is not None else raw_week_pairs
     summary_requests = [
         {"key": f"{raw}|{week}", "concept_name": raw, "week": week,
          "chunks": engine.concept_week_chunks.get((raw, week), [])}
-        for raw, week in raw_week_pairs
+        for raw, week in target_pairs
         if (raw, week) not in engine.concept_week_summaries
     ]
     if not summary_requests:
@@ -407,22 +449,143 @@ async def precompute_week_summaries(engine, client, raw_week_pairs):
     summaries = await summarize_weeks_batch(client, summary_requests, engine)
     for req in summary_requests:
         text = summaries.get(req["key"])
-        if text:
-            engine.concept_week_summaries[(req["concept_name"], req["week"])] = text
-        # else: leave uncached — falls back to a plain template, and gets
-        # retried next time this pair is precomputed or viewed.
+        if not text:
+            # Cache a fallback too — otherwise a failed generation (e.g.
+            # Groq already rate-limited from a big batch) stays permanently
+            # "missing", and every later view of this concept re-fires a
+            # live Groq call for it instead of reading from cache, which is
+            # exactly the click-triggers-an-LLM-call behavior the caching
+            # in get_concept_detail is meant to avoid.
+            #
+            # The fallback itself is grounded in the actual retrieved PDF
+            # excerpt (already fetched above, no extra LLM call) rather than
+            # a content-free "appeared in document X" note — a concept whose
+            # summary generation failed should still show real material from
+            # the source, not a stub with no explanation of the concept.
+            chunks = req["chunks"]
+            if chunks:
+                excerpt = chunks[0]["text"].strip()
+                snippet = excerpt[:500].rsplit(". ", 1)[0] + "." if len(excerpt) > 500 else excerpt
+                citation = engine.format_citation(chunks[0]["pages"])
+                citation_str = f" ({citation})" if citation else ""
+                text = f"{snippet}{citation_str}"
+            else:
+                docs = sorted({
+                    c["source"] for c in engine.concepts
+                    if c["name"] == req["concept_name"] and c["week"] == req["week"]
+                })
+                text = f"Appeared in document(s): {', '.join(docs) if docs else 'unknown'} — no excerpt could be retrieved."
+        engine.concept_week_summaries[(req["concept_name"], req["week"])] = text
+
+
+def _dedupe_summary_targets(raw_week_pairs, engine):
+    """
+    raw_week_pairs is all-one-concept by construction in get_concept_detail
+    (every entry is a raw spelling that fused into the same canonical
+    concept), so unlike precompute_week_summaries' generic input, it's safe
+    to collapse to one raw name per week here. Picks a spelling that
+    already has a cached summary if one exists (costs nothing); otherwise
+    the spelling with the most occurrences that week, ties broken
+    alphabetically for determinism.
+    """
+    by_week = defaultdict(list)
+    for raw, week in raw_week_pairs:
+        by_week[week].append(raw)
+
+    chosen = set()
+    for week, raw_names in by_week.items():
+        cached = next((raw for raw in raw_names if (raw, week) in engine.concept_week_summaries), None)
+        if cached is not None:
+            chosen.add((cached, week))
+            continue
+        counts = Counter(raw_names)
+        best = sorted(set(raw_names), key=lambda r: (-counts[r], r))[0]
+        chosen.add((best, week))
+    return chosen
+
+
+async def synthesize_overall_evolution(client, concept_name, consecutive_comparisons):
+    """
+    Synthesizes a concept's first-to-last "overall evolution" summary from
+    the per-transition comparisons already generated for it, instead of
+    re-sending raw first-week/last-week excerpts through another Groq call
+    (as summarize_comparisons_batch would). Cheaper — the input is a
+    handful of already-grounded sentences rather than ~1200 chars of raw
+    excerpt — and arguably more accurate too, since it's built from
+    verified per-transition diffs instead of asking the model to eyeball
+    two distant excerpts directly. Only used for concepts spanning more
+    than 2 weeks; the 2-week case reuses its single consecutive comparison
+    directly (see get_concept_detail).
+    """
+    system_prompt = (
+        "You are a study assistant. You are given a chronological sequence of "
+        "week-to-week comparisons already written for one concept. Write a single "
+        "1-3 sentence summary of its overall arc from the first week to the last, "
+        "grounded only in what these comparisons say — do not invent any detail "
+        "that isn't in them."
+    )
+    # Skip placeholder text from transitions whose own generation failed —
+    # feeding "Comparison unavailable..." to the model as if it were real
+    # signal produces a hallucination-adjacent "overall" grounded in nothing.
+    usable = [c for c in consecutive_comparisons if not c["comparison"].startswith("Comparison unavailable")]
+    if not usable:
+        return None
+    steps = "\n".join(f"{c['from_week']} -> {c['to_week']}: {c['comparison']}" for c in usable)
+    user_prompt = f"CONCEPT: {concept_name}\n\n{steps}"
+    max_tokens = BATCH_TOKEN_OVERHEAD + COMPARISON_TOKENS_PER_ITEM
+    text = await _call_with_retry(client, system_prompt, user_prompt, temperature=0.25, max_tokens=max_tokens)
+    return text.strip() if text else None
+
+
+async def get_concept_description(engine, concept_name, client):
+    """
+    Cheap "what is this concept" tier: a single grounded summary from the
+    concept's earliest-appearance week only — one LLM call regardless of
+    how many weeks it actually spans. Meant to back a plain node click in
+    the graph UI (general graph or Evolution graph alike). get_concept_detail
+    is the separate, explicit "show concept evolution" action: it costs one
+    call per week plus one per week-to-week transition, so it stays gated
+    behind that explicit request instead of running on every click.
+    """
+    if not engine:
+        return None
+
+    occurrences = [c for c in engine.concepts if engine.canonical_nodes.get(c["name"], c["name"]) == concept_name]
+    if not occurrences:
+        return None
+
+    weeks_data_raw = defaultdict(list)
+    for occ in occurrences:
+        weeks_data_raw[occ["week"]].append(occ["source"])
+    first_week = min(weeks_data_raw.keys(), key=lambda w: int(w.split(" ")[1]) if ' ' in w else 0)
+
+    raw_pairs = {(occ["name"], occ["week"]) for occ in occurrences if occ["week"] == first_week}
+    await precompute_week_summaries(engine, client, raw_pairs, summary_pairs=_dedupe_summary_targets(raw_pairs, engine))
+
+    summary = next(
+        (engine.concept_week_summaries[(raw, w)] for raw, w in raw_pairs if (raw, w) in engine.concept_week_summaries),
+        None,
+    ) or f"Appeared in document(s): {', '.join(set(weeks_data_raw[first_week]))}"
+
+    return {
+        "concept_name": concept_name,
+        "week": first_week,
+        "summary": summary,
+        "appears_in_weeks": len(weeks_data_raw),
+    }
 
 
 async def get_concept_detail(engine, concept_name, client):
     """
-    Returns detailed evolution information for a single concept, generating
-    and caching whatever hasn't been generated yet. Called eagerly from the
-    upload/fuse pipeline (main.py) so every concept is already cached by the
-    time a user can click on it — a concept's (week) summaries and
-    comparisons are cached forever once generated, so calling this again
-    for the same concept is free. It's still safe to call lazily (e.g. if a
-    concept somehow wasn't precomputed) since it generates on demand either
-    way; the pipeline just makes that the uncommon path instead of the norm.
+    Returns full evolution information for a single concept — every week's
+    summary plus every week-to-week comparison — generating and caching
+    whatever hasn't been generated yet. Called on demand only, from the
+    explicit "show concept evolution" action in the UI (not on a plain node
+    click; see get_concept_description for that cheaper tier, and not
+    eagerly at upload/fuse time — a concept the user never asks to see the
+    evolution of never costs anything beyond get_concept_description's one
+    call). Summaries and comparisons are cached forever once generated, so
+    calling this again for the same concept is free.
     """
     if not engine:
         return None
@@ -444,7 +607,11 @@ async def get_concept_detail(engine, concept_name, client):
     # needed whether or not it turns out to span multiple weeks. Delegates
     # to precompute_week_summaries so a single concept viewed on-demand and
     # a whole document precomputed in bulk share the same batching path.
-    await precompute_week_summaries(engine, client, raw_week_pairs)
+    # summary_pairs is deduped to one raw spelling per week (see
+    # _dedupe_summary_targets) — retrieval still happens for every spelling,
+    # but only one per week ever gets an LLM summary requested, since only
+    # one is ever shown in weeks_data below.
+    await precompute_week_summaries(engine, client, raw_week_pairs, summary_pairs=_dedupe_summary_targets(raw_week_pairs, engine))
 
     def excerpt_for(week):
         texts = []
@@ -481,7 +648,11 @@ async def get_concept_detail(engine, concept_name, client):
             ]
             comparisons = await summarize_comparisons_batch(client, comparison_requests)
             for fw, tw in pairs:
-                text = comparisons.get(f"{fw}|{tw}") or f"It was present in {fw} and continued to appear in {tw}."
+                text = comparisons.get(f"{fw}|{tw}") or (
+                    f"Comparison unavailable — the {fw} vs. {tw} diff for this concept couldn't "
+                    f"be generated. It did appear in both weeks, but no concrete difference could "
+                    f"be computed this time."
+                )
                 consecutive_comparisons.append({"from_week": fw, "to_week": tw, "comparison": text})
         engine.concept_consecutive_comparisons[concept_name] = consecutive_comparisons
 
@@ -497,11 +668,7 @@ async def get_concept_detail(engine, concept_name, client):
                 f"The concept first appeared in {first_week} and was last seen in {last_week}."
             )
         else:
-            overall_reqs = [{"key": "overall", "concept_name": concept_name,
-                              "from_week": first_week, "from_text": excerpt_for(first_week),
-                              "to_week": last_week, "to_text": excerpt_for(last_week)}]
-            result = await summarize_comparisons_batch(client, overall_reqs)
-            comparison = result.get("overall") or (
+            comparison = await synthesize_overall_evolution(client, concept_name, consecutive_comparisons) or (
                 f"The concept first appeared in {first_week} (from '{weeks_data_raw[first_week][0]}') "
                 f"and was last seen in {last_week} (from '{weeks_data_raw[last_week][0]}')."
             )
