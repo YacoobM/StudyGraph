@@ -1,0 +1,1915 @@
+{
+  "timestamp": "2026-07-12T20:53:38.372050",
+  "nodes": [
+    {
+      "id": "graph_theory",
+      "name": "graph theory",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "part_of \u2192 graph traversal; data structures \u2192 part_of; trees \u2192 part_of; data mining \u2192 related_to; network analysis \u2192 related_to; route finding \u2192 relate",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "graph_traversal",
+      "name": "graph traversal",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "graph theory \u2192 part_of; part_of \u2192 breadth first search (bfs); part_of \u2192 depth first search (dfs); algorithms \u2192 part_of; causes \u2192 complexity analysis; ",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "breadth_first_search_(bfs)",
+      "name": "breadth first search (bfs)",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "graph traversal \u2192 part_of; related_to \u2192 depth first search (dfs); algorithms \u2192 part_of; uses \u2192 queue; related_to \u2192 time complexity; related_to \u2192 space",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "depth_first_search_(dfs)",
+      "name": "depth first search (dfs)",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "graph traversal \u2192 part_of; breadth first search (bfs) \u2192 related_to; algorithms \u2192 part_of; related_to \u2192 time complexity; related_to \u2192 space complexity;",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "data_structures",
+      "name": "data structures",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "part_of \u2192 graph theory; part_of \u2192 queue; enables \u2192 algorithms; breadth first search (bfs) \u2192 related_to; depth first search (dfs) \u2192 related_to; dfs \u2192 r",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "algorithms",
+      "name": "algorithms",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "part_of \u2192 graph traversal; part_of \u2192 breadth first search (bfs); part_of \u2192 depth first search (dfs); data structures \u2192 enables; part_of \u2192 complexity a",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "complexity_analysis",
+      "name": "complexity analysis",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "part_of \u2192 time complexity; part_of \u2192 space complexity; graph traversal \u2192 causes; big o notation \u2192 enables; algorithms \u2192 part_of; explains \u2192 dfs; expla",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "time_complexity",
+      "name": "time complexity",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "complexity analysis \u2192 part_of; big o notation \u2192 related_to; breadth first search (bfs) \u2192 related_to; depth first search (dfs) \u2192 related_to; uses \u2192 big",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "space_complexity",
+      "name": "space complexity",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "complexity analysis \u2192 part_of; big o notation \u2192 related_to; breadth first search (bfs) \u2192 related_to; depth first search (dfs) \u2192 related_to; uses \u2192 big",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "big_o_notation",
+      "name": "big o notation",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "related_to \u2192 time complexity; related_to \u2192 space complexity; enables \u2192 complexity analysis; breadth first search (bfs) \u2192 related_to; depth first searc",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "trees",
+      "name": "trees",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "part_of \u2192 graph theory; part_of \u2192 graph theory",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "shortest_path",
+      "name": "shortest path",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "related_to \u2192 bfs; breadth first search (bfs) \u2192 enables; related_to \u2192 spanning tree; related_to \u2192 bfs; breadth first search (bfs) \u2192 enables; related_to",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "data_mining",
+      "name": "data mining",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 graph theory; related_to \u2192 graph theory",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "network_analysis",
+      "name": "network analysis",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 graph theory; related_to \u2192 graph theory",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "route_finding",
+      "name": "route finding",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 graph theory; related_to \u2192 graph theory",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "game_theory",
+      "name": "game theory",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 graph theory; related_to \u2192 graph theory",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "queue",
+      "name": "queue",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "breadth first search (bfs) \u2192 uses; data structures \u2192 part_of; breadth first search (bfs) \u2192 uses; data structures \u2192 part_of",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "directed_graph",
+      "name": "directed graph",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "breadth first search (bfs) \u2192 applies_to; related_to \u2192 breadth first search (bfs); depth first search (dfs) \u2192 related_to; graph theory \u2192 part_of; sourc",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "undirected_graph",
+      "name": "undirected graph",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        },
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "breadth first search (bfs) \u2192 applies_to; related_to \u2192 breadth first search (bfs); graph theory \u2192 part_of; part_of \u2192 graph traversal; breadth first sea",
+      "is_canonical": true,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2
+    },
+    {
+      "id": "spanning_tree",
+      "name": "spanning tree",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "breadth first search (bfs) \u2192 creates; related_to \u2192 bfs; shortest path \u2192 related_to; depth first search (dfs) \u2192 enables; breadth first search (bfs) \u2192 c",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "connected_component",
+      "name": "connected component",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "prerequisite \u2192 breadth first search (bfs); breadth first search (bfs) \u2192 enables; depth first search (dfs) \u2192 enables; prerequisite \u2192 breadth first sear",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "adjacency_matrix",
+      "name": "adjacency matrix",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 dfs; related_to \u2192 bfs; breadth first search (bfs) \u2192 related_to; part_of \u2192 graph theory; related_to \u2192 dfs; related_to \u2192 bfs; breadth first",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "adjacency_list",
+      "name": "adjacency list",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 dfs; related_to \u2192 bfs; breadth first search (bfs) \u2192 related_to; part_of \u2192 graph theory; related_to \u2192 dfs; related_to \u2192 bfs; breadth first",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "broadcasting_in_network",
+      "name": "broadcasting in network",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "uses \u2192 breadth first search (bfs); breadth first search (bfs) \u2192 enables; uses \u2192 breadth first search (bfs); breadth first search (bfs) \u2192 enables",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "cycle_detection",
+      "name": "cycle detection",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "depth first search (dfs) \u2192 enables; depth first search (dfs) \u2192 enables",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "path_finding",
+      "name": "path finding",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "breadth first search (bfs) \u2192 enables; depth first search (dfs) \u2192 enables; breadth first search (bfs) \u2192 enables; depth first search (dfs) \u2192 enables",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "external_graph_algorithms",
+      "name": "external graph algorithms",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "part_of \u2192 graph theory; related_to \u2192 i/o-efficient algorithms; part_of \u2192 graph theory; related_to \u2192 i/o-efficient algorithms",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "i/o-efficient_algorithms",
+      "name": "i/o-efficient algorithms",
+      "source": [
+        {
+          "file": "graph-traversals-and-its-applications-in-graph-theory.pdf"
+        }
+      ],
+      "description": "related_to \u2192 graph theory; external graph algorithms \u2192 related_to; related_to \u2192 graph theory; external graph algorithms \u2192 related_to",
+      "is_canonical": true,
+      "color": "#ffadad",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "lexicographical_ordering",
+      "name": "lexicographical ordering",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "depth first search (dfs) \u2192 uses; breadth first search (bfs) \u2192 uses; depth first search (dfs) \u2192 uses; breadth first search (bfs) \u2192 uses",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "bellman-ford_algorithm",
+      "name": "bellman-ford algorithm",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "algorithms \u2192 part_of; algorithms \u2192 part_of",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "longest_path",
+      "name": "longest path",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "topological sorting \u2192 enables; topological sorting \u2192 enables",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "topological_sorting",
+      "name": "topological sorting",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "depth first search (dfs) \u2192 enables; enables \u2192 longest path; part_of \u2192 algorithms; depth first search (dfs) \u2192 enables; enables \u2192 longest path; part_of ",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "bipartite_graph",
+      "name": "bipartite graph",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "depth first search (dfs) \u2192 enables; breadth first search (bfs) \u2192 enables; part_of \u2192 graph theory; depth first search (dfs) \u2192 enables; breadth first se",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "source_vertex",
+      "name": "source vertex",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "part_of \u2192 directed graph; connected graph \u2192 part_of; dfs \u2192 enables; bfs \u2192 enables; depth first search (dfs) \u2192 enables; directed graph \u2192 enables; cause",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "connected_graph",
+      "name": "connected graph",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "part_of \u2192 source vertex; graph theory \u2192 part_of; part_of \u2192 source vertex; graph theory \u2192 part_of",
+      "is_canonical": true,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    },
+    {
+      "id": "edges",
+      "name": "edges",
+      "source": [
+        {
+          "file": "Section5_Solutions.pdf"
+        }
+      ],
+      "description": "graph traversal \u2192 part_of; graph traversal \u2192 part_of",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1
+    }
+  ],
+  "edges": [
+    {
+      "id": "graph theory_to_graph traversal",
+      "source": "graph_theory",
+      "target": "graph_traversal",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "graph traversal_to_breadth first search (bfs)",
+      "source": "graph_traversal",
+      "target": "breadth_first_search_(bfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "graph traversal_to_depth first search (dfs)",
+      "source": "graph_traversal",
+      "target": "depth_first_search_(dfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "data structures_to_graph theory",
+      "source": "data_structures",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_graph traversal",
+      "source": "algorithms",
+      "target": "graph_traversal",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "complexity analysis_to_time complexity",
+      "source": "complexity_analysis",
+      "target": "time_complexity",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "complexity analysis_to_space complexity",
+      "source": "complexity_analysis",
+      "target": "space_complexity",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "big o notation_to_time complexity",
+      "source": "big_o_notation",
+      "target": "time_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "big o notation_to_space complexity",
+      "source": "big_o_notation",
+      "target": "space_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_depth first search (dfs)",
+      "source": "breadth_first_search_(bfs)",
+      "target": "depth_first_search_(dfs)",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "trees_to_graph theory",
+      "source": "trees",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph traversal_to_complexity analysis",
+      "source": "graph_traversal",
+      "target": "complexity_analysis",
+      "label": "causes",
+      "relation": "causes",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_breadth first search (bfs)",
+      "source": "algorithms",
+      "target": "breadth_first_search_(bfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_depth first search (dfs)",
+      "source": "algorithms",
+      "target": "depth_first_search_(dfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "big o notation_to_complexity analysis",
+      "source": "big_o_notation",
+      "target": "complexity_analysis",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "data mining_to_graph theory",
+      "source": "data_mining",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "network analysis_to_graph theory",
+      "source": "network_analysis",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "route finding_to_graph theory",
+      "source": "route_finding",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "game theory_to_graph theory",
+      "source": "game_theory",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_queue",
+      "source": "breadth_first_search_(bfs)",
+      "target": "queue",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_time complexity",
+      "source": "breadth_first_search_(bfs)",
+      "target": "time_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_space complexity",
+      "source": "breadth_first_search_(bfs)",
+      "target": "space_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_big o notation",
+      "source": "breadth_first_search_(bfs)",
+      "target": "big_o_notation",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_directed graph",
+      "source": "breadth_first_search_(bfs)",
+      "target": "directed_graph",
+      "label": "applies_to",
+      "relation": "applies_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_undirected graph",
+      "source": "breadth_first_search_(bfs)",
+      "target": "undirected_graph",
+      "label": "applies_to",
+      "relation": "applies_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_time complexity",
+      "source": "depth_first_search_(dfs)",
+      "target": "time_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_space complexity",
+      "source": "depth_first_search_(dfs)",
+      "target": "space_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_big o notation",
+      "source": "depth_first_search_(dfs)",
+      "target": "big_o_notation",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "data structures_to_queue",
+      "source": "data_structures",
+      "target": "queue",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_spanning tree",
+      "source": "breadth_first_search_(bfs)",
+      "target": "spanning_tree",
+      "label": "creates",
+      "relation": "creates",
+      "conflict_resolved": true
+    },
+    {
+      "id": "directed graph_to_breadth first search (bfs)",
+      "source": "directed_graph",
+      "target": "breadth_first_search_(bfs)",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "undirected graph_to_breadth first search (bfs)",
+      "source": "undirected_graph",
+      "target": "breadth_first_search_(bfs)",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "connected component_to_breadth first search (bfs)",
+      "source": "connected_component",
+      "target": "breadth_first_search_(bfs)",
+      "label": "prerequisite",
+      "relation": "prerequisite",
+      "conflict_resolved": false
+    },
+    {
+      "id": "data structures_to_algorithms",
+      "source": "data_structures",
+      "target": "algorithms",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_complexity analysis",
+      "source": "algorithms",
+      "target": "complexity_analysis",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "time complexity_to_big o notation",
+      "source": "time_complexity",
+      "target": "big_o_notation",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "space complexity_to_big o notation",
+      "source": "space_complexity",
+      "target": "big_o_notation",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_algorithms",
+      "source": "depth_first_search_(dfs)",
+      "target": "algorithms",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_data structures",
+      "source": "breadth_first_search_(bfs)",
+      "target": "data_structures",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_data structures",
+      "source": "depth_first_search_(dfs)",
+      "target": "data_structures",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_algorithms",
+      "source": "breadth_first_search_(bfs)",
+      "target": "algorithms",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_complexity analysis",
+      "source": "breadth_first_search_(bfs)",
+      "target": "complexity_analysis",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_complexity analysis",
+      "source": "depth_first_search_(dfs)",
+      "target": "complexity_analysis",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_adjacency matrix",
+      "source": "breadth_first_search_(bfs)",
+      "target": "adjacency_matrix",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_adjacency list",
+      "source": "breadth_first_search_(bfs)",
+      "target": "adjacency_list",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "adjacency matrix_to_graph theory",
+      "source": "adjacency_matrix",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "adjacency list_to_graph theory",
+      "source": "adjacency_list",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_shortest path",
+      "source": "breadth_first_search_(bfs)",
+      "target": "shortest_path",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "shortest path_to_spanning tree",
+      "source": "shortest_path",
+      "target": "spanning_tree",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "broadcasting in network_to_breadth first search (bfs)",
+      "source": "broadcasting_in_network",
+      "target": "breadth_first_search_(bfs)",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_broadcasting in network",
+      "source": "breadth_first_search_(bfs)",
+      "target": "broadcasting_in_network",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_cycle detection",
+      "source": "depth_first_search_(dfs)",
+      "target": "cycle_detection",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_path finding",
+      "source": "breadth_first_search_(bfs)",
+      "target": "path_finding",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_path finding",
+      "source": "depth_first_search_(dfs)",
+      "target": "path_finding",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_connected component",
+      "source": "breadth_first_search_(bfs)",
+      "target": "connected_component",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_connected component",
+      "source": "depth_first_search_(dfs)",
+      "target": "connected_component",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "complexity analysis_to_big o notation",
+      "source": "complexity_analysis",
+      "target": "big_o_notation",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_spanning tree",
+      "source": "depth_first_search_(dfs)",
+      "target": "spanning_tree",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "time complexity_to_complexity analysis",
+      "source": "time_complexity",
+      "target": "complexity_analysis",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "space complexity_to_complexity analysis",
+      "source": "space_complexity",
+      "target": "complexity_analysis",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "external graph algorithms_to_graph theory",
+      "source": "external_graph_algorithms",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "i/o-efficient algorithms_to_graph theory",
+      "source": "i/o-efficient_algorithms",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "external graph algorithms_to_i/o-efficient algorithms",
+      "source": "external_graph_algorithms",
+      "target": "i/o-efficient_algorithms",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_data structures",
+      "source": "graph_theory",
+      "target": "data_structures",
+      "label": "prerequisite",
+      "relation": "prerequisite",
+      "conflict_resolved": false
+    },
+    {
+      "id": "algorithms_to_graph theory",
+      "source": "algorithms",
+      "target": "graph_theory",
+      "label": "applied_in",
+      "relation": "applied_in",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_lexicographical ordering",
+      "source": "depth_first_search_(dfs)",
+      "target": "lexicographical_ordering",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_lexicographical ordering",
+      "source": "breadth_first_search_(bfs)",
+      "target": "lexicographical_ordering",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_undirected graph",
+      "source": "graph_theory",
+      "target": "undirected_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "undirected graph_to_graph traversal",
+      "source": "undirected_graph",
+      "target": "graph_traversal",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_directed graph",
+      "source": "depth_first_search_(dfs)",
+      "target": "directed_graph",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "algorithms_to_bellman-ford algorithm",
+      "source": "algorithms",
+      "target": "bellman-ford_algorithm",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_directed graph",
+      "source": "graph_theory",
+      "target": "directed_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_topological sorting",
+      "source": "depth_first_search_(dfs)",
+      "target": "topological_sorting",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "topological sorting_to_longest path",
+      "source": "topological_sorting",
+      "target": "longest_path",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "topological sorting_to_algorithms",
+      "source": "topological_sorting",
+      "target": "algorithms",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_bipartite graph",
+      "source": "depth_first_search_(dfs)",
+      "target": "bipartite_graph",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_bipartite graph",
+      "source": "breadth_first_search_(bfs)",
+      "target": "bipartite_graph",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_data structures",
+      "source": "algorithms",
+      "target": "data_structures",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "bipartite graph_to_graph theory",
+      "source": "bipartite_graph",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "source vertex_to_directed graph",
+      "source": "source_vertex",
+      "target": "directed_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "connected graph_to_source vertex",
+      "source": "connected_graph",
+      "target": "source_vertex",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_source vertex",
+      "source": "depth_first_search_(dfs)",
+      "target": "source_vertex",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph traversal_to_edges",
+      "source": "graph_traversal",
+      "target": "edges",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_connected graph",
+      "source": "graph_theory",
+      "target": "connected_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "directed graph_to_source vertex",
+      "source": "directed_graph",
+      "target": "source_vertex",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "source vertex_to_breadth first search (bfs)",
+      "source": "source_vertex",
+      "target": "breadth_first_search_(bfs)",
+      "label": "causes",
+      "relation": "causes",
+      "conflict_resolved": false
+    },
+    {
+      "id": "source vertex_to_depth first search (dfs)",
+      "source": "source_vertex",
+      "target": "depth_first_search_(dfs)",
+      "label": "causes",
+      "relation": "causes",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_graph traversal",
+      "source": "graph_theory",
+      "target": "graph_traversal",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "graph traversal_to_breadth first search (bfs)",
+      "source": "graph_traversal",
+      "target": "breadth_first_search_(bfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "graph traversal_to_depth first search (dfs)",
+      "source": "graph_traversal",
+      "target": "depth_first_search_(dfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "data structures_to_graph theory",
+      "source": "data_structures",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_graph traversal",
+      "source": "algorithms",
+      "target": "graph_traversal",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "complexity analysis_to_time complexity",
+      "source": "complexity_analysis",
+      "target": "time_complexity",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "complexity analysis_to_space complexity",
+      "source": "complexity_analysis",
+      "target": "space_complexity",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "big o notation_to_time complexity",
+      "source": "big_o_notation",
+      "target": "time_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "big o notation_to_space complexity",
+      "source": "big_o_notation",
+      "target": "space_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_depth first search (dfs)",
+      "source": "breadth_first_search_(bfs)",
+      "target": "depth_first_search_(dfs)",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "trees_to_graph theory",
+      "source": "trees",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph traversal_to_complexity analysis",
+      "source": "graph_traversal",
+      "target": "complexity_analysis",
+      "label": "causes",
+      "relation": "causes",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_breadth first search (bfs)",
+      "source": "algorithms",
+      "target": "breadth_first_search_(bfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_depth first search (dfs)",
+      "source": "algorithms",
+      "target": "depth_first_search_(dfs)",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "big o notation_to_complexity analysis",
+      "source": "big_o_notation",
+      "target": "complexity_analysis",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "data mining_to_graph theory",
+      "source": "data_mining",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "network analysis_to_graph theory",
+      "source": "network_analysis",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "route finding_to_graph theory",
+      "source": "route_finding",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "game theory_to_graph theory",
+      "source": "game_theory",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_queue",
+      "source": "breadth_first_search_(bfs)",
+      "target": "queue",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_time complexity",
+      "source": "breadth_first_search_(bfs)",
+      "target": "time_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_space complexity",
+      "source": "breadth_first_search_(bfs)",
+      "target": "space_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_big o notation",
+      "source": "breadth_first_search_(bfs)",
+      "target": "big_o_notation",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_directed graph",
+      "source": "breadth_first_search_(bfs)",
+      "target": "directed_graph",
+      "label": "applies_to",
+      "relation": "applies_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_undirected graph",
+      "source": "breadth_first_search_(bfs)",
+      "target": "undirected_graph",
+      "label": "applies_to",
+      "relation": "applies_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_time complexity",
+      "source": "depth_first_search_(dfs)",
+      "target": "time_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_space complexity",
+      "source": "depth_first_search_(dfs)",
+      "target": "space_complexity",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_big o notation",
+      "source": "depth_first_search_(dfs)",
+      "target": "big_o_notation",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "data structures_to_queue",
+      "source": "data_structures",
+      "target": "queue",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_spanning tree",
+      "source": "breadth_first_search_(bfs)",
+      "target": "spanning_tree",
+      "label": "creates",
+      "relation": "creates",
+      "conflict_resolved": true
+    },
+    {
+      "id": "directed graph_to_breadth first search (bfs)",
+      "source": "directed_graph",
+      "target": "breadth_first_search_(bfs)",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "undirected graph_to_breadth first search (bfs)",
+      "source": "undirected_graph",
+      "target": "breadth_first_search_(bfs)",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "connected component_to_breadth first search (bfs)",
+      "source": "connected_component",
+      "target": "breadth_first_search_(bfs)",
+      "label": "prerequisite",
+      "relation": "prerequisite",
+      "conflict_resolved": false
+    },
+    {
+      "id": "data structures_to_algorithms",
+      "source": "data_structures",
+      "target": "algorithms",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_complexity analysis",
+      "source": "algorithms",
+      "target": "complexity_analysis",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "time complexity_to_big o notation",
+      "source": "time_complexity",
+      "target": "big_o_notation",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "space complexity_to_big o notation",
+      "source": "space_complexity",
+      "target": "big_o_notation",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_algorithms",
+      "source": "depth_first_search_(dfs)",
+      "target": "algorithms",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_data structures",
+      "source": "breadth_first_search_(bfs)",
+      "target": "data_structures",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_data structures",
+      "source": "depth_first_search_(dfs)",
+      "target": "data_structures",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_algorithms",
+      "source": "breadth_first_search_(bfs)",
+      "target": "algorithms",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_complexity analysis",
+      "source": "breadth_first_search_(bfs)",
+      "target": "complexity_analysis",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_complexity analysis",
+      "source": "depth_first_search_(dfs)",
+      "target": "complexity_analysis",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_adjacency matrix",
+      "source": "breadth_first_search_(bfs)",
+      "target": "adjacency_matrix",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_adjacency list",
+      "source": "breadth_first_search_(bfs)",
+      "target": "adjacency_list",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "adjacency matrix_to_graph theory",
+      "source": "adjacency_matrix",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "adjacency list_to_graph theory",
+      "source": "adjacency_list",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_shortest path",
+      "source": "breadth_first_search_(bfs)",
+      "target": "shortest_path",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "shortest path_to_spanning tree",
+      "source": "shortest_path",
+      "target": "spanning_tree",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "broadcasting in network_to_breadth first search (bfs)",
+      "source": "broadcasting_in_network",
+      "target": "breadth_first_search_(bfs)",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": false
+    },
+    {
+      "id": "breadth first search (bfs)_to_broadcasting in network",
+      "source": "breadth_first_search_(bfs)",
+      "target": "broadcasting_in_network",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_cycle detection",
+      "source": "depth_first_search_(dfs)",
+      "target": "cycle_detection",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_path finding",
+      "source": "breadth_first_search_(bfs)",
+      "target": "path_finding",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_path finding",
+      "source": "depth_first_search_(dfs)",
+      "target": "path_finding",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_connected component",
+      "source": "breadth_first_search_(bfs)",
+      "target": "connected_component",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_connected component",
+      "source": "depth_first_search_(dfs)",
+      "target": "connected_component",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "complexity analysis_to_big o notation",
+      "source": "complexity_analysis",
+      "target": "big_o_notation",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_spanning tree",
+      "source": "depth_first_search_(dfs)",
+      "target": "spanning_tree",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "time complexity_to_complexity analysis",
+      "source": "time_complexity",
+      "target": "complexity_analysis",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "space complexity_to_complexity analysis",
+      "source": "space_complexity",
+      "target": "complexity_analysis",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "external graph algorithms_to_graph theory",
+      "source": "external_graph_algorithms",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "i/o-efficient algorithms_to_graph theory",
+      "source": "i/o-efficient_algorithms",
+      "target": "graph_theory",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "external graph algorithms_to_i/o-efficient algorithms",
+      "source": "external_graph_algorithms",
+      "target": "i/o-efficient_algorithms",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_data structures",
+      "source": "graph_theory",
+      "target": "data_structures",
+      "label": "prerequisite",
+      "relation": "prerequisite",
+      "conflict_resolved": false
+    },
+    {
+      "id": "algorithms_to_graph theory",
+      "source": "algorithms",
+      "target": "graph_theory",
+      "label": "applied_in",
+      "relation": "applied_in",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_lexicographical ordering",
+      "source": "depth_first_search_(dfs)",
+      "target": "lexicographical_ordering",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_lexicographical ordering",
+      "source": "breadth_first_search_(bfs)",
+      "target": "lexicographical_ordering",
+      "label": "uses",
+      "relation": "uses",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_undirected graph",
+      "source": "graph_theory",
+      "target": "undirected_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "undirected graph_to_graph traversal",
+      "source": "undirected_graph",
+      "target": "graph_traversal",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_directed graph",
+      "source": "depth_first_search_(dfs)",
+      "target": "directed_graph",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "algorithms_to_bellman-ford algorithm",
+      "source": "algorithms",
+      "target": "bellman-ford_algorithm",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_directed graph",
+      "source": "graph_theory",
+      "target": "directed_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_topological sorting",
+      "source": "depth_first_search_(dfs)",
+      "target": "topological_sorting",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "topological sorting_to_longest path",
+      "source": "topological_sorting",
+      "target": "longest_path",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "topological sorting_to_algorithms",
+      "source": "topological_sorting",
+      "target": "algorithms",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "depth first search (dfs)_to_bipartite graph",
+      "source": "depth_first_search_(dfs)",
+      "target": "bipartite_graph",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "breadth first search (bfs)_to_bipartite graph",
+      "source": "breadth_first_search_(bfs)",
+      "target": "bipartite_graph",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": true
+    },
+    {
+      "id": "algorithms_to_data structures",
+      "source": "algorithms",
+      "target": "data_structures",
+      "label": "related_to",
+      "relation": "related_to",
+      "conflict_resolved": false
+    },
+    {
+      "id": "bipartite graph_to_graph theory",
+      "source": "bipartite_graph",
+      "target": "graph_theory",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "source vertex_to_directed graph",
+      "source": "source_vertex",
+      "target": "directed_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "connected graph_to_source vertex",
+      "source": "connected_graph",
+      "target": "source_vertex",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": true
+    },
+    {
+      "id": "depth first search (dfs)_to_source vertex",
+      "source": "depth_first_search_(dfs)",
+      "target": "source_vertex",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph traversal_to_edges",
+      "source": "graph_traversal",
+      "target": "edges",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "graph theory_to_connected graph",
+      "source": "graph_theory",
+      "target": "connected_graph",
+      "label": "part_of",
+      "relation": "part_of",
+      "conflict_resolved": false
+    },
+    {
+      "id": "directed graph_to_source vertex",
+      "source": "directed_graph",
+      "target": "source_vertex",
+      "label": "enables",
+      "relation": "enables",
+      "conflict_resolved": false
+    },
+    {
+      "id": "source vertex_to_breadth first search (bfs)",
+      "source": "source_vertex",
+      "target": "breadth_first_search_(bfs)",
+      "label": "causes",
+      "relation": "causes",
+      "conflict_resolved": false
+    },
+    {
+      "id": "source vertex_to_depth first search (dfs)",
+      "source": "source_vertex",
+      "target": "depth_first_search_(dfs)",
+      "label": "causes",
+      "relation": "causes",
+      "conflict_resolved": false
+    }
+  ],
+  "stats": {
+    "total_nodes": 36,
+    "total_edges": 174,
+    "fusion_stats": {
+      "canonical_nodes": 31,
+      "fused_edges": 218,
+      "inferred_edges": 0
+    }
+  }
+}

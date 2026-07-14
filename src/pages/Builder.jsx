@@ -29,9 +29,12 @@ export default function Builder() {
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
-  const [graphData, setGraphData] = useState({ nodes: [], edges: [] })
+  const [graphData, setGraphData] = useState({ nodes: [], edges: [], legend: null })
   const [chatOpen, setChatOpen] = useState(false)
   const [drag, setDrag] = useState(false)
+  const [maxNodes, setMaxNodes] = useState('')
+  const [minMentions, setMinMentions] = useState('2')
+  const [processingMessage, setProcessingMessage] = useState('')
   const fileRef = useRef(null)
 
   const loadDocs = async () => {
@@ -47,22 +50,30 @@ export default function Builder() {
     setBusy(true)
     try {
       for (const file of list) {
-        await uploadDocument(file)
+        setProcessingMessage(`Processing ${file.name}…`)
+        await uploadDocument(file, 'llm', maxNodes ? Number(maxNodes) : null, (status) => {
+          if (status.stage === 'running') {
+            setProcessingMessage(`Processing ${file.name} — extracting concepts and generating summaries…`)
+          }
+        }, minMentions ? Number(minMentions) : null)
       }
       await loadDocs()
     } catch (e) {
-      alert(e?.response?.data?.error || 'Upload failed')
+      alert(e?.response?.data?.error || e?.message || 'Upload failed')
     } finally {
       setBusy(false)
+      setProcessingMessage('')
     }
   }
 
   const generate = async () => {
+    if (!docs.length) return
     setBusy(true)
     try {
       const ids = selected.size ? Array.from(selected) : docs.map(d => d.id)
       const result = await generateGraph(ids, modelSel.provider, modelSel.model)
-      setGraphData({ nodes: result?.nodes || [], edges: result?.edges || [] })
+      setGraphData({ nodes: result?.nodes || [], edges: result?.edges || [], legend: result?.legend || null })
+      setGraphOpen(true)
       console.log(result)
       await loadDocs()
       // Keep users on the generation page so the embedded Q&A panel is immediately available.
@@ -174,12 +185,54 @@ export default function Builder() {
             />
           </div>
 
+          {processingMessage && (
+            <div className="sidebar-section processing-status">{processingMessage}</div>
+          )}
+
           {/* Model picker — choose which LLM extracts the graph */}
           <div className="sidebar-section">
             <div className="sidebar-label">Extraction Model</div>
             <ModelPicker value={modelSel} onChange={setModelSel} />
             <div className="sidebar-hint">
               Model used for entity + relationship extraction.
+            </div>
+          </div>
+
+          {/* Temporary lever for LLM/rate-limit load: caps how many distinct
+              concepts each uploaded document can contribute, which caps how
+              many evolution summaries get generated during upload. */}
+          <div className="sidebar-section">
+            <div className="sidebar-label">Max Nodes / Document</div>
+            <input
+              type="number"
+              min="1"
+              placeholder="Unlimited"
+              value={maxNodes}
+              onChange={(e) => setMaxNodes(e.target.value)}
+              className="max-nodes-input"
+            />
+            <div className="sidebar-hint">
+              Caps concepts extracted per document. Lower this if you're hitting API rate limits.
+            </div>
+          </div>
+
+          {/* "Key concept" threshold: drops concepts mentioned fewer than
+              this many times, unless they're a curated seed concept. Cuts
+              noisy/low-value nodes AND the LLM calls they'd otherwise cost
+              for evolution summaries and comparisons. */}
+          <div className="sidebar-section">
+            <div className="sidebar-label">Min Mentions to Keep a Concept</div>
+            <input
+              type="number"
+              min="1"
+              placeholder="2"
+              value={minMentions}
+              onChange={(e) => setMinMentions(e.target.value)}
+              className="max-nodes-input"
+            />
+            <div className="sidebar-hint">
+              Drops concepts below this mention count. Raise it for a
+              cleaner graph and fewer API calls; set to 1 to keep everything.
             </div>
           </div>
         </aside>
@@ -307,6 +360,7 @@ export default function Builder() {
         <GraphViewer
           nodes={graphData.nodes}
           edges={graphData.edges}
+          legend={graphData.legend}
           onClose={() => setGraphOpen(false)}
         />
       )}

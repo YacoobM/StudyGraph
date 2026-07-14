@@ -16,6 +16,29 @@ async function safeFetchJson(url, options = {}) {
   return handleResponse(response)
 }
 
+// Backend runs extraction as a background task (see backend/main.py's
+// _run_upload_pipeline) so /api/upload itself returns almost immediately
+// with just an acknowledgment — this polls the single status slot until
+// that background work reports done/error. Evolution summaries are not
+// part of this background work — they're generated on demand per concept
+// (see fetchConceptDescription/fetchConcept below).
+export async function getPipelineStatus() {
+  return safeFetchJson(`${API_BASE_URL}/api/upload/status`)
+}
+
+async function pollUntilDone(pollFn, { intervalMs = 1500, timeoutMs = 10 * 60 * 1000 } = {}) {
+  const start = Date.now()
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const status = await pollFn()
+    if (status.stage === 'done' || status.stage === 'error') return status
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for the backend to finish processing.')
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+}
+
 // Backend has no document store — just one global engine that accumulates
 // everything uploaded. We track upload metadata client-side so the docs
 // table has real rows, built only from actual /api/upload responses.
@@ -70,17 +93,34 @@ export async function listDocuments() {
   return { documents: _documents }
 }
 
-export async function uploadDocument(file, seedMethod = 'llm') {
+export async function uploadDocument(file, seedMethod = 'llm', maxNodes = null, onStatus = null, minMentions = null) {
   const formData = new FormData()
   formData.append('file', file)
 
   // seed_method is a query param on the backend, not a form field
   const url = `${API_BASE_URL}/api/upload`
+  // seed_method, max_nodes, and min_mentions are query params on the backend, not form fields
+  const params = new URLSearchParams()
+  if (maxNodes) params.set('max_nodes', maxNodes)
+  if (minMentions) params.set('min_mentions', minMentions)
   const uploadResult = await safeFetchJson(url, { method: 'POST', body: formData })
 
-  const doc = _docFromUploadResponse(file, uploadResult)
+  // The request above only acknowledges receipt — extraction happens
+  // afterward in a background task, so wait for that to actually finish
+  // before treating the upload as done.
+  const finalStatus = await pollUntilDone(async () => {
+    const status = await getPipelineStatus()
+    if (onStatus) onStatus(status)
+    return status
+  })
+
+  if (finalStatus.stage === 'error') {
+    throw new Error(finalStatus.error || 'Upload processing failed')
+  }
+
+  const doc = _docFromUploadResponse(file, finalStatus)
   _documents.push(doc)
-  return { document: doc, raw: uploadResult }
+  return { document: doc, raw: finalStatus }
 }
 
 export async function deleteDocument(id) {
@@ -91,10 +131,8 @@ export async function deleteDocument(id) {
 }
 
 export async function generateGraph(_docIds, _provider, _model) {
-  // Closest real equivalent to "generate graph" is /api/fuse, which fuses
-  // everything uploaded so far. Backend has no per-document scoping or
-  // per-call model override, so those args are accepted but unused.
 
+  await safeFetchJson(`${API_BASE_URL}/api/fuse`, { method: 'POST' })
   return safeFetchJson(`${API_BASE_URL}/api/graph`, { method: 'GET' })
 }
 
@@ -103,16 +141,18 @@ function buildGraphPayload(raw) {
 
   const nodes = Array.isArray(raw.nodes)
     ? raw.nodes.map((node) => {
-      const { id, name, description, source, is_canonical, ...rest } = node
+      const { id, name, description, source, is_canonical, color, appears_in_weeks, ...rest } = node
       return {
         id,
         label: name || 'Concept',
-        color: is_canonical ? '#a3e635' : '#8b5cf6',
+        // Use the color from the backend, with a fallback for older data structures.
+        color: color || (is_canonical ? '#a3e635' : '#8b5cf6'),
         properties: {
           ...rest,
           ...(name ? { name } : {}),
           ...(description ? { description } : {}),
           ...(source ? { source } : {}),
+          ...(appears_in_weeks !== undefined ? { appears_in_weeks } : {}),
         },
       }
     })
@@ -151,4 +191,30 @@ export async function askQuestion(question) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: question }),
   })
+}
+
+export async function fetchGraphData(week = null) {
+  const url = new URL(`${API_BASE_URL}/api/evolution/graph`)
+  if (week) {
+    url.searchParams.append('week', week)
+  }
+  return safeFetchJson(url.toString())
+}
+
+// Cheap tier: one grounded summary from the concept's earliest-appearance
+// week only. Use this for a plain node click — it's what backs the
+// "DESCRIPTION" text in both the general graph and the Evolution graph.
+export async function fetchConceptDescription(conceptName) {
+  return safeFetchJson(`${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/description`)
+}
+
+// Full tier: every week's summary plus every week-to-week comparison. Costs
+// one LLM call per week/transition, so only call this from an explicit
+// "show concept evolution" action, not on a plain node click.
+export async function fetchConcept(conceptName) {
+  return safeFetchJson(`${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}`)
+}
+
+export async function fetchConceptSubgraph(conceptName) {
+  return safeFetchJson(`${API_BASE_URL}/api/evolution/subgraph/${encodeURIComponent(conceptName)}`)
 }

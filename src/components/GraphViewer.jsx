@@ -1,6 +1,9 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import GraphCanvas from './GraphCanvas'
 import NodeDetails from './NodeDetails'
+import GraphLegend from './GraphLegend'
+import { fetchConceptDescription } from '../services/api.js'
 import './GraphViewer.css'
 
 /*
@@ -12,10 +15,13 @@ import './GraphViewer.css'
  * nodes, edges - graph data, shape: see GraphCanvas
  * onClose - closes the modal
  */
-export default function GraphViewer({ nodes = [], edges = [], onClose }) {
+export default function GraphViewer({ nodes = [], edges = [], legend = null, onClose }) {
+  const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedNode, setSelectedNode] = useState(null)
   const [filterLevel, setFilterLevel] = useState(3)
+  const [conceptDescription, setConceptDescription] = useState(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
 
   const getConnections = () => {
     if (!selectedNode) return []
@@ -45,6 +51,27 @@ export default function GraphViewer({ nodes = [], edges = [], onClose }) {
           strength: l.strength,
         }
       })
+  }
+
+  const handleNodeSelect = (node) => {
+    setSelectedNode(node)
+    setConceptDescription(null) // Clear previous description
+    if (node) {
+      setDetailsLoading(true)
+      fetchConceptDescription(node.name)
+        .then(setConceptDescription)
+        .catch(() => setConceptDescription(null)) // Ensure it's null on failure
+        .finally(() => setDetailsLoading(false))
+    }
+  }
+
+  // Full evolution (all weeks + comparisons) is deliberately not fetched
+  // here — it's the expensive tier, gated behind the dedicated Evolution
+  // page instead of firing on every general-graph node click.
+  const handleViewEvolution = (name) => {
+    const conceptName = name || selectedNode?.name || selectedNode?.concept_name || selectedNode?.label
+    if (!conceptName) return
+    navigate(`/evolution?concept=${encodeURIComponent(conceptName)}`)
   }
 
   return (
@@ -81,13 +108,17 @@ export default function GraphViewer({ nodes = [], edges = [], onClose }) {
               filterLevel={filterLevel}
               searchTerm={searchTerm}
               selectedNode={selectedNode}
-              onNodeSelect={setSelectedNode}
+              onNodeSelect={handleNodeSelect}
             />
           )}
+          {legend && <GraphLegend legend={legend} />}
           <NodeDetails
             node={selectedNode}
             onClose={() => setSelectedNode(null)}
             connections={getConnections()}
+            conceptDescription={conceptDescription}
+            detailsLoading={detailsLoading}
+            onViewEvolution={handleViewEvolution}
           />
         </div>
       </div>

@@ -151,7 +151,7 @@ export default function GraphCanvas({
     // FIXED: Added HEX color fallbacks to stop nodes from defaulting to pure black
     node.append('circle')
       .attr('r', (d) => (highlightedNodeIds.includes(d.id) ? 30 : 25))
-      .attr('fill', 'var(--primary-color, #10b981)')
+      .attr('fill', (d) => d.color || 'var(--primary-color, #10b981)')
       .attr('stroke', (d) => (highlightedNodeIds.includes(d.id) ? '#6B9EFF' : 'none'))
       .attr('stroke-width', (d) => (highlightedNodeIds.includes(d.id) ? 2 : 0))
       .attr('filter', (d) => (highlightedNodeIds.includes(d.id) ? 'drop-shadow(0 0 6px rgba(107, 158, 255, 0.6))' : 'none'))

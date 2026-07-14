@@ -1,3 +1,4 @@
+import sys
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -11,11 +12,18 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict, Counter
 import time
 import asyncio
 from chromadb import Client
 from schemas import *
 from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
+
+# make evolution_data importable regardless of cwd
+backend_dir = Path(__file__).resolve().parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+import evolution_data
 
 load_dotenv()
 
@@ -51,7 +59,7 @@ ce_client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
 engine = None
 
 EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
-    
+
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
     try:
@@ -73,7 +81,7 @@ def save_extraction_result(timings, nodes, edges):
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = OUTPUT_DIR / f"result_{timestamp}.json"
-        
+
         data = {
             "timestamp": timestamp,
             "nodes": nodes,
@@ -84,9 +92,9 @@ def save_extraction_result(timings, nodes, edges):
                 "timings": timings
             }
         }
-        
+
         with open(output_file, 'w') as f:
-            json.dump(data,f,indent=2)
+            json.dump(data, f, indent=2)
         return str(output_file)
     except Exception as e:
         print(f"Error saving file: {e}")
@@ -113,12 +121,12 @@ def save_graph_json(nodes, edges, fusion_stats=None):
     except Exception as e:
         print(f"Error saving graph JSON: {e}")
         return None
-    
+
 def get_collection(project_id, user_id="default"):
     return chroma.get_or_create_collection(
         name=f"user_{user_id}_project_{project_id}"
     )
-    
+
 def call_groq(prompt, text_batch):
     return client.chat.completions.create(
         messages=[
@@ -141,7 +149,7 @@ def call_cerebras(prompt, text_batch):
 
 def call_llm(prompt, text_batch):
     return call_groq(prompt, text_batch)
-    
+
 class StudyGraphEngine:
     def __init__(self, collections):
         self.concepts = []
@@ -156,6 +164,23 @@ class StudyGraphEngine:
         self.seed_generation_time = None        # float, seconds
         self.upload_latency = None              # float, total time for entire upload endpoint
         self.collections = collections
+        self._doc_concept_names = {}    # doc_name -> set of admitted concept names (for max_nodes_per_doc)
+        self._chroma_chunk_counter = 0  # monotonic counter so chunk ids never collide across uploads
+
+        # --- Concept-evolution state ---
+        self.week_counter = 1                    # Tracks upload batches as "weeks"
+        self.uploads_by_week = {}                 # week_key -> filename
+        self.chunks_by_week = defaultdict(list)   # week_key -> [{text, pages, doc_name, embedding}] (in-memory, separate from ChromaDB)
+        self.concept_week_chunks = {}                       # (name, week) -> retrieved chunk list
+        self.concept_week_summaries = {}                     # (name, week) -> LLM summary text
+        self.concept_consecutive_comparisons = {}             # canonical concept_name -> [{from_week, to_week, comparison}]
+        self.concept_overall_comparison = {}                  # canonical concept_name -> comparison text (first week vs. latest week)
+
+        # Single-slot status for the background upload pipeline. One slot,
+        # not one per upload — a second upload started before the first
+        # finishes overwrites this rather than queuing. Fine for a
+        # single-user setup; not safe under concurrent uploads.
+        self.pipeline_status = {"stage": "idle"}
 
     def generate_seeds(self, all_pages):
         """
@@ -180,12 +205,12 @@ class StudyGraphEngine:
         try:
             response = call_llm(seed_prompt, f"Material:\n{full_text[:5000]}")
             content = response.choices[0].message.content
-            
+
             if not content or not content.strip():
                 print("Empty response from LLM for seed generation")
                 self.seed_entities = []
                 return
-                
+
             content = content.strip()
             if content.startswith("```"):
                 content = content.split("```")[1]
@@ -227,7 +252,7 @@ class StudyGraphEngine:
         pages = [{"page": i + 1, "text": p.get_text()} for i, p in enumerate(doc)]
         return pages
 
-    def get_chunks(self, pages, source="unknown", size=2000, overlap=400):
+    def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
         chunks = []
         full_text = ""
         position_to_page = []
@@ -248,12 +273,16 @@ class StudyGraphEngine:
             chunks.append({"text": chunk_text, "pages": spanned_pages, "source": source})
             start += step
 
-        self.index_chunks(chunks)
+        self.index_chunks(chunks, week_key=week_key)
+
+        if week_key is not None:
+            self.index_chunks_for_week(chunks, week_key, source)
+
         return chunks
 
     async def extract_knowledge(self, text_batch):
         raw_data = None  # ← initialize here so except blocks can always reference it
-        
+
         if self.seed_entities:
             seed_list = ", ".join(self.seed_entities[:10])
             prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
@@ -276,11 +305,11 @@ class StudyGraphEngine:
             async with EXTRACTION_SEMAPHORE:
                 response = await asyncio.to_thread(call_llm, prompt, text_batch)
             content = response.choices[0].message.content
-            
+
             if not content or not content.strip():
-                print("Cerebras returned empty response")
+                print("LLM returned empty response")
                 return {"concepts": [], "relationships": []}
-            
+
             # Strip markdown fences if the model wraps output anyway
             content = content.strip()
             if content.startswith("```"):
@@ -288,7 +317,7 @@ class StudyGraphEngine:
                 if content.startswith("json"):
                     content = content[4:]
                 content = content.strip()
-            
+
             raw_data = json.loads(content)
             validated = ExtractionResult(**raw_data)
             print("Done")
@@ -305,9 +334,8 @@ class StudyGraphEngine:
             return {"concepts": [], "relationships": []}
         except json.JSONDecodeError as e:
             print(f"JSON parse error: {e}")
-            print(f"Raw content was: {response.choices[0].message.content[:200] if response else 'no response'}")
             return {"concepts": [], "relationships": []}
-        except RateLimitError or RLE as e:
+        except (RateLimitError, RLE) as e:
             print(e)
             return {"concepts": [], "relationships": []}
         except Exception as e:
@@ -315,15 +343,24 @@ class StudyGraphEngine:
             print(f"Raw data was: {raw_data}")
             return {"concepts": [], "relationships": []}
 
-    def add_to_graph(self, raw_data, doc_name):
+    def add_to_graph(self, raw_data, doc_name, week_key=None, max_nodes_per_doc=None):
+        """No global dedupe by name — a concept can have one entry per week
+        so evolution tracking sees repeat appearances. /api/graph collapses
+        duplicates by name for display."""
         if not raw_data:
             return
         for c in raw_data.get("concepts", []):
             if not isinstance(c, str):
                 continue
             name = c.lower().strip()
-            if not any(node["name"] == name for node in self.concepts):
-                self.concepts.append({"name": name, "source": doc_name})
+            if not name:
+                continue
+            if max_nodes_per_doc is not None:
+                doc_names = self._doc_concept_names.setdefault(doc_name, set())
+                if name not in doc_names and len(doc_names) >= max_nodes_per_doc:
+                    continue
+                doc_names.add(name)
+            self.concepts.append({"name": name, "source": doc_name, "week": week_key})
 
         for r in raw_data.get("relationships", []):
             from_node = r.get("from", "").lower().strip()
@@ -333,6 +370,41 @@ class StudyGraphEngine:
                 self.edges.append(
                     {"from": from_node, "to": to_node, "relation": relation, "source": doc_name}
                 )
+
+    def prune_low_value_concepts(self, doc_name, week_key, min_mentions=2):
+        """
+        Drop concepts admitted from this doc/week that show no sign of being
+        a "key" concept: mentioned fewer than min_mentions times across this
+        doc's chunks, and not one of the curated seed_entities. Off by
+        default (call with min_mentions=1, or don't call it at all) so it
+        never changes behavior unless explicitly requested.
+        """
+        doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c.get("week") == week_key]
+        if not doc_week_concepts:
+            return
+
+        counts = Counter(c["name"] for c in doc_week_concepts)
+        seeds = set(self.seed_entities)
+
+        dropped = {
+            name for name, count in counts.items()
+            if count < min_mentions and name not in seeds
+        }
+        if not dropped:
+            return
+
+        self.concepts = [
+            c for c in self.concepts
+            if not (c["source"] == doc_name and c.get("week") == week_key and c["name"] in dropped)
+        ]
+        self.edges = [
+            e for e in self.edges
+            if not (e["source"] == doc_name and (e["from"] in dropped or e["to"] in dropped))
+        ]
+        if doc_name in self._doc_concept_names:
+            self._doc_concept_names[doc_name] -= dropped
+
+        print(f"Pruned {len(dropped)} low-value concept(s) from {doc_name} ({week_key}): {sorted(dropped)}")
 
     def fuse_graph(self):
         """
@@ -360,59 +432,47 @@ class StudyGraphEngine:
         if len(node_names) < 2:
             return
 
-        # Encode all concept names
         embeddings = self.model.encode(node_names)
-        
-        # Track which nodes have been merged
+
         merged = set()
         threshold = 0.80  # tune this based on false positives you see
-        
+
         for i in range(len(node_names)):
             if node_names[i] in merged:
                 continue
-            
-            # Find all similar nodes to this one
+
             sims = cosine_similarity([embeddings[i]], embeddings)[0]
-            
+
             for j in range(i + 1, len(node_names)):
                 if node_names[j] in merged:
                     continue
-                
+
                 if sims[j] >= threshold:
-                    # Merge j into i (i is canonical)
                     self.canonical_nodes[node_names[j]] = node_names[i]
                     merged.add(node_names[j])
 
         print(f"Entity merging: {len(self.canonical_nodes)} merges via cosine similarity (threshold={threshold})")
-        
+
     def _normalize_relation(self, relation):
         """
         Normalize relation labels to a fixed vocabulary.
         Handles common LLM output variance without an LLM call.
         """
         r = relation.lower().strip()
-        
-        # Define synonym groups → canonical form
+
         synonyms = {
-            # prerequisite family
             "prerequisite": ["prerequisite", "prerequisite for", "prerequisite_for", "requires", "required for", "depends on"],
-            # causation family
             "causes": ["causes", "cause", "leads to", "results in", "produces"],
-            # composition family
             "part_of": ["part of", "part_of", "component of", "composed of", "comprises"],
-            # relation/connection family
             "related_to": ["related to", "related_to", "associated with", "connected to", "linked to", "relates to"],
-            # explanation family
             "explains": ["explains", "explain", "defined as", "describes", "clarifies"],
-            # enabling/facilitation
             "enables": ["enables", "enable", "allows", "permits", "facilitates"],
         }
-        
+
         for canonical, variants in synonyms.items():
             if r in variants:
                 return canonical
-        
-        # Fallback: return as-is if not in map
+
         return r
 
     def _resolve_conflicts(self):
@@ -425,31 +485,27 @@ class StudyGraphEngine:
             return
 
         edge_groups = {}
-        
-        # Group edges by canonical node pairs
+
         for edge in self.edges:
             from_node = self.canonical_nodes.get(edge["from"], edge["from"])
             to_node = self.canonical_nodes.get(edge["to"], edge["to"])
-            
-            # Normalize the relation label
+
             normalized_relation = self._normalize_relation(edge["relation"])
-            
+
             key = (from_node, to_node)
             if key not in edge_groups:
                 edge_groups[key] = []
-            
+
             edge_groups[key].append({
                 "from": from_node,
                 "to": to_node,
                 "relation": normalized_relation,
                 "source": edge.get("source", "unknown"),
-                "original_relation": edge["relation"]  # keep for debugging
+                "original_relation": edge["relation"]
             })
 
-        # Process each edge group
         for (from_node, to_node), edges in edge_groups.items():
             if len(edges) == 1:
-                # Single edge, keep as-is
                 self.fused_edges.append({
                     "from": edges[0]["from"],
                     "to": edges[0]["to"],
@@ -458,22 +514,18 @@ class StudyGraphEngine:
                     "conflict_resolved": False
                 })
             else:
-                # Multiple edges between same nodes
                 relations = [e["relation"] for e in edges]
-                
+
                 if len(set(relations)) == 1:
-                    # All have the same (normalized) relation — just one edge needed
                     self.fused_edges.append({
                         "from": from_node,
                         "to": to_node,
                         "relation": relations[0],
                         "source": edges[0]["source"],
-                        "conflict_resolved": True,  # flag that we collapsed multiple edges
-                        "original_count": len(edges)  # how many we merged
+                        "conflict_resolved": True,
+                        "original_count": len(edges)
                     })
                 else:
-                    # Different relations even after normalization — rare, pick the first
-                    # (Could log this for inspection if needed)
                     self.fused_edges.append({
                         "from": from_node,
                         "to": to_node,
@@ -481,11 +533,11 @@ class StudyGraphEngine:
                         "source": edges[0]["source"],
                         "conflict_resolved": True,
                         "original_count": len(edges),
-                        "conflicting_relations": relations  # log what the conflict was
+                        "conflicting_relations": relations
                     })
 
         print(f"Conflict resolution: Processed {len(edge_groups)} edge groups, "
-            f"created {len(self.fused_edges)} fused edges")
+              f"created {len(self.fused_edges)} fused edges")
 
     def find_best_node(self, query):
         if not self.concepts:
@@ -621,39 +673,88 @@ class StudyGraphEngine:
             "total_count": len(visited)
         }
 
-    def index_chunks(self, chunks):
-        #store into the vector database
+    def index_chunks(self, chunks, week_key=None):
+        # store into the vector database
         texts = [chunk["text"] for chunk in chunks]
 
         embeddings = self.model.encode(texts)
-        
+
+        ids = [f"chunk_{self._chroma_chunk_counter + i}" for i in range(len(texts))]
+        self._chroma_chunk_counter += len(texts)
+
+        metadatas = []
+        for chunk in chunks:
+            meta = {"pages": chunk["pages"], "source": chunk.get("source", "unknown")}
+            if week_key is not None:
+                meta["week"] = week_key
+            metadatas.append(meta)
+
         self.collections.add(
-            ids=[f"chunk_{i}" for i in range(len(texts))],
+            ids=ids,
             embeddings=embeddings,
             documents=texts,
-            metadatas=[{"pages": chunk["pages"], "source": chunk.get("source", "unknown")} for chunk in chunks]
+            metadatas=metadatas
         )
 
     def retrieve_chunks(self, query, top_k=3):
         query_embedding  = self.model.encode([query.lower()])
-        
+
         results = self.collections.query(
             query_embeddings=query_embedding,
             n_results=top_k
         )
-        
+
         if not results["documents"] or not results["documents"][0]:
-            return [] # case of failed chunk retrieval
-        
+            return []  # case of failed chunk retrieval
+
         return [
-        {
-            "text": doc,
-            "pages": meta["pages"],
-            "source": meta.get("source", "unknown"),
-            "similarity": 1 - dist
-        }
-        for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0])
-    ]
+            {
+                "text": doc,
+                "pages": meta["pages"],
+                "source": meta.get("source", "unknown"),
+                "similarity": 1 - dist
+            }
+            for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0])
+        ]
+
+    # --- Evolution-only chunk store ---
+
+    def index_chunks_for_week(self, chunks, week_key, doc_name):
+        """Persist embedded chunks under `week_key`, additively (never wiped
+        on later uploads), so concept-evolution summaries can retrieve
+        grounded source text for any past week."""
+        texts, pages_list = [], []
+        for chunk in chunks:
+            texts.append(chunk["text"])
+            pages_list.append(chunk.get("pages", []))
+        if not texts:
+            return
+
+        embeddings = self.model.encode(texts)
+        for text, pages, embedding in zip(texts, pages_list, embeddings):
+            self.chunks_by_week[week_key].append({
+                "text": text, "pages": pages, "doc_name": doc_name, "embedding": embedding,
+            })
+
+    def retrieve_chunks_for_week(self, query, week_key, top_k=2):
+        pool = self.chunks_by_week.get(week_key, [])
+        if not pool:
+            return []
+        query_embedding = self.model.encode([query.lower()])
+        chunk_embeddings = np.array([c["embedding"] for c in pool])
+        similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
+        top_indices = np.argsort(similarities)[-top_k:][::-1]
+
+        return [
+            {
+                "text": pool[i]["text"],
+                "pages": pool[i]["pages"],
+                "doc_name": pool[i]["doc_name"],
+                "similarity": round(float(similarities[i]), 3),
+            }
+            for i in top_indices
+            if similarities[i] > 0.15
+        ]
 
     @staticmethod
     def format_citation(pages):
@@ -671,8 +772,7 @@ class StudyGraphEngine:
         Returns concise, well-cited answers.
         """
         retrieved = self.retrieve_chunks(query, top_k=3)
-        
-        # If no text chunks found, return early
+
         if not retrieved:
             return {
                 "answer": "No relevant text chunks found in your documents. Try a different query.",
@@ -684,12 +784,10 @@ class StudyGraphEngine:
                 "graph_search_depth": 0
             }
 
-        # Build context from retrieved chunks with visible citations
         context_blocks, all_cited_pages, sources = [], [], []
         for r in retrieved:
             citation = self.format_citation(r["pages"])
             header = f"[{citation}]" if citation else "[unknown page]"
-            # Truncate chunk text to keep prompt reasonable
             chunk_text = r["text"][:400]
             context_blocks.append(f"{header}\n{chunk_text}")
             all_cited_pages.extend(r["pages"])
@@ -702,7 +800,6 @@ class StudyGraphEngine:
         context_text = "\n\n".join(context_blocks)
         unique_pages = sorted(set(all_cited_pages))
 
-        # Optional: add graph context if available
         graph_section = ""
         working_edges = self.fused_edges if self.fused_edges else self.edges
         if working_edges:
@@ -712,10 +809,10 @@ class StudyGraphEngine:
                 "edges": multi_hop_result.get("edges", []),
                 "is_fused": bool(self.fused_edges)
             }
-            
+
             if subgraph.get("edges"):
                 graph_lines = ["Related concepts from the graph:"]
-                for e in subgraph.get("edges", [])[:5]:  # limit to 5 edges
+                for e in subgraph.get("edges", [])[:5]:
                     graph_lines.append(f"  {e['from']} [{e['relation']}] {e['to']}")
                 graph_section = "\n".join(graph_lines)
         else:
@@ -778,10 +875,10 @@ async def extract_with_exp_backoff(text, retries=5):
     backoff.
     """
     delay = 5
-    
+
     for attempt in range(retries):
         try:
-            return await(engine.extract_knowledge(text))
+            return await (engine.extract_knowledge(text))
         except RateLimitError as e:
             await asyncio.sleep(delay)
             delay *= 2
@@ -793,103 +890,144 @@ async def health_check():
     return {"status": "ok"}
 
 
-@app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, max_nodes, min_mentions):
     """
-    Upload a PDF and extract knowledge graph with Global Perspective pipeline.
-    On every upload, BOTH seed methods are benchmarked and results written to
-    outputs/seed_generation_llm.txt.
+    Everything slow and LLM-dependent about an upload: seed generation,
+    chunk extraction, and graph building. Runs as a background task with no
+    HTTP request attached, so Groq rate-limit retries/backoff can take as
+    long as they need without risking a request timeout or leaving the
+    browser hanging on a spinner. Poll GET /api/upload/status for progress.
     """
-    # in case of unconfigured groq api key
-    if not os.getenv("GROQ_API_KEY"):
-        raise HTTPException(
-            status_code=503,
-            detail="The AI Service is temporarily down. Please try again later."
-        )
-    
-    global engine
-    upload_start = time.time()
-
-    if engine is None:
-        #instantitate a new instance of the studygraph class
-        engine = StudyGraphEngine(get_collection(1))
     try:
-        file_bytes = await file.read()
-        safe_name = Path(file.filename).name
-        upload_path = UPLOAD_DIR / safe_name
-        upload_path.write_bytes(file_bytes)
-
-        pages = engine.extract_text(file_bytes, safe_name)
+        safe_name = Path(filename).name
 
         engine.generate_seeds(pages)
         save_seed_entities(engine.seed_entities)
 
-        chunks = engine.get_chunks(pages, source=safe_name)
+        chunks = engine.get_chunks(pages, source=safe_name, week_key=week_key)
 
         extraction_tasks = [
             extract_with_exp_backoff(chunk["text"])
             for chunk in chunks
         ]
-                
         results = await asyncio.gather(*extraction_tasks)
-        
-        # Record total upload latency (make it a class variable if needed later)
-        upload_latency = round(time.time() - upload_start, 3)
 
-        # Add to graph sequentially (order doesn't matter here)
         for i, data in enumerate(results):
-            engine.add_to_graph(data, file.filename)
+            engine.add_to_graph(data, filename, week_key=week_key, max_nodes_per_doc=max_nodes)
             print(f"Processed chunk {i + 1}/{len(results)}")
 
-        # Save current graph state
+        if min_mentions > 1:
+            engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
+
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
         graph_save_path = save_graph_json(
             [{"name": c["name"], "source": c["source"]} for c in engine.concepts],
             working_edges
         )
-                
+
+        upload_latency = round(time.time() - upload_start, 3)
         save_extraction_result(
             {
                 "number of chunks": len(chunks),
                 "latency": upload_latency,
-                "time per chunk": upload_latency/len(chunks)
+                "time per chunk": upload_latency / len(chunks) if chunks else 0
             },
             engine.concepts,
             working_edges
         )
-        
-        return {
-        "status": "success",
-        "message": f"Processed {len(pages)} pages, {len(chunks)} chunks extracted",
-        "chunks": len(chunks),
-        "filename": file.filename,
-        "seeds_generated": len(engine.seed_entities),
-        "seed_entities": engine.seed_entities,
-        "pipeline_phase": "stream",
-        "graph_saved_to": graph_save_path,
-        "raw_concepts": len(engine.concepts),
-        "total_edges": len(working_edges)
+        engine.upload_latency = upload_latency
+
+        engine.pipeline_status = {
+            "stage": "done",
+            "operation": "upload",
+            "week": week_key,
+            "filename": filename,
+            "chunks": len(chunks),
+            "seeds_generated": len(engine.seed_entities),
+            "seed_entities": engine.seed_entities,
+            "raw_concepts": len(engine.concepts),
+            "total_edges": len(working_edges),
+            "graph_saved_to": graph_save_path,
+            "error": None,
         }
-        
-    except HTTPException as e:
-        if e.status_code in [401, 402, 403, 429]:
-            # This is an error on our end while accessing the groq api
-            raise HTTPException(
-                status_code=503, 
-                detail="The service is temporarily down. Please try again soon."
-                )
-        elif e.status_code in [413]:
-            raise HTTPException(
-                status_code=413, 
-                detail="The file size is too large, consider uploading the file in different batches."
-            )
-    
     except Exception as e:
-        print(f"Upload error: {e}")
+        print(f"Background upload pipeline failed for {filename}: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-            
+        engine.pipeline_status = {
+            "stage": "error", "operation": "upload",
+            "week": week_key, "filename": filename, "error": str(e),
+        }
+
+
+@app.post("/api/upload")
+async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_mentions: int = 1):
+    """
+    Upload a PDF. Only the fast, local, deterministic steps (read the file,
+    save it to disk, parse its text, assign a week) happen before this
+    responds. Extraction and graph building happen afterward in a
+    background task (see _run_upload_pipeline) — this endpoint always
+    returns quickly regardless of how much Groq rate-limit backoff the
+    pipeline needs. Poll GET /api/upload/status for progress.
+
+    max_nodes: optional hard cap on distinct concepts admitted from this
+    document (default: no cap).
+
+    min_mentions: "key concept" threshold for pruning low-value concepts
+    after extraction. Default 1 == pruning disabled. Raise to 2+ to drop
+    concepts extracted only once and not in seed_entities.
+    """
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="The AI Service is temporarily down. Please try again later."
+        )
+
+    global engine
+    upload_start = time.time()
+
+    if engine is None:
+        engine = StudyGraphEngine(get_collection(1))
+
+    try:
+        file_bytes = await file.read()
+        safe_name = Path(file.filename).name
+        upload_path = UPLOAD_DIR / safe_name
+        upload_path.write_bytes(file_bytes)
+        pages = engine.extract_text(file_bytes, safe_name)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Assigned synchronously (not inside the background task) so a second
+    # upload started before this one finishes still gets a distinct week.
+    current_week_key = f"Week {engine.week_counter}"
+    engine.week_counter += 1
+    engine.uploads_by_week[current_week_key] = file.filename
+
+    engine.pipeline_status = {
+        "stage": "running", "operation": "upload",
+        "week": current_week_key, "filename": file.filename, "error": None,
+    }
+    asyncio.create_task(
+        _run_upload_pipeline(engine, pages, file.filename, current_week_key, upload_start, max_nodes, min_mentions)
+    )
+
+    return {
+        "status": "processing",
+        "message": f"Received {len(pages)} pages — processing in the background.",
+        "week": current_week_key,
+        "filename": file.filename,
+    }
+
+
+@app.get("/api/upload/status")
+async def get_pipeline_status():
+    """Poll target for the background upload pipeline (see StudyGraphEngine.pipeline_status)."""
+    global engine
+    if engine is None:
+        return {"stage": "idle"}
+    return engine.pipeline_status
+
 @app.get("/api/files/{filename}")
 async def serve_uploaded_file(filename: str):
     safe_name = Path(filename).name
@@ -904,10 +1042,13 @@ async def serve_uploaded_file(filename: str):
 
 @app.get("/api/graph")
 async def get_graph():
-    """Get current knowledge graph (uses fused graph if available)"""
+    """Get current knowledge graph (uses fused graph if available), with
+    week-based color coding for the evolution feature."""
     global engine
     if engine is None:
         return GraphResponse(nodes=[], edges=[])
+
+    week_color_map = evolution_data.get_week_color_map(engine)
 
     working_edges = engine.fused_edges if engine.fused_edges else engine.edges
 
@@ -922,17 +1063,37 @@ async def get_graph():
         concept_relations[from_node].append(f"{e['relation']} → {to_node}")
         concept_relations[to_node].append(f"{from_node} → {e['relation']}")
 
-    nodes = []
+    # collapse duplicate concept entries by canonical name, tracking weeks/sources
+    aggregated_concepts = {}
     for c in engine.concepts:
         canonical_name = engine.canonical_nodes.get(c["name"], c["name"])
-        if not any(n["name"] == canonical_name for n in nodes):
-            nodes.append({
-                "id": canonical_name.replace(" ", "_"),
-                "name": canonical_name,
-                "source": [{"file": c["source"]}],  # format as object with file
-                "description": "; ".join(concept_relations.get(canonical_name, []))[:150] or canonical_name,
-                "is_canonical": canonical_name in engine.canonical_nodes.values()
-            })
+        if canonical_name not in aggregated_concepts:
+            aggregated_concepts[canonical_name] = {"sources": set(), "weeks": set()}
+        aggregated_concepts[canonical_name]["sources"].add(c["source"])
+        week = c.get("week")
+        if week:
+            aggregated_concepts[canonical_name]["weeks"].add(week)
+
+    nodes = []
+    for name, data in aggregated_concepts.items():
+        appears_in_weeks = len(data["weeks"])
+        node_color = evolution_data.DEFAULT_COLOR
+
+        if appears_in_weeks > 1:
+            node_color = evolution_data.MULTI_WEEK_COLOR
+        elif appears_in_weeks == 1:
+            first_week = list(data["weeks"])[0]
+            node_color = week_color_map.get(first_week, evolution_data.DEFAULT_COLOR)
+
+        nodes.append({
+            "id": name.replace(" ", "_"),
+            "name": name,
+            "source": [{"file": s} for s in data["sources"]],
+            "description": "; ".join(concept_relations.get(name, []))[:150] or name,
+            "is_canonical": name in engine.canonical_nodes.values(),
+            "color": node_color,
+            "appears_in_weeks": appears_in_weeks,
+        })
 
     valid_node_ids = {n["id"] for n in nodes}
 
@@ -969,11 +1130,18 @@ async def get_graph():
         "inferred_edges": len(engine.inferred_edges)
     })
 
+    legend = {
+        "weeks": [{"week": week, "color": color} for week, color in week_color_map.items()],
+        "multi_week": {"label": "Spans multiple weeks", "color": evolution_data.MULTI_WEEK_COLOR},
+        "no_week_data": {"label": "No week data", "color": evolution_data.DEFAULT_COLOR},
+    }
+
     return {
         "nodes": nodes,
         "edges": edges,
         "is_fused": bool(engine.fused_edges),
         "graph_saved_to": graph_save_path,
+        "legend": legend,
         "stats": {
             "canonical_nodes": len(engine.canonical_nodes),
             "fused_edges": len(engine.fused_edges),
@@ -985,29 +1153,25 @@ async def get_graph():
 @app.post("/api/query")
 async def query_rag(request: QueryRequest):
     """Query the knowledge graph with RAG"""
-    # in case of unconfigured groq api key
     if not os.getenv("GROQ_API_KEY"):
         raise HTTPException(
             status_code=503,
             detail="The AI Service is temporarily down. Please try again later."
-        ) 
+        )
     global engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
-    
-    # need to review this section again (status codes)
+
     try:
         result = engine.rag_query(request.query)
         return result
     except HTTPException as e:
-        # This is an error on our end while accessing the groq api
         if e.status_code in [401, 402, 403, 429]:
             raise HTTPException(
-                status_code=503, 
+                status_code=503,
                 detail="The service is temporarily down. Please try again soon."
-                )
+            )
     except Exception as e:
-        #general error (need to make this more full proof)
         raise HTTPException(
             status_code=500,
             detail=str(e)
@@ -1047,6 +1211,57 @@ async def fuse_knowledge_graph():
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- Concept-evolution endpoints ---
+
+@app.get("/api/evolution/graph")
+async def get_evolution_graph_data(week: str = None):
+    """Get the main evolution graph data, optionally filtered by week."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
+    return evolution_data.get_graph_data(engine, week)
+
+
+@app.get("/api/evolution/concept/{concept_name}/description")
+async def get_evolution_concept_description(concept_name: str):
+    """Cheap tier: a single grounded summary from the concept's
+    earliest-appearance week only. Meant to back a plain node click."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
+    description = await evolution_data.get_concept_description(engine, concept_name, client)
+    if not description:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return description
+
+
+@app.get("/api/evolution/concept/{concept_name}")
+async def get_evolution_concept_detail(concept_name: str):
+    """Full tier: every week's summary plus every week-to-week comparison.
+    Generates and caches lazily on first request — meant to back the
+    explicit "show concept evolution" action."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
+    details = await evolution_data.get_concept_detail(engine, concept_name, client)
+    if not details:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return details
+
+
+@app.get("/api/evolution/subgraph/{concept_name}")
+async def get_evolution_concept_subgraph(concept_name: str):
+    """Get the D3-ready subgraph for a concept's weekly evolution."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
+    subgraph = evolution_data.get_concept_subgraph(engine, concept_name)
+    if not subgraph:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return subgraph
+
 
 if __name__ == "__main__":
     import uvicorn

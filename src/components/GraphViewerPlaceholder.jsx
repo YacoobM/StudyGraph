@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { getGraph } from '../services/api'
+import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import './GraphViewerPlaceholder.css'
 
 /* ==========================================================================
@@ -50,17 +50,23 @@ import './GraphViewerPlaceholder.css'
  *
  * ========================================================================== */
 
-export default function GraphViewerPlaceholder({ onClose }) {
-  const [graph, setGraph] = useState(null)
-  const [loading, setLoading] = useState(true)
+export default function GraphViewerPlaceholder({ graph, onClose }) {
+  const navigate = useNavigate()
+  const [selectedNode, setSelectedNode] = useState(null)
 
-  useEffect(() => {
-    let mounted = true
-    getGraph()
-      .then((data) => { if (mounted) { setGraph(data); setLoading(false) } })
-      .catch(() => { if (mounted) setLoading(false) })
-    return () => { mounted = false }
-  }, [])
+  const handleNodeClick = (node) => {
+    setSelectedNode(selectedNode?.id === node.id ? null : node)
+  }
+
+  const handleViewEvolution = (node) => {
+    if (!node || !node.properties.name) return
+    navigate(`/evolution?concept=${encodeURIComponent(node.properties.name)}`)
+  }
+
+  const loading = !graph; // Loading is true if no graph prop is passed
+  const nodes = graph?.nodes || [];
+  const relationships = graph?.relationships || [];
+  const stats = graph?.stats || { total_nodes: 0, total_relationships: 0 };
 
   return (
     <div className="gvp-overlay">
@@ -71,7 +77,7 @@ export default function GraphViewerPlaceholder({ onClose }) {
             <div className="gvp-subtitle">
               {loading
                 ? 'Loading graph data…'
-                : `${graph?.stats?.total_nodes ?? 0} nodes · ${graph?.stats?.total_relationships ?? 0} relationships`}
+                : `${stats.total_nodes} nodes · ${stats.total_relationships} relationships`}
             </div>
           </div>
           <button className="gvp-close" onClick={onClose}>×</button>
@@ -81,59 +87,59 @@ export default function GraphViewerPlaceholder({ onClose }) {
           {/* ================================================================
               ⬇️  VISUALIZATION TEAMMATE: REPLACE THIS BLOCK  ⬇️
               ================================================================ */}
-          <div className="gvp-placeholder">
-            <div className="gvp-icon">
-              <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                <circle cx="32" cy="16" r="8" fill="#22d3ee" opacity="0.9"/>
-                <circle cx="13" cy="46" r="6" fill="#f9a8d4" opacity="0.9"/>
-                <circle cx="51" cy="46" r="6" fill="#a3e635" opacity="0.9"/>
-                <circle cx="48" cy="20" r="5" fill="#fbbf24" opacity="0.9"/>
-                <line x1="32" y1="24" x2="13" y2="40" stroke="#475569" strokeWidth="2"/>
-                <line x1="32" y1="24" x2="51" y2="40" stroke="#475569" strokeWidth="2"/>
-                <line x1="32" y1="20" x2="44" y2="20" stroke="#475569" strokeWidth="2"/>
-                <line x1="19" y1="46" x2="45" y2="46" stroke="#475569" strokeWidth="2"/>
-              </svg>
-            </div>
-            <h3>Graph visualization goes here</h3>
-            <p className="gvp-note">
-              This is <strong>INTEGRATION POINT #2</strong>. The visualization
-              module renders into this area using the graph data shown below.
-            </p>
-
-            {/* A simple readout of the data, proving the contract works.
-                The visualization teammate can delete this once their
-                renderer is in place. */}
+          <div className="gvp-placeholder gvp-data-with-details">
             {loading ? (
               <div className="gvp-loading">Fetching graph…</div>
-            ) : graph ? (
-              <div className="gvp-data">
-                <div className="gvp-data-col">
-                  <div className="gvp-data-title">Nodes ({graph.nodes.length})</div>
-                  <ul>
-                    {graph.nodes.slice(0, 8).map((n) => (
-                      <li key={n.id}>
-                        <span className="gvp-dot" style={{ background: n.color }} />
-                        <span className="gvp-name">{n.properties?.name || n.properties?.fileName || n.label}</span>
-                        <span className="gvp-label">{n.label}</span>
-                      </li>
-                    ))}
-                  </ul>
+            ) : nodes.length > 0 ? (
+              <>
+                <div className="gvp-data">
+                  <div className="gvp-data-col">
+                    <div className="gvp-data-title">Nodes ({nodes.length})</div>
+                    <ul>
+                      {nodes.slice(0, 15).map((n) => (
+                        <li key={n.id} onClick={() => handleNodeClick(n)} className={selectedNode?.id === n.id ? 'selected' : ''}>
+                          <span className="gvp-dot" style={{ background: n.color }} />
+                          <span className="gvp-name">{n.properties?.name || n.label}</span>
+                          <span className="gvp-label">{n.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="gvp-data-col">
+                    <div className="gvp-data-title">Relationships ({relationships.length})</div>
+                    <ul>
+                      {relationships.slice(0, 15).map((r) => (
+                        <li key={r.id}>
+                          <code>{r.source}</code>
+                          <span className="gvp-rel">→ {r.type} →</span>
+                          <code>{r.target}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-                <div className="gvp-data-col">
-                  <div className="gvp-data-title">Relationships ({graph.relationships.length})</div>
-                  <ul>
-                    {graph.relationships.slice(0, 8).map((r) => (
-                      <li key={r.id}>
-                        <code>{r.source}</code>
-                        <span className="gvp-rel">→ {r.type} →</span>
-                        <code>{r.target}</code>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+
+                {selectedNode && (
+                  <div className="gvp-details-panel">
+                    <h4>{selectedNode.properties.name}</h4>
+                    <p>Appears in <strong>{selectedNode.properties.appears_in_weeks}</strong> week(s).</p>
+                    
+                    {selectedNode.properties.appears_in_weeks > 1 && (
+                      <button className="btn-view-evolution" onClick={() => handleViewEvolution(selectedNode)}>
+                        View Concept Evolution
+                      </button>
+                    )}
+
+                    <h5>Properties</h5>
+                    <pre>{JSON.stringify(selectedNode.properties, null, 2)}</pre>
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="gvp-loading">No graph data available.</div>
+              <div className="gvp-loading">
+                <h3>Graph is Empty</h3>
+                <p>Upload documents and generate a graph to see a visualization.</p>
+              </div>
             )}
           </div>
           {/* ================================================================
