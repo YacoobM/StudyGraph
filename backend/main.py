@@ -15,6 +15,7 @@ import time
 import asyncio
 from chromadb import Client
 from schemas import *
+from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
 
 load_dotenv()
 
@@ -44,6 +45,8 @@ app.add_middleware(
 )
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+ce_client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
 
 engine = None
 
@@ -116,6 +119,29 @@ def get_collection(project_id, user_id="default"):
         name=f"user_{user_id}_project_{project_id}"
     )
     
+def call_groq(prompt, text_batch):
+    return client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text_batch},
+        ],
+        model="llama-3.3-70b-versatile",
+        response_format={"type": "json_object"},
+    )
+
+def call_cerebras(prompt, text_batch):
+    return ce_client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text_batch},
+        ],
+        model="gemma-4-31b",
+        max_completion_tokens=2000,
+    )
+
+def call_llm(prompt, text_batch):
+    return call_groq(prompt, text_batch)
+    
 class StudyGraphEngine:
     def __init__(self, collections):
         self.concepts = []
@@ -141,28 +167,33 @@ class StudyGraphEngine:
         self.seed_generation_time = round(time.time() - start, 3)
 
     def _generate_seeds_llm(self, all_pages):
-        """
-        LLM-based seed generation: Uses Groq to identify top 20 concepts.
-        Original method — unchanged from initial implementation.
-        """
         full_text = " ".join([p.get("text", "") for p in all_pages])
         if not full_text.strip():
             return
 
-        seed_prompt = """Analyze the academic material and identify the TOP 20 most fundamental and important concepts.
-These should be core topics that the entire material revolves around. Return as JSON:
-{"seed_concepts": ["concept1", "concept2", ..., "concept20"]}
-Only return the JSON object, no other text."""
+        seed_prompt = """You are a JSON-only engine. Respond with ONLY a valid JSON object, no markdown, no explanation.
+
+    Analyze the academic material and identify the TOP 20 most fundamental concepts.
+    Respond with ONLY this structure:
+    {"seed_concepts": ["concept1", "concept2", "concept3"]}"""
 
         try:
-            response = client.chat.completions.create(
-                messages=[
-                    {"role": "user", "content": f"{seed_prompt}\n\nMaterial:\n{full_text[:5000]}"}
-                ],
-                model="llama-3.3-70b-versatile",
-                response_format={"type": "json_object"},
-            )
-            seed_json = json.loads(response.choices[0].message.content)
+            response = call_llm(seed_prompt, f"Material:\n{full_text[:5000]}")
+            content = response.choices[0].message.content
+            
+            if not content or not content.strip():
+                print("Empty response from LLM for seed generation")
+                self.seed_entities = []
+                return
+                
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+
+            seed_json = json.loads(content)
             self.seed_entities = [s.lower().strip() for s in seed_json.get("seed_concepts", [])]
             print(f"LLM generated {len(self.seed_entities)} seed entities: {self.seed_entities}")
         except Exception as e:
@@ -221,61 +252,68 @@ Only return the JSON object, no other text."""
         return chunks
 
     async def extract_knowledge(self, text_batch):
-        """
-        Extract concepts and relationships asynchronously.
-        Validates output against schema before returning.
-        """
-        async with EXTRACTION_SEMAPHORE:
-            if self.seed_entities:
-                seed_list = ", ".join(self.seed_entities[:10])
-                prompt = f"""Extract COMPREHENSIVE academic concepts and relationships, PRIORITIZING these key entities: {seed_list}.
-    Focus on relationships that directly involve these seeds or their immediate dependencies.
-    Extract ALL meaningful concepts and relationships in the text - be thorough and find multiple connections.
-    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
-    Return strict JSON:
-    {{"concepts": [], "relationships": [{{"from": "", "to": "", "relation": ""}}]}}
-    Only return valid JSON, no other text."""
-            else:
-                prompt = """Extract COMPREHENSIVE academic concepts and relationships from the text.
-    Find and include ALL meaningful concepts and relationships - be thorough.
-    Include relationship types: prerequisite, causes, part_of, explains, enables, related_to
-    Return JSON:
-    {"concepts": [], "relationships": [{"from": "", "to": "", "relation": ""}]}
-    Only return valid JSON, no other text."""
+        raw_data = None  # ← initialize here so except blocks can always reference it
+        
+        if self.seed_entities:
+            seed_list = ", ".join(self.seed_entities[:10])
+            prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
-            try:
-                # Run sync Groq call in thread pool
-                def call_groq():
-                    return client.chat.completions.create(
-                        messages=[
-                            {"role": "system", "content": prompt},
-                            {"role": "user", "content": text_batch},
-                        ],
-                        model="llama-3.3-70b-versatile",
-                        response_format={"type": "json_object"},
-                    )
-                
-                chat_completion = await asyncio.to_thread(call_groq)
-                raw_data = json.loads(chat_completion.choices[0].message.content)
-                
-                # Validate against schema
-                validated = ExtractionResult(**raw_data)
-                print("Done")
-                return {
-                    "concepts": validated.concepts,
-                    "relationships": [
-                        {"from": r.from_, "to": r.to, "relation": r.relation}
-                        for r in validated.relationships
-                    ]
-                }
-            except ValueError as e:
-                print(f"Extraction validation error: {e}")
-                print(f"Raw data was: {raw_data}")
+    Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.
+    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+
+    Respond with ONLY this exact JSON structure:
+    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables"}}]}}"""
+        else:
+            prompt = """You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
+
+    Extract academic concepts and relationships from the text.
+    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+
+    Respond with ONLY this exact JSON structure:
+    {"concepts": ["concept1", "concept2"], "relationships": [{"from": "concept1", "to": "concept2", "relation": "enables"}]}"""
+
+        try:
+            async with EXTRACTION_SEMAPHORE:
+                response = await asyncio.to_thread(call_llm, prompt, text_batch)
+            content = response.choices[0].message.content
+            
+            if not content or not content.strip():
+                print("Cerebras returned empty response")
                 return {"concepts": [], "relationships": []}
-            except Exception as e:
-                print(f"Error calling Groq: {e}")
-                print(f"Raw data was: {raw_data if 'raw_data' in locals() else 'N/A'}")
-                return {"concepts": [], "relationships": []}
+            
+            # Strip markdown fences if the model wraps output anyway
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+            
+            raw_data = json.loads(content)
+            validated = ExtractionResult(**raw_data)
+            print("Done")
+            return {
+                "concepts": validated.concepts,
+                "relationships": [
+                    {"from": r.from_, "to": r.to, "relation": r.relation}
+                    for r in validated.relationships
+                ]
+            }
+        except ValueError as e:
+            print(f"Extraction validation error: {e}")
+            print(f"Raw data was: {raw_data}")
+            return {"concepts": [], "relationships": []}
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {e}")
+            print(f"Raw content was: {response.choices[0].message.content[:200] if response else 'no response'}")
+            return {"concepts": [], "relationships": []}
+        except RateLimitError or RLE as e:
+            print(e)
+            return {"concepts": [], "relationships": []}
+        except Exception as e:
+            print(f"Error calling LLM: {e}")
+            print(f"Raw data was: {raw_data}")
+            return {"concepts": [], "relationships": []}
 
     def add_to_graph(self, raw_data, doc_name):
         if not raw_data:

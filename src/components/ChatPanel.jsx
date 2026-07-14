@@ -4,6 +4,14 @@ import './ChatPanel.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+const getDocumentUrl = (source, pageNumber) => {
+  const filename = source?.fileName || source?.file
+  if (!filename) return null
+  const safeFileName = encodeURIComponent(filename)
+  const targetPage = pageNumber || source?.page_number || 1
+  return `${API_BASE_URL}/api/files/${safeFileName}#page=${targetPage}`
+}
+
 export default function ChatPanel({ onClose, embedded = false }) {
   const [messages, setMessages] = useState([
     {
@@ -19,14 +27,6 @@ export default function ChatPanel({ onClose, embedded = false }) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, busy])
-
-  const getDocumentUrl = (source, pageNumber) => {
-    const filename = source?.fileName || source?.file
-    if (!filename) return null
-    const safeFileName = encodeURIComponent(filename)
-    const targetPage = pageNumber || source?.page_number || 1
-    return `${API_BASE_URL}/api/files/${safeFileName}#page=${targetPage}`
-  }
 
   const openCitation = (source, pageNumber) => {
     const url = getDocumentUrl(source, pageNumber)
