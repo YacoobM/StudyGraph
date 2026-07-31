@@ -1,18 +1,28 @@
 import React from "react";
+import ConceptEvolutionDetails from "./ConceptEvolutionDetails";
 
 /*
  * NodeDetails
  * Side panel shown when a graph node is selected. Shows the cheap
  * "what is this concept" description (one grounded summary from its
  * earliest-appearance week) plus sources/connections — all either free or
- * a single LLM call. The full evolution breakdown (every week's summary,
- * every week-to-week comparison, the timeline) is deliberately NOT shown
- * here — for a multi-week concept, "View Full Evolution" navigates to the
- * dedicated Evolution page instead, so that expensive tier only ever
- * generates when explicitly asked for.
- * connections: [{ nodeName, label, direction, strength }]
+ * a single LLM call.
+ *
+ * "View Full Evolution" expands the expensive tier (every week's summary +
+ * every week-to-week comparison + the mini timeline subgraph) inline, right
+ * in this same panel, on that one click — it used to navigate to a separate
+ * /evolution page and ask for the same thing again via a second "Show
+ * Concept Evolution" button; that page (with its own independent full-graph
+ * fetch and layout) is gone, folded into here, so there's one action, one
+ * click, and no separate graph to lose on the way back.
  */
-export default function NodeDetails({ node, onClose, connections, conceptDescription, detailsLoading, onViewEvolution }) {
+export default function NodeDetails({
+  node, onClose, connections,
+  conceptDescription, detailsLoading,
+  evolution, evolutionLoading, onShowEvolution,
+  onRegenerate, regenerating,
+  onOpenSource,
+}) {
   return (
     <div className={`kg-side-panel ${node ? "open" : ""}`}>
       {node && (
@@ -24,31 +34,49 @@ export default function NodeDetails({ node, onClose, connections, conceptDescrip
             </button>
           </div>
 
-          <div className="section-title">DESCRIPTION</div>
+          <div className="section-title">
+            DESCRIPTION
+            {!detailsLoading && conceptDescription && (
+              <button
+                className="regenerate-btn"
+                onClick={onRegenerate}
+                disabled={regenerating}
+                title="Re-generate this description from the source material"
+                style={{ marginLeft: "auto" }}
+              >
+                {regenerating ? "Regenerating…" : "⟳ Regenerate"}
+              </button>
+            )}
+          </div>
           {detailsLoading ? (
             <p style={{ color: 'var(--gv-text-secondary)'}}>Loading details...</p>
           ) : (
-            <p style={{ fontSize: "0.9rem", lineHeight: 1.5, marginBottom: "16px" }}>
-              {/* A grounded definition of what the concept IS, from its earliest
-                  appearance — one cheap LLM call, distinct from the full
-                  evolution breakdown, which lives on the Evolution page. */}
-              {conceptDescription?.summary || node.description}
-            </p>
+            <>
+              {conceptDescription?.is_fallback && (
+                <p className="fallback-warning">
+                  ⚠ Groq couldn't summarize this one — showing a raw excerpt from the source instead. Try Regenerate.
+                </p>
+              )}
+              <p style={{ fontSize: "0.9rem", lineHeight: 1.5, marginBottom: "16px" }}>
+                {/* A grounded definition of what the concept IS, from its earliest
+                    appearance — one cheap LLM call, distinct from the full
+                    evolution breakdown below. */}
+                {conceptDescription?.summary || node.description}
+              </p>
+            </>
           )}
 
-          {node.appears_in_weeks > 1 && !detailsLoading && (
+          {node.appears_in_weeks > 1 && !detailsLoading && !evolution && (
             <button
               className="view-evolution-btn"
-              style={{
-                marginBottom: "24px", background: "none", border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)", color: "var(--text-1)", padding: "6px 12px",
-                fontSize: "0.85rem", cursor: "pointer",
-              }}
-              onClick={() => onViewEvolution(node.name)}
+              disabled={evolutionLoading}
+              onClick={() => onShowEvolution(node.name)}
             >
-              View Full Evolution →
+              {evolutionLoading ? 'Loading concept evolution…' : 'View Full Evolution →'}
             </button>
           )}
+
+          {evolution && <ConceptEvolutionDetails evolution={evolution} />}
 
           <div className="section-title">
             SOURCES
@@ -60,10 +88,15 @@ export default function NodeDetails({ node, onClose, connections, conceptDescrip
           </div>
           <div className="source-grid">
             {node.source.map((src, i) => (
-              <div key={i} className="source-item">
+              <div
+                key={i}
+                className="source-item source-item-clickable"
+                onClick={() => onOpenSource(src, node.name)}
+                title="Open this source"
+              >
                 <span className="source-file">{src.file}</span>
                 <span className="source-page">
-                  {src.page ? `Pg. ${src.page}` : "Page unknown"}
+                  {src.pageLabel ? `Pg. ${src.pageLabel}` : "Page unknown"}
                 </span>
               </div>
             ))}

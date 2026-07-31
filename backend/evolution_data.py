@@ -102,7 +102,7 @@ def get_graph_data(engine, week=None):
     return {"nodes": nodes, "edges": edges, "legend": legend}
 
 
-MAX_RETRIES = 4
+MAX_RETRIES = 40
 BATCH_SIZE = 6  # concepts per LLM call. Was 3, tuned for llama-3.1-8b-instant's
                 # 6,000 TPM cap — a 15-concept batch there was ~10,500 tokens,
                 # rejected outright (413) no matter how many times it's
@@ -448,8 +448,11 @@ async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pair
 
     summaries = await summarize_weeks_batch(client, summary_requests, engine)
     for req in summary_requests:
+        key = (req["concept_name"], req["week"])
         text = summaries.get(req["key"])
-        if not text:
+        if text:
+            engine.degraded_summary_keys.discard(key)
+        else:
             # Cache a fallback too — otherwise a failed generation (e.g.
             # Groq already rate-limited from a big batch) stays permanently
             # "missing", and every later view of this concept re-fires a
@@ -475,7 +478,8 @@ async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pair
                     if c["name"] == req["concept_name"] and c["week"] == req["week"]
                 })
                 text = f"Appeared in document(s): {', '.join(docs) if docs else 'unknown'} — no excerpt could be retrieved."
-        engine.concept_week_summaries[(req["concept_name"], req["week"])] = text
+            engine.degraded_summary_keys.add(key)
+        engine.concept_week_summaries[key] = text
 
 
 def _dedupe_summary_targets(raw_week_pairs, engine):
@@ -562,15 +566,19 @@ async def get_concept_description(engine, concept_name, client):
     raw_pairs = {(occ["name"], occ["week"]) for occ in occurrences if occ["week"] == first_week}
     await precompute_week_summaries(engine, client, raw_pairs, summary_pairs=_dedupe_summary_targets(raw_pairs, engine))
 
-    summary = next(
-        (engine.concept_week_summaries[(raw, w)] for raw, w in raw_pairs if (raw, w) in engine.concept_week_summaries),
-        None,
-    ) or f"Appeared in document(s): {', '.join(set(weeks_data_raw[first_week]))}"
+    used_key = next((key for key in raw_pairs if key in engine.concept_week_summaries), None)
+    summary = (
+        engine.concept_week_summaries[used_key] if used_key
+        else f"Appeared in document(s): {', '.join(set(weeks_data_raw[first_week]))}"
+    )
 
     return {
         "concept_name": concept_name,
         "week": first_week,
         "summary": summary,
+        # True when Groq generation failed and this is the raw-excerpt fallback
+        # rather than an actual summary — see precompute_week_summaries.
+        "is_fallback": bool(used_key and used_key in engine.degraded_summary_keys),
         "appears_in_weeks": len(weeks_data_raw),
     }
 
@@ -626,12 +634,16 @@ async def get_concept_detail(engine, concept_name, client):
 
     weeks_data = []
     for week in sorted_weeks:
-        summary = next(
-            (engine.concept_week_summaries[(raw, w)] for raw, w in raw_week_pairs
-             if w == week and (raw, w) in engine.concept_week_summaries),
+        used_key = next(
+            ((raw, w) for raw, w in raw_week_pairs if w == week and (raw, w) in engine.concept_week_summaries),
             None,
         )
-        weeks_data.append({"week": week, "summary": summary or fallback_week_summary(week)})
+        summary = engine.concept_week_summaries[used_key] if used_key else None
+        weeks_data.append({
+            "week": week,
+            "summary": summary or fallback_week_summary(week),
+            "is_fallback": bool(used_key and used_key in engine.degraded_summary_keys),
+        })
 
     # Comparisons only make sense for concepts spanning more than one week,
     # and are cached under the canonical concept_name (not per raw spelling)

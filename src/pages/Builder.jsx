@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import {
-  listDocuments, uploadDocument, deleteDocument, generateGraph,
+  listDocuments, uploadDocument, deleteDocument, generateGraph, fetchGraph,
 } from '../services/api'
 import GraphViewer from '../components/GraphViewer.jsx'
 import ChatPanel from '../components/ChatPanel.jsx'
@@ -43,6 +43,21 @@ export default function Builder() {
   }
 
   useEffect(() => { loadDocs() }, [])
+
+  // The backend keeps one global in-memory graph for the life of the
+  // process — it doesn't disappear just because this component remounts
+  // (e.g. coming back from viewing a concept's evolution used to navigate
+  // to a separate page and back). Restore it here instead of leaving
+  // graphData empty until the user regenerates from scratch.
+  useEffect(() => {
+    fetchGraph()
+      .then((result) => {
+        if (result?.nodes?.length) {
+          setGraphData({ nodes: result.nodes, edges: result.edges || [], legend: result.legend || null })
+        }
+      })
+      .catch(() => {}) // no graph yet (fresh backend) — nothing to restore
+  }, [])
 
   const onFiles = async (files) => {
     const list = Array.from(files || [])

@@ -4,7 +4,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Landing from './pages/Landing.jsx'
 import Login from './pages/Login.jsx'
 import Builder from './pages/Builder.jsx'
-import Evolution from './pages/Evolution.jsx'
 import { AuthProvider, RequireAuth } from './auth.jsx'
 import './styles/global.css'
 
@@ -20,14 +19,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             element={
               <RequireAuth>
                 <Builder />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/evolution"
-            element={
-              <RequireAuth>
-                <Evolution />
               </RequireAuth>
             }
           />
