@@ -47,3 +47,4 @@ dist/
 .idea/
 
 backend/outputs
+backend/uploads

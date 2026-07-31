@@ -1,7 +1,23 @@
 import sys
+from pathlib import Path
+from collections import defaultdict, Counter
+
+# Windows defaults stdout/stderr to the system ANSI codepage (cp1252), not
+# UTF-8 — any print() of extracted PDF text hits this the moment a document
+# contains a character outside that codepage (e.g. the "fl"/"fi" typographic
+# ligatures common in professionally-typeset academic PDFs), crashing the
+# whole background upload pipeline with UnicodeEncodeError. errors="replace"
+# rather than just switching to utf-8 so an unprintable character degrades
+# to "?" instead of still being able to crash a misconfigured terminal.
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
 import json
@@ -39,6 +55,12 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Uploaded PDFs, kept around (keyed by sanitized filename, same identity used
+# everywhere else as doc_name) so a concept's source can be opened later —
+# previously the bytes were read for text extraction and then discarded.
+UPLOADS_DIR = Path(__file__).parent / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+
 app = FastAPI(
     title="StudyGraph API",
     description="FastAPI backend for StudyGraph LLM integration",
@@ -47,7 +69,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    # Vite picks the next free port whenever its default is already taken
+    # (3000 -> 3001 -> 3002 ...), so a fixed origin list breaks the moment
+    # something else is holding the usual port — match any localhost port
+    # instead of hardcoding one.
+    allow_origin_regex=r"http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,7 +81,10 @@ app.add_middleware(
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-ce_client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
+engine = None
+
+EXTRACTION_SEMAPHORE = asyncio.Semaphore(5)
+EXTRACTION_MAX_RETRIES = 40  # matches evolution_data.py's MAX_RETRIES
 
 engine = None
 
@@ -182,6 +211,21 @@ class StudyGraphEngine:
         # finishes overwrites this rather than queuing. Fine for a
         # single-user setup; not safe under concurrent uploads.
         self.pipeline_status = {"stage": "idle"}
+
+        # --- Concept-evolution cache ---
+        # Populated eagerly, during the upload/fuse pipeline itself
+        # (see upload_pdf and fuse_knowledge_graph), using the same
+        # get_concept_detail() that used to run lazily on first click. Once
+        # generated, a (concept, week) pair is cached forever — viewing it
+        # again, from any endpoint, costs nothing.
+        self.concept_week_chunks = {}                        # (name, week) -> retrieved chunk list
+        self.concept_week_summaries = {}                      # (name, week) -> LLM summary text
+        self.concept_consecutive_comparisons = {}              # canonical concept_name -> [{from_week, to_week, comparison}]
+        self.concept_overall_comparison = {}                   # canonical concept_name -> comparison text (first week vs. latest week)
+        # (name, week) pairs whose concept_week_summaries entry is the raw-excerpt
+        # fallback (Groq generation failed) rather than an actual LLM summary — lets
+        # the API flag it and the /regenerate endpoint know what's worth retrying.
+        self.degraded_summary_keys = set()
 
     def generate_seeds(self, all_pages):
         """
@@ -344,10 +388,7 @@ class StudyGraphEngine:
             print(f"Raw data was: {raw_data}")
             return {"concepts": [], "relationships": []}
 
-    def add_to_graph(self, raw_data, doc_name, week_key=None, max_nodes_per_doc=None):
-        """No global dedupe by name — a concept can have one entry per week
-        so evolution tracking sees repeat appearances. /api/graph collapses
-        duplicates by name for display."""
+    def add_to_graph(self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None):
         if not raw_data:
             return
         for c in raw_data.get("concepts", []):
@@ -361,7 +402,8 @@ class StudyGraphEngine:
                 if name not in doc_names and len(doc_names) >= max_nodes_per_doc:
                     continue
                 doc_names.add(name)
-            self.concepts.append({"name": name, "source": doc_name, "week": week_key})
+            # We allow duplicate concept names, as they might come from different weeks/docs
+            self.concepts.append({"name": name, "source": doc_name, "week": week_key, "pages": pages or []})
 
         for r in raw_data.get("relationships", []):
             from_node = r.get("from", "").lower().strip()
@@ -887,11 +929,23 @@ async def health_check():
 
 async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, max_nodes, min_mentions):
     """
-    Everything slow and LLM-dependent about an upload: seed generation,
-    chunk extraction, and graph building. Runs as a background task with no
-    HTTP request attached, so Groq rate-limit retries/backoff can take as
-    long as they need without risking a request timeout or leaving the
-    browser hanging on a spinner. Poll GET /api/upload/status for progress.
+    Everything slow and LLM-dependent about an upload: seed generation (first
+    upload only), chunk extraction, graph building, and — for every concept
+    that survives pruning — its cheap-tier description (see
+    evolution_data.precompute_week_summaries), so a node's DESCRIPTION and
+    SOURCES are both already sitting in cache by the time this pipeline
+    reports "done," rather than firing a live Groq call the first time
+    someone clicks it. Runs as a background task with no HTTP request
+    attached, so Groq rate-limit retries/backoff can take as long as they
+    need without risking a request timeout or leaving the browser hanging on
+    a spinner for minutes — the same freedom a standalone offline script
+    would have.
+
+    The full evolution tier (every week's summary + every week-to-week
+    comparison — see get_concept_detail) is deliberately NOT precomputed
+    here — it's the expensive tier, gated behind the explicit "View Full
+    Evolution" action, since most concepts a document ever surfaces are
+    never asked for their full cross-week history.
     """
     try:
         safe_name = Path(filename).name
@@ -907,13 +961,29 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, 
         ]
         results = await asyncio.gather(*extraction_tasks)
 
+        # Add to graph sequentially (order doesn't matter here). results[i]
+        # came from chunks[:15][i], so chunks[i]'s spanned pages line up with it.
         for i, data in enumerate(results):
-            engine.add_to_graph(data, filename, week_key=week_key, max_nodes_per_doc=max_nodes)
+            engine.add_to_graph(data, filename, week_key, max_nodes_per_doc=max_nodes, pages=chunks[i].get("pages"))
             print(f"Processed chunk {i + 1}/{len(results)}")
 
         if min_mentions > 1:
             engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
 
+        # Description precompute: one cheap-tier summary per surviving
+        # concept from this document, batched (see BATCH_SIZE in
+        # evolution_data) rather than the one-call-per-click this used to
+        # be. Fusion hasn't run yet at this point in the pipeline, so raw
+        # names here are genuinely distinct concepts, not spelling variants
+        # of one canonical concept — no dedup pass needed (contrast
+        # get_concept_detail, which dedupes post-fusion spellings).
+        doc_week_pairs = {
+            (c["name"], c["week"]) for c in engine.concepts
+            if c["source"] == filename and c["week"] == week_key
+        }
+        await evolution_data.precompute_week_summaries(engine, client, doc_week_pairs)
+
+        # Save current graph state (for debugging/persistence)
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
         graph_save_path = save_graph_json(
             [{"name": c["name"], "source": c["source"]} for c in engine.concepts],
@@ -984,34 +1054,42 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
     if engine is None:
         engine = StudyGraphEngine(get_collection(1))
 
+    # Strip any directory components a client could send (path traversal) —
+    # this sanitized name is used as doc_name everywhere below, consistent
+    # with how the rest of the app already treats filename as the document's
+    # identity (there's no separate document-id scheme).
+    safe_filename = Path(file.filename).name
+
     try:
         file_bytes = await file.read()
-        safe_name = Path(file.filename).name
-        upload_path = UPLOAD_DIR / safe_name
-        upload_path.write_bytes(file_bytes)
-        pages = engine.extract_text(file_bytes, safe_name)
+        pages = engine.extract_text(file_bytes, safe_filename)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Persisted so a concept's source can be opened later (see
+    # GET /api/documents/file/{filename}) — previously these bytes were
+    # discarded right after text extraction.
+    (UPLOADS_DIR / safe_filename).write_bytes(file_bytes)
 
     # Assigned synchronously (not inside the background task) so a second
     # upload started before this one finishes still gets a distinct week.
     current_week_key = f"Week {engine.week_counter}"
     engine.week_counter += 1
-    engine.uploads_by_week[current_week_key] = file.filename
+    engine.uploads_by_week[current_week_key] = safe_filename
 
     engine.pipeline_status = {
         "stage": "running", "operation": "upload",
-        "week": current_week_key, "filename": file.filename, "error": None,
+        "week": current_week_key, "filename": safe_filename, "error": None,
     }
     asyncio.create_task(
-        _run_upload_pipeline(engine, pages, file.filename, current_week_key, upload_start, max_nodes, min_mentions)
+        _run_upload_pipeline(engine, pages, safe_filename, current_week_key, max_nodes, upload_start, min_mentions)
     )
 
     return {
         "status": "processing",
         "message": f"Received {len(pages)} pages — processing in the background.",
         "week": current_week_key,
-        "filename": file.filename,
+        "filename": safe_filename,
     }
 
 
@@ -1034,6 +1112,35 @@ async def serve_uploaded_file(filename: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=\"{safe_name}\""},
     )
+
+@app.get("/api/documents/file/{filename}")
+async def get_document_file(filename: str):
+    """Serves a previously-uploaded PDF back (e.g. for the 'open source at page N' viewer)."""
+    safe_name = Path(filename).name  # no path traversal via the URL param either
+    pdf_path = UPLOADS_DIR / safe_name
+    if not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(pdf_path, media_type="application/pdf", filename=safe_name)
+
+
+def _source_page_fields(pages):
+    """
+    pages: sorted list of distinct page ints a concept appeared on within one
+    source file. Returns the jump target for the PDF viewer (first page) plus
+    a compact human-readable label ("43", "43-48", "43, 47, 50") — mirrors
+    StudyGraphEngine.format_citation's range-compaction but without its
+    "p./pp." prefix, since the frontend supplies its own "Pg." label.
+    """
+    if not pages:
+        return {"page": None, "pageLabel": None}
+    if len(pages) == 1:
+        label = str(pages[0])
+    elif pages == list(range(pages[0], pages[-1] + 1)):
+        label = f"{pages[0]}-{pages[-1]}"
+    else:
+        label = ", ".join(str(p) for p in pages)
+    return {"page": pages[0], "pageLabel": label}
+
 
 @app.get("/api/graph")
 async def get_graph():
@@ -1063,8 +1170,14 @@ async def get_graph():
     for c in engine.concepts:
         canonical_name = engine.canonical_nodes.get(c["name"], c["name"])
         if canonical_name not in aggregated_concepts:
-            aggregated_concepts[canonical_name] = {"sources": set(), "weeks": set()}
-        aggregated_concepts[canonical_name]["sources"].add(c["source"])
+            aggregated_concepts[canonical_name] = {"sources": defaultdict(set), "weeks": set()}
+        # Union pages across every chunk this concept was pulled from for this
+        # file — the same concept can turn up in several chunks of one doc.
+        aggregated_concepts[canonical_name]["sources"][c["source"]].update(
+            p for p in (c.get("pages") or []) if isinstance(p, int)
+        )
+        # Defensive check: Only add the week if it exists on the concept object.
+        # This prevents crashes and incorrect counts if data is malformed.
         week = c.get("week")
         if week:
             aggregated_concepts[canonical_name]["weeks"].add(week)
@@ -1080,15 +1193,20 @@ async def get_graph():
             first_week = list(data["weeks"])[0]
             node_color = week_color_map.get(first_week, evolution_data.DEFAULT_COLOR)
 
-        nodes.append({
-            "id": name.replace(" ", "_"),
-            "name": name,
-            "source": [{"file": s} for s in data["sources"]],
-            "description": "; ".join(concept_relations.get(name, []))[:150] or name,
-            "is_canonical": name in engine.canonical_nodes.values(),
-            "color": node_color,
-            "appears_in_weeks": appears_in_weeks,
-        })
+        # Now create the final node object for the response
+        if not any(n["name"] == name for n in nodes):
+            nodes.append({
+                "id": name.replace(" ", "_"),
+                "name": name,
+                "source": [
+                    {"file": f, **_source_page_fields(sorted(page_set))}
+                    for f, page_set in data["sources"].items()
+                ],
+                "description": "; ".join(concept_relations.get(name, []))[:150] or name,
+                "is_canonical": name in engine.canonical_nodes.values(),
+                "color": node_color,
+                "appears_in_weeks": appears_in_weeks,
+            })
 
     valid_node_ids = {n["id"] for n in nodes}
 
@@ -1256,6 +1374,35 @@ async def get_evolution_concept_subgraph(concept_name: str):
     if not subgraph:
         raise HTTPException(status_code=404, detail="Concept not found")
     return subgraph
+
+
+@app.post("/api/evolution/concept/{concept_name}/regenerate")
+async def regenerate_evolution_concept(concept_name: str):
+    """
+    Clears cached summaries/comparisons for a concept so the next request
+    for its description or full detail regenerates them from Groq instead
+    of reusing whatever's cached — the only way to recover a concept whose
+    summary permanently stuck as the raw-excerpt fallback (see
+    precompute_week_summaries) or that's just wrong for any other reason.
+    Retrieval (concept_week_chunks) is left alone since it's free/local and
+    unaffected by why the summary was bad.
+    """
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=404, detail="No graph loaded")
+
+    occurrences = [c for c in engine.concepts if engine.canonical_nodes.get(c["name"], c["name"]) == concept_name]
+    if not occurrences:
+        raise HTTPException(status_code=404, detail="Concept not found")
+
+    raw_week_pairs = {(occ["name"], occ["week"]) for occ in occurrences}
+    for key in raw_week_pairs:
+        engine.concept_week_summaries.pop(key, None)
+        engine.degraded_summary_keys.discard(key)
+    engine.concept_overall_comparison.pop(concept_name, None)
+    engine.concept_consecutive_comparisons.pop(concept_name, None)
+
+    return {"ok": True, "cleared": len(raw_week_pairs)}
 
 
 if __name__ == "__main__":

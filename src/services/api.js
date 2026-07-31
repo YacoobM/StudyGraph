@@ -133,7 +133,28 @@ export async function deleteDocument(id) {
 export async function generateGraph(_docIds, _provider, _model) {
 
   await safeFetchJson(`${API_BASE_URL}/api/fuse`, { method: 'POST' })
+  return fetchGraph()
+}
+
+// Raw GET /api/graph, with no /api/fuse call — used to restore whatever
+// graph the backend already has (e.g. on mount) without re-triggering
+// fusion. Same response shape generateGraph() resolves to.
+export async function fetchGraph() {
   return safeFetchJson(`${API_BASE_URL}/api/graph`, { method: 'GET' })
+}
+
+export function getDocumentFileUrl(filename) {
+  return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`
+}
+
+// Clears cached summaries/comparisons for a concept so the next description/
+// evolution fetch regenerates them from Groq — the way to recover a concept
+// whose cached summary is the raw-excerpt fallback (see is_fallback on
+// fetchConceptDescription/fetchConcept) or is just wrong for any reason.
+export async function regenerateConcept(conceptName) {
+  return safeFetchJson(`${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`, {
+    method: 'POST',
+  })
 }
 
 function buildGraphPayload(raw) {
@@ -191,14 +212,6 @@ export async function askQuestion(question) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: question }),
   })
-}
-
-export async function fetchGraphData(week = null) {
-  const url = new URL(`${API_BASE_URL}/api/evolution/graph`)
-  if (week) {
-    url.searchParams.append('week', week)
-  }
-  return safeFetchJson(url.toString())
 }
 
 // Cheap tier: one grounded summary from the concept's earliest-appearance

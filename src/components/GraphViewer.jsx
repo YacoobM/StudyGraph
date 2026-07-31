@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import GraphCanvas from './GraphCanvas'
 import NodeDetails from './NodeDetails'
 import GraphLegend from './GraphLegend'
-import { fetchConceptDescription } from '../services/api.js'
+import PdfViewerModal from './PdfViewerModal'
+import { fetchConceptDescription, fetchConcept, fetchConceptSubgraph, regenerateConcept, getDocumentFileUrl } from '../services/api.js'
 import './GraphViewer.css'
 
 /*
@@ -16,12 +16,21 @@ import './GraphViewer.css'
  * onClose - closes the modal
  */
 export default function GraphViewer({ nodes = [], edges = [], legend = null, onClose }) {
-  const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedNode, setSelectedNode] = useState(null)
   const [filterLevel, setFilterLevel] = useState(3)
   const [conceptDescription, setConceptDescription] = useState(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+
+  // Full evolution (all weeks + comparisons + timeline) is deliberately not
+  // fetched on plain node select — it's the expensive tier, only loaded when
+  // the user explicitly presses "View Full Evolution", and shown inline in
+  // NodeDetails rather than on a separate page/graph.
+  const [evolution, setEvolution] = useState(null)
+  const [evolutionLoading, setEvolutionLoading] = useState(false)
+
+  const [pdfSource, setPdfSource] = useState(null) // { fileUrl, fileName, page, highlightText }
 
   const getConnections = () => {
     if (!selectedNode) return []
@@ -32,18 +41,18 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
         const sourceId = String(typeof l.source === 'object' ? l.source.id : l.source)
         const targetId = String(typeof l.target === 'object' ? l.target.id : l.target)
         const currentSelectedId = String(selectedNode.id)
-        
+
         return validLink && (sourceId === currentSelectedId || targetId === currentSelectedId)
       })
       .map((l) => {
         const sourceId = String(typeof l.source === 'object' ? l.source.id : l.source)
         const targetId = String(typeof l.target === 'object' ? l.target.id : l.target)
         const currentSelectedId = String(selectedNode.id)
-        
+
         const isSource = sourceId === currentSelectedId
         const connectedNodeId = isSource ? targetId : sourceId
         const connectedNode = nodes.find((n) => String(n.id) === connectedNodeId)
-        
+
         return {
           nodeName: connectedNode?.name || 'Unknown',
           label: l.label,
@@ -56,6 +65,7 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
   const handleNodeSelect = (node) => {
     setSelectedNode(node)
     setConceptDescription(null) // Clear previous description
+    setEvolution(null) // A newly selected node's evolution hasn't been requested yet
     if (node) {
       setDetailsLoading(true)
       fetchConceptDescription(node.name)
@@ -65,13 +75,45 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
     }
   }
 
-  // Full evolution (all weeks + comparisons) is deliberately not fetched
-  // here — it's the expensive tier, gated behind the dedicated Evolution
-  // page instead of firing on every general-graph node click.
-  const handleViewEvolution = (name) => {
-    const conceptName = name || selectedNode?.name || selectedNode?.concept_name || selectedNode?.label
-    if (!conceptName) return
-    navigate(`/evolution?concept=${encodeURIComponent(conceptName)}`)
+  const handleShowEvolution = async (name) => {
+    setEvolutionLoading(true)
+    try {
+      const [details, subgraph] = await Promise.all([
+        fetchConcept(name),
+        fetchConceptSubgraph(name),
+      ])
+      setEvolution({ details, subgraph })
+    } catch (e) {
+      setEvolution(null)
+    } finally {
+      setEvolutionLoading(false)
+    }
+  }
+
+  const handleRegenerate = async () => {
+    if (!selectedNode) return
+    setRegenerating(true)
+    try {
+      await regenerateConcept(selectedNode.name)
+      const desc = await fetchConceptDescription(selectedNode.name).catch(() => null)
+      setConceptDescription(desc)
+      // If the full evolution was already open, refresh it too — otherwise
+      // leave it collapsed, same as a freshly selected node.
+      if (evolution) {
+        await handleShowEvolution(selectedNode.name)
+      }
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  const handleOpenSource = (src, conceptName) => {
+    setPdfSource({
+      fileUrl: getDocumentFileUrl(src.file),
+      fileName: src.file,
+      page: src.page || 1,
+      highlightText: conceptName,
+    })
   }
 
   return (
@@ -118,10 +160,25 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
             connections={getConnections()}
             conceptDescription={conceptDescription}
             detailsLoading={detailsLoading}
-            onViewEvolution={handleViewEvolution}
+            evolution={evolution}
+            evolutionLoading={evolutionLoading}
+            onShowEvolution={handleShowEvolution}
+            onRegenerate={handleRegenerate}
+            regenerating={regenerating}
+            onOpenSource={handleOpenSource}
           />
         </div>
       </div>
+
+      {pdfSource && (
+        <PdfViewerModal
+          fileUrl={pdfSource.fileUrl}
+          fileName={pdfSource.fileName}
+          page={pdfSource.page}
+          highlightText={pdfSource.highlightText}
+          onClose={() => setPdfSource(null)}
+        />
+      )}
     </div>
   )
 }
