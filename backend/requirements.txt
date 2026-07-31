@@ -10,3 +10,6 @@ datasets
 python-dotenv
 python-multipart
 uvicorn
+scikit-learn
+numpy
+pydantic

@@ -37,6 +37,7 @@ backend_dir = Path(__file__).resolve().parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 import evolution_data
+import graph_fusion
 
 load_dotenv()
 
@@ -648,15 +649,9 @@ Only return the JSON object, no other text."""
         print(f"Pruned {len(dropped)} low-value concept(s) from {doc_name} ({week_key}): {sorted(dropped)}")
 
     def fuse_graph(self):
-        """
-        Global Knowledge Fusion: Called after all files are processed.
-        Performs three sub-operations:
-        1. Entity Merging: Merge semantically identical nodes
-        2. Conflict Resolution: Select accurate relations for multi-edge scenarios
-        """
+        """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
         print("Starting Global Knowledge Fusion...")
-        self._merge_entities()
-        self._resolve_conflicts()
+        self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, client)
 
         print(f"Fusion complete. Canonical nodes: {len(self.canonical_nodes)}, "
               f"Fused edges: {len(self.fused_edges)}, Inferred edges: {len(self.inferred_edges)}")
