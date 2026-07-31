@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 from collections import defaultdict, Counter
@@ -20,19 +19,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+import os
 import json
 import fitz
 from groq import Groq, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+from pathlib import Path
 from datetime import datetime
+from collections import defaultdict, Counter
 import time
-from bertopic import BERTopic
-from sklearn.feature_extraction.text import CountVectorizer
 import asyncio
+from chromadb import Client
+from schemas import *
+from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
 
-# Ensure the script's directory is on the Python path to resolve import issues.
+# make evolution_data importable regardless of cwd
 backend_dir = Path(__file__).resolve().parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
@@ -41,10 +44,16 @@ import graph_fusion
 
 load_dotenv()
 
+chroma = Client()
+
+if not os.getenv("GROQ_API_KEY"):
+    raise RuntimeError("GROQ_API_KEY is not configured!")
+
 # globals
-# Move outputs directory up one level to prevent `uvicorn --reload` from restarting on file writes.
-OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
+OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR = OUTPUT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Uploaded PDFs, kept around (keyed by sanitized filename, same identity used
 # everywhere else as doc_name) so a concept's source can be opened later —
@@ -71,25 +80,16 @@ app.add_middleware(
 )
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 engine = None
 
 EXTRACTION_SEMAPHORE = asyncio.Semaphore(5)
 EXTRACTION_MAX_RETRIES = 40  # matches evolution_data.py's MAX_RETRIES
 
-class Relationship(BaseModel):
-    from_: str = Field(..., alias="from")
-    to: str
-    relation: str
+engine = None
 
-    class Config:
-        populate_by_name = True
+EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
 
-class ExtractionResult(BaseModel):
-    concepts: list[str]
-    relationships: list[Relationship]
-    
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
     try:
@@ -107,25 +107,28 @@ def save_seed_entities(seed_entities):
         print(f"Error saving seed entities: {e}")
         return None
 
-
-def save_benchmark_results(method_name, timing, seeds):
-    """Save benchmark results to text file"""
+def save_extraction_result(timings, nodes, edges):
     try:
-        output_file = OUTPUT_DIR / f"seed_generation_{method_name}.txt"
-        with open(output_file, "w") as f:
-            f.write(f"Method: {method_name.upper()}\n")
-            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-            f.write(f"Execution Time: {timing} seconds\n")
-            f.write(f"Seeds Generated: {len(seeds)}\n")
-            f.write(f"\nSeeds:\n")
-            for i, seed in enumerate(seeds, 1):
-                f.write(f"{i}. {seed}\n")
-        print(f"Saved {method_name} benchmark results to {output_file}")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = OUTPUT_DIR / f"result_{timestamp}.json"
+
+        data = {
+            "timestamp": timestamp,
+            "nodes": nodes,
+            "edges": edges,
+            "stats": {
+                "total_nodes": len(nodes),
+                "total_edges": len(edges),
+                "timings": timings
+            }
+        }
+
+        with open(output_file, 'w') as f:
+            json.dump(data, f, indent=2)
         return str(output_file)
     except Exception as e:
-        print(f"Error saving benchmark results: {e}")
+        print(f"Error saving file: {e}")
         return None
-
 
 def save_graph_json(nodes, edges, fusion_stats=None):
     """Save complete graph JSON to graph_json.json"""
@@ -149,25 +152,36 @@ def save_graph_json(nodes, edges, fusion_stats=None):
         print(f"Error saving graph JSON: {e}")
         return None
 
+def get_collection(project_id, user_id="default"):
+    return chroma.get_or_create_collection(
+        name=f"user_{user_id}_project_{project_id}"
+    )
 
-class QueryRequest(BaseModel):
-    query: str
+def call_groq(prompt, text_batch):
+    return client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text_batch},
+        ],
+        model="llama-3.3-70b-versatile",
+        response_format={"type": "json_object"},
+    )
 
-class RAGResponse(BaseModel):
-    answer: str
-    citations: list[int]
-    citation_label: str
-    chunks_used: int
-    chunks: list[dict]
-    subgraph: dict
+def call_cerebras(prompt, text_batch):
+    return ce_client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text_batch},
+        ],
+        model="gemma-4-31b",
+        max_completion_tokens=2000,
+    )
 
-class GraphResponse(BaseModel):
-    nodes: list[dict]
-    edges: list[dict]
-
+def call_llm(prompt, text_batch):
+    return call_groq(prompt, text_batch)
 
 class StudyGraphEngine:
-    def __init__(self, seed_method="llm"):
+    def __init__(self, collections):
         self.concepts = []
         self.edges = []
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -177,26 +191,25 @@ class StudyGraphEngine:
         self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
         self.fused_edges = []           # Edges after conflict resolution (post-fusion)
         self.inferred_edges = []        # Transitive edges inferred during fusion
-        self.seed_method = seed_method  # "llm" or "bertopic"
         self.seed_generation_time = None        # float, seconds
-        self.seed_generation_method = None      # string, records which method was actually used
         self.upload_latency = None              # float, total time for entire upload endpoint
-        self.week_counter = 1                   # Tracks upload batches as "weeks"
-        self.uploads_by_week = {}               # Maps week key to filename
-        # Unlike chunk_store (wiped on every upload, used only for the RAG chat's
-        # "latest doc" search), this accumulates embedded chunks per week so
-        # concept-evolution summaries can retrieve grounded source text for any
-        # past week, not just the most recently uploaded document.
-        self.chunks_by_week = defaultdict(list)
-        self._doc_concept_names = {}            # doc_name -> set of admitted concept names (for max_nodes_per_doc)
+        self.collections = collections
+        self._doc_concept_names = {}    # doc_name -> set of admitted concept names (for max_nodes_per_doc)
+        self._chroma_chunk_counter = 0  # monotonic counter so chunk ids never collide across uploads
 
-        # Single-slot status for whatever background pipeline task is
-        # currently running (extraction+evolution-precompute after upload,
-        # or comparison-precompute after fuse). One slot, not one per
-        # upload — this app has one global engine and no concurrent-user
-        # story yet, so a second upload started before the first finishes
-        # would overwrite this rather than queue; fine for a single-user
-        # dev setup, not safe to assume under concurrent uploads.
+        # --- Concept-evolution state ---
+        self.week_counter = 1                    # Tracks upload batches as "weeks"
+        self.uploads_by_week = {}                 # week_key -> filename
+        self.chunks_by_week = defaultdict(list)   # week_key -> [{text, pages, doc_name, embedding}] (in-memory, separate from ChromaDB)
+        self.concept_week_chunks = {}                       # (name, week) -> retrieved chunk list
+        self.concept_week_summaries = {}                     # (name, week) -> LLM summary text
+        self.concept_consecutive_comparisons = {}             # canonical concept_name -> [{from_week, to_week, comparison}]
+        self.concept_overall_comparison = {}                  # canonical concept_name -> comparison text (first week vs. latest week)
+
+        # Single-slot status for the background upload pipeline. One slot,
+        # not one per upload — a second upload started before the first
+        # finishes overwrites this rather than queuing. Fine for a
+        # single-user setup; not safe under concurrent uploads.
         self.pipeline_status = {"stage": "idle"}
 
         # --- Concept-evolution cache ---
@@ -222,97 +235,45 @@ class StudyGraphEngine:
         start = time.time()
         self._generate_seeds_llm(all_pages)
         self.seed_generation_time = round(time.time() - start, 3)
-        self.seed_generation_method = self.seed_method
-        print(f"Seed generation ({self.seed_method}): {self.seed_generation_time}s")
 
     def _generate_seeds_llm(self, all_pages):
-        """
-        LLM-based seed generation: Uses Groq to identify top 20 concepts.
-        Original method — unchanged from initial implementation.
-        """
         full_text = " ".join([p.get("text", "") for p in all_pages])
         if not full_text.strip():
             return
 
-        seed_prompt = """Analyze the academic material and identify the TOP 20 most fundamental and important concepts.
-These should be core topics that the entire material revolves around. Return as JSON:
-{"seed_concepts": ["concept1", "concept2", ..., "concept20"]}
-Only return the JSON object, no other text."""
+        seed_prompt = """You are a JSON-only engine. Respond with ONLY a valid JSON object, no markdown, no explanation.
+
+    Analyze the academic material and identify the TOP 20 most fundamental concepts.
+    Respond with ONLY this structure:
+    {"seed_concepts": ["concept1", "concept2", "concept3"]}"""
 
         try:
-            response = client.chat.completions.create(
-                messages=[
-                    {"role": "user", "content": f"{seed_prompt}\n\nMaterial:\n{full_text[:5000]}"}
-                ],
-                model="llama-3.3-70b-versatile",
-                response_format={"type": "json_object"},
-            )
-            seed_json = json.loads(response.choices[0].message.content)
+            response = call_llm(seed_prompt, f"Material:\n{full_text[:5000]}")
+            content = response.choices[0].message.content
+
+            if not content or not content.strip():
+                print("Empty response from LLM for seed generation")
+                self.seed_entities = []
+                return
+
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+
+            seed_json = json.loads(content)
             self.seed_entities = [s.lower().strip() for s in seed_json.get("seed_concepts", [])]
             print(f"LLM generated {len(self.seed_entities)} seed entities: {self.seed_entities}")
         except Exception as e:
             print(f"Error generating seeds (LLM): {e}")
             self.seed_entities = []
 
-    def _clean_sentences_for_bertopic(self, sentences):
-        """
-        Remove noise sentences before BERTopic clustering.
-        Strips citations, references, headers, page numbers, and other
-        PDF extraction artefacts that pollute topic modelling.
-        """
-        import re
-        cleaned = []
-        for s in sentences:
-            # Drop sentences that are mostly digits (page numbers, years, table data)
-            if sum(c.isdigit() for c in s) / max(len(s), 1) > 0.3:
-                continue
-            # Drop sentences containing common reference/citation noise
-            if re.search(
-                r'\b(pp\.|arxiv|doi|proceedings|conference|vol\.|isbn|http|www\.|et al|ibid)\b',
-                s, re.IGNORECASE
-            ):
-                continue
-            # Drop sentences that are fewer than 6 words (too short to be meaningful)
-            if len(s.split()) < 6:
-                continue
-            # Drop sentences that are mostly uppercase (headers, section titles)
-            alpha_chars = [c for c in s if c.isalpha()]
-            if alpha_chars and sum(c.isupper() for c in alpha_chars) / len(alpha_chars) > 0.5:
-                continue
-            # Drop sentences that look like author lists or affiliations
-            if re.search(r'\b(university|institute|department|laboratory|corp\.|inc\.)\b', s, re.IGNORECASE):
-                continue
-            cleaned.append(s)
-        print(f"BERTopic sentence cleaning: {len(sentences)} → {len(cleaned)} sentences")
-        return cleaned
-
-    def _clean_seed_tokens(self, seeds):
-        """
-        Remove junk tokens from the raw seed list after BERTopic extraction.
-        Kills single characters, letter-space fragments like 'p', 'revenge p',
-        and any token that is too short to be a meaningful concept.
-        """
-        import re
-        cleaned = []
-        for s in seeds:
-            s = s.lower().strip()
-            # Drop single characters
-            if len(s) <= 3:
-                continue
-            # Drop tokens that are just a letter followed by a space and more (e.g. "p 45", "revenge p")
-            if re.match(r'^[a-z]\s', s) or re.search(r'\s[a-z]$', s):
-                continue
-            # Drop tokens that are purely numeric or punctuation
-            if re.match(r'^[\d\s\.\,\-]+$', s):
-                continue
-            cleaned.append(s)
-        return cleaned
-
     def _deduplicate_seeds_semantically(self, seeds, threshold=0.85):
         """
         Remove semantically redundant seeds using cosine similarity.
         Prevents variants like 'deep fake', 'deep fakes', 'deepfake' all surviving.
-        Keeps the first (highest-scored by BERTopic) representative of each cluster.
         """
         if not seeds:
             return seeds
@@ -331,147 +292,12 @@ Only return the JSON object, no other text."""
         print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
-    def _generate_seeds_bertopic(self, all_pages):
-        """
-        BERTopic-based seed generation: Uses topic modeling for seed extraction.
-        Applies sentence cleaning before clustering and seed cleaning after
-        to remove PDF noise and semantically redundant terms.
-        Falls back to LLM if document is too short for meaningful clustering.
-        """
-
-        # Split all page text into individual sentences
-        raw_sentences = []
-        for page in all_pages:
-            text = page.get("text", "")
-            raw_sentences.extend([s.strip() for s in text.split(".") if len(s.strip()) > 20])
-
-        # Clean sentences to remove PDF noise before clustering
-        sentences = self._clean_sentences_for_bertopic(raw_sentences)
-
-        # Fallback to LLM if not enough clean sentences remain
-        if len(sentences) < 10:
-            print("Warning: too few clean sentences for BERTopic, falling back to LLM")
-            self._generate_seeds_llm(all_pages)
-            return
-
-        try:
-            # Custom vectorizer: removes stopwords, captures bigrams, requires min frequency
-            vectorizer = CountVectorizer(
-                stop_words="english",
-                ngram_range=(1, 2),  # captures both unigrams and bigrams like "neural network"
-                min_df=2             # term must appear in at least 2 sentences to be considered
-            )
-
-            # Reuse self.model — do NOT load a second SentenceTransformer
-            topic_model = BERTopic(
-                embedding_model=self.model,
-                vectorizer_model=vectorizer,
-                nr_topics=20
-            )
-            topics, _ = topic_model.fit_transform(sentences)
-
-            # Extract top 3 representative words/phrases per topic (prefer bigrams)
-            raw_seeds = []
-            topic_info = topic_model.get_topic_info()
-            for topic_id in topic_info["Topic"].values:
-                if topic_id == -1:  # BERTopic uses -1 for outlier sentences
-                    continue
-                topic_words = topic_model.get_topic(topic_id)
-                # Prefer multi-word terms (bigrams) first, then unigrams
-                bigrams = [w for w, _ in topic_words[:6] if " " in w]
-                unigrams = [w for w, _ in topic_words[:6] if " " not in w]
-                top_words = (bigrams + unigrams)[:3]
-                raw_seeds.extend(top_words)
-
-            # Step 1: Remove junk tokens (single chars, fragments, punctuation)
-            cleaned_seeds = self._clean_seed_tokens(raw_seeds)
-
-            # Step 2: Deduplicate exact strings
-            deduped_seeds = list(set(cleaned_seeds))
-
-            # Step 3: Semantic deduplication to remove near-duplicate variants
-            final_seeds = self._deduplicate_seeds_semantically(deduped_seeds)[:20]
-
-            self.seed_entities = final_seeds
-            print(f"BERTopic generated {len(self.seed_entities)} seeds: {self.seed_entities}")
-        except Exception as e:
-            print(f"Error in BERTopic generation: {e}")
-            print("Falling back to LLM method")
-            self._generate_seeds_llm(all_pages)
-
-    def _run_both_seed_methods(self, all_pages):
-        """
-        Run both LLM and BERTopic seed generation on the same pages,
-        record timing for each, write benchmark files, and return results.
-        Called automatically on every upload.
-        """
-        results = {}
-
-        # --- LLM method ---
-        print("\n=== Benchmarking LLM seed method ===")
-        llm_temp = StudyGraphEngine(seed_method="llm")
-        llm_temp.generate_seeds(all_pages)
-        llm_file = save_benchmark_results("llm", llm_temp.seed_generation_time, llm_temp.seed_entities)
-        results["llm"] = {
-            "seeds": llm_temp.seed_entities,
-            "time_seconds": llm_temp.seed_generation_time,
-            "seed_count": len(llm_temp.seed_entities),
-            "output_file": llm_file,
-        }
-
-        # --- BERTopic method ---
-        print("\n=== Benchmarking BERTopic seed method ===")
-        bertopic_temp = StudyGraphEngine(seed_method="bertopic")
-        bertopic_temp.generate_seeds(all_pages)
-        bertopic_file = save_benchmark_results("bertopic", bertopic_temp.seed_generation_time, bertopic_temp.seed_entities)
-        results["bertopic"] = {
-            "seeds": bertopic_temp.seed_entities,
-            "time_seconds": bertopic_temp.seed_generation_time,
-            "seed_count": len(bertopic_temp.seed_entities),
-            "output_file": bertopic_file,
-        }
-
-        # --- Assign seeds from requested method to this engine ---
-        chosen = results[self.seed_method]
-        self.seed_entities = chosen["seeds"]
-        self.seed_generation_time = chosen["time_seconds"]
-        self.seed_generation_method = self.seed_method
-        save_seed_entities(self.seed_entities)
-
-        # --- Compute comparison metrics ---
-        llm_set = set(results["llm"]["seeds"])
-        bert_set = set(results["bertopic"]["seeds"])
-        common = llm_set & bert_set
-        denom = max(len(llm_set), len(bert_set))
-        bert_time = results["bertopic"]["time_seconds"]
-        llm_time = results["llm"]["time_seconds"]
-
-        if bert_time > 0 and llm_time > 0:
-            speedup_val = round(llm_time / bert_time, 2)
-            if speedup_val > 1:
-                speedup_str = f"BERTopic is {speedup_val}x faster"
-            else:
-                speedup_str = f"LLM is {round(1 / speedup_val, 2)}x faster"
-        else:
-            speedup_str = "N/A"
-
-        results["comparison"] = {
-            "common_seeds": list(common),
-            "only_llm": list(llm_set - bert_set),
-            "only_bertopic": list(bert_set - llm_set),
-            "common_count": len(common),
-            "overlap_percentage": round(len(common) / denom * 100, 1) if denom > 0 else 0,
-            "speedup": speedup_str,
-        }
-
-        return results
-
     def extract_text(self, file_bytes, filename=None):
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         pages = [{"page": i + 1, "text": p.get_text()} for i, p in enumerate(doc)]
         return pages
 
-    def get_chunks(self, pages, size=2000, overlap=400):
+    def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
         chunks = []
         full_text = ""
         position_to_page = []
@@ -489,87 +315,77 @@ Only return the JSON object, no other text."""
             end = min(start + size, len(full_text))
             chunk_text = full_text[start:end]
             spanned_pages = sorted(set(position_to_page[start:end]))
-            chunks.append({"text": chunk_text, "pages": spanned_pages})
+            chunks.append({"text": chunk_text, "pages": spanned_pages, "source": source})
             start += step
 
-        self.index_chunks(chunks)
+        self.index_chunks(chunks, week_key=week_key)
+
+        if week_key is not None:
+            self.index_chunks_for_week(chunks, week_key, source)
+
         return chunks
 
     async def extract_knowledge(self, text_batch):
-        """
-        Extract concepts and relationships asynchronously.
-        Validates output against schema before returning.
+        raw_data = None  # ← initialize here so except blocks can always reference it
 
-        Retries on Groq rate limits (honoring Retry-After when present,
-        exponential backoff otherwise) instead of failing the chunk
-        outright — previously a single 429 here silently dropped that
-        chunk's concepts with no retry at all, unlike evolution_data.py's
-        LLM calls which already had this treatment.
-        """
-        async with EXTRACTION_SEMAPHORE:
-            if self.seed_entities:
-                seed_list = ", ".join(self.seed_entities[:10])
-                prompt = f"""Extract COMPREHENSIVE academic concepts and relationships, PRIORITIZING these key entities: {seed_list}.
-    Focus on relationships that directly involve these seeds or their immediate dependencies.
-    Extract ALL meaningful concepts and relationships in the text - be thorough and find multiple connections.
+        if self.seed_entities:
+            seed_list = ", ".join(self.seed_entities[:10])
+            prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
+
+    Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.
     Relationship types: prerequisite, causes, part_of, explains, enables, related_to
-    Return strict JSON:
-    {{"concepts": [], "relationships": [{{"from": "", "to": "", "relation": ""}}]}}
-    Only return valid JSON, no other text."""
-            else:
-                prompt = """Extract COMPREHENSIVE academic concepts and relationships from the text.
-    Find and include ALL meaningful concepts and relationships - be thorough.
-    Include relationship types: prerequisite, causes, part_of, explains, enables, related_to
-    Return JSON:
-    {"concepts": [], "relationships": [{"from": "", "to": "", "relation": ""}]}
-    Only return valid JSON, no other text."""
 
-            def call_groq():
-                return client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": text_batch},
-                    ],
-                    model="llama-3.3-70b-versatile",
-                    response_format={"type": "json_object"},
-                )
+    Respond with ONLY this exact JSON structure:
+    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables"}}]}}"""
+        else:
+            prompt = """You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
-            for attempt in range(EXTRACTION_MAX_RETRIES + 1):
-                raw_data = None
-                try:
-                    chat_completion = await asyncio.to_thread(call_groq)
-                    raw_data = json.loads(chat_completion.choices[0].message.content)
+    Extract academic concepts and relationships from the text.
+    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
 
-                    # Validate against schema
-                    validated = ExtractionResult(**raw_data)
+    Respond with ONLY this exact JSON structure:
+    {"concepts": ["concept1", "concept2"], "relationships": [{"from": "concept1", "to": "concept2", "relation": "enables"}]}"""
 
-                    return {
-                        "concepts": validated.concepts,
-                        "relationships": [
-                            {"from": r.from_, "to": r.to, "relation": r.relation}
-                            for r in validated.relationships
-                        ]
-                    }
-                except RateLimitError as e:
-                    if attempt == EXTRACTION_MAX_RETRIES:
-                        print(f"Extraction rate limit exceeded after {EXTRACTION_MAX_RETRIES} retries — dropping this chunk.")
-                        return {"concepts": [], "relationships": []}
-                    retry_after = None
-                    try:
-                        retry_after = float(e.response.headers.get("retry-after"))
-                    except (AttributeError, TypeError, ValueError):
-                        pass
-                    delay = retry_after if retry_after is not None else min(60, 5 * (3 ** attempt))
-                    print(f"Extraction rate limited (attempt {attempt + 1}/{EXTRACTION_MAX_RETRIES}) — retrying in {delay:.1f}s.")
-                    await asyncio.sleep(delay)
-                except ValueError as e:
-                    print(f"Extraction validation error: {e}")
-                    print(f"Raw data was: {raw_data}")
-                    return {"concepts": [], "relationships": []}
-                except Exception as e:
-                    print(f"Error calling Groq: {e}")
-                    print(f"Raw data was: {raw_data}")
-                    return {"concepts": [], "relationships": []}
+        try:
+            async with EXTRACTION_SEMAPHORE:
+                response = await asyncio.to_thread(call_llm, prompt, text_batch)
+            content = response.choices[0].message.content
+
+            if not content or not content.strip():
+                print("LLM returned empty response")
+                return {"concepts": [], "relationships": []}
+
+            # Strip markdown fences if the model wraps output anyway
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+
+            raw_data = json.loads(content)
+            validated = ExtractionResult(**raw_data)
+            print("Done")
+            return {
+                "concepts": validated.concepts,
+                "relationships": [
+                    {"from": r.from_, "to": r.to, "relation": r.relation}
+                    for r in validated.relationships
+                ]
+            }
+        except ValueError as e:
+            print(f"Extraction validation error: {e}")
+            print(f"Raw data was: {raw_data}")
+            return {"concepts": [], "relationships": []}
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {e}")
+            return {"concepts": [], "relationships": []}
+        except (RateLimitError, RLE) as e:
+            print(e)
+            return {"concepts": [], "relationships": []}
+        except Exception as e:
+            print(f"Error calling LLM: {e}")
+            print(f"Raw data was: {raw_data}")
             return {"concepts": [], "relationships": []}
 
     def add_to_graph(self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None):
@@ -579,11 +395,9 @@ Only return the JSON object, no other text."""
             if not isinstance(c, str):
                 continue
             name = c.lower().strip()
+            if not name:
+                continue
             if max_nodes_per_doc is not None:
-                # Cap distinct concept names per document — duplicates of an
-                # already-admitted name are still recorded (they're free,
-                # not another thing that needs an LLM summary later), only
-                # brand-new names for this doc are rejected past the cap.
                 doc_names = self._doc_concept_names.setdefault(doc_name, set())
                 if name not in doc_names and len(doc_names) >= max_nodes_per_doc:
                     continue
@@ -604,24 +418,11 @@ Only return the JSON object, no other text."""
         """
         Drop concepts admitted from this doc/week that show no sign of being
         a "key" concept: mentioned fewer than min_mentions times across this
-        doc's chunks, and not one of the curated seed_entities. Run this
-        before evolution-summary precompute so one-off extraction noise (the
-        "extract ALL concepts" prompt is deliberately over-inclusive)
-        doesn't turn into wasted LLM summary/comparison calls — fewer
-        low-value concepts means fewer Groq calls per upload, which is the
-        main lever against hitting the rate limit.
-
-        Previously this also spared any concept with at least one edge, but
-        the extraction prompt asks the LLM to find "multiple connections"
-        for everything it names, so nearly every concept ends up with an
-        edge — that exemption was swallowing the mention-count filter almost
-        entirely (observed: raising min_mentions from 2 to 3 pruned only a
-        handful of concepts out of dozens). Mention count and seed status
-        are now the only ways to survive; a concept mattering enough to have
-        an edge but not enough to be mentioned more than once is exactly the
-        kind of marginal, thinly-grounded node this filter exists to cut.
+        doc's chunks, and not one of the curated seed_entities. Off by
+        default (call with min_mentions=1, or don't call it at all) so it
+        never changes behavior unless explicitly requested.
         """
-        doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c["week"] == week_key]
+        doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c.get("week") == week_key]
         if not doc_week_concepts:
             return
 
@@ -637,7 +438,7 @@ Only return the JSON object, no other text."""
 
         self.concepts = [
             c for c in self.concepts
-            if not (c["source"] == doc_name and c["week"] == week_key and c["name"] in dropped)
+            if not (c["source"] == doc_name and c.get("week") == week_key and c["name"] in dropped)
         ]
         self.edges = [
             e for e in self.edges
@@ -668,59 +469,47 @@ Only return the JSON object, no other text."""
         if len(node_names) < 2:
             return
 
-        # Encode all concept names
         embeddings = self.model.encode(node_names)
-        
-        # Track which nodes have been merged
+
         merged = set()
         threshold = 0.80  # tune this based on false positives you see
-        
+
         for i in range(len(node_names)):
             if node_names[i] in merged:
                 continue
-            
-            # Find all similar nodes to this one
+
             sims = cosine_similarity([embeddings[i]], embeddings)[0]
-            
+
             for j in range(i + 1, len(node_names)):
                 if node_names[j] in merged:
                     continue
-                
+
                 if sims[j] >= threshold:
-                    # Merge j into i (i is canonical)
                     self.canonical_nodes[node_names[j]] = node_names[i]
                     merged.add(node_names[j])
 
         print(f"Entity merging: {len(self.canonical_nodes)} merges via cosine similarity (threshold={threshold})")
-        
+
     def _normalize_relation(self, relation):
         """
         Normalize relation labels to a fixed vocabulary.
         Handles common LLM output variance without an LLM call.
         """
         r = relation.lower().strip()
-        
-        # Define synonym groups → canonical form
+
         synonyms = {
-            # prerequisite family
             "prerequisite": ["prerequisite", "prerequisite for", "prerequisite_for", "requires", "required for", "depends on"],
-            # causation family
             "causes": ["causes", "cause", "leads to", "results in", "produces"],
-            # composition family
             "part_of": ["part of", "part_of", "component of", "composed of", "comprises"],
-            # relation/connection family
             "related_to": ["related to", "related_to", "associated with", "connected to", "linked to", "relates to"],
-            # explanation family
             "explains": ["explains", "explain", "defined as", "describes", "clarifies"],
-            # enabling/facilitation
             "enables": ["enables", "enable", "allows", "permits", "facilitates"],
         }
-        
+
         for canonical, variants in synonyms.items():
             if r in variants:
                 return canonical
-        
-        # Fallback: return as-is if not in map
+
         return r
 
     def _resolve_conflicts(self):
@@ -733,31 +522,27 @@ Only return the JSON object, no other text."""
             return
 
         edge_groups = {}
-        
-        # Group edges by canonical node pairs
+
         for edge in self.edges:
             from_node = self.canonical_nodes.get(edge["from"], edge["from"])
             to_node = self.canonical_nodes.get(edge["to"], edge["to"])
-            
-            # Normalize the relation label
+
             normalized_relation = self._normalize_relation(edge["relation"])
-            
+
             key = (from_node, to_node)
             if key not in edge_groups:
                 edge_groups[key] = []
-            
+
             edge_groups[key].append({
                 "from": from_node,
                 "to": to_node,
                 "relation": normalized_relation,
                 "source": edge.get("source", "unknown"),
-                "original_relation": edge["relation"]  # keep for debugging
+                "original_relation": edge["relation"]
             })
 
-        # Process each edge group
         for (from_node, to_node), edges in edge_groups.items():
             if len(edges) == 1:
-                # Single edge, keep as-is
                 self.fused_edges.append({
                     "from": edges[0]["from"],
                     "to": edges[0]["to"],
@@ -766,22 +551,18 @@ Only return the JSON object, no other text."""
                     "conflict_resolved": False
                 })
             else:
-                # Multiple edges between same nodes
                 relations = [e["relation"] for e in edges]
-                
+
                 if len(set(relations)) == 1:
-                    # All have the same (normalized) relation — just one edge needed
                     self.fused_edges.append({
                         "from": from_node,
                         "to": to_node,
                         "relation": relations[0],
                         "source": edges[0]["source"],
-                        "conflict_resolved": True,  # flag that we collapsed multiple edges
-                        "original_count": len(edges)  # how many we merged
+                        "conflict_resolved": True,
+                        "original_count": len(edges)
                     })
                 else:
-                    # Different relations even after normalization — rare, pick the first
-                    # (Could log this for inspection if needed)
                     self.fused_edges.append({
                         "from": from_node,
                         "to": to_node,
@@ -789,11 +570,11 @@ Only return the JSON object, no other text."""
                         "source": edges[0]["source"],
                         "conflict_resolved": True,
                         "original_count": len(edges),
-                        "conflicting_relations": relations  # log what the conflict was
+                        "conflicting_relations": relations
                     })
 
         print(f"Conflict resolution: Processed {len(edge_groups)} edge groups, "
-            f"created {len(self.fused_edges)} fused edges")
+              f"created {len(self.fused_edges)} fused edges")
 
     def find_best_node(self, query):
         if not self.concepts:
@@ -929,21 +710,51 @@ Only return the JSON object, no other text."""
             "total_count": len(visited)
         }
 
-    def index_chunks(self, chunks):
-        self.chunk_store = []
-        texts, pages_list = [], []
-        for chunk in chunks:
-            if isinstance(chunk, dict):
-                texts.append(chunk["text"])
-                pages_list.append(chunk.get("pages", [chunk["page"]] if "page" in chunk else []))
-            else:
-                texts.append(chunk)
-                pages_list.append([])
+    def index_chunks(self, chunks, week_key=None):
+        # store into the vector database
+        texts = [chunk["text"] for chunk in chunks]
 
-        embeddings = self.model.encode(texts, show_progress_bar=True)
-        for text, pages, embedding in zip(texts, pages_list, embeddings):
-            self.chunk_store.append({"text": text, "pages": pages, "embedding": embedding})
-        print(f"Indexed {len(self.chunk_store)} chunks")
+        embeddings = self.model.encode(texts)
+
+        ids = [f"chunk_{self._chroma_chunk_counter + i}" for i in range(len(texts))]
+        self._chroma_chunk_counter += len(texts)
+
+        metadatas = []
+        for chunk in chunks:
+            meta = {"pages": chunk["pages"], "source": chunk.get("source", "unknown")}
+            if week_key is not None:
+                meta["week"] = week_key
+            metadatas.append(meta)
+
+        self.collections.add(
+            ids=ids,
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=metadatas
+        )
+
+    def retrieve_chunks(self, query, top_k=3):
+        query_embedding  = self.model.encode([query.lower()])
+
+        results = self.collections.query(
+            query_embeddings=query_embedding,
+            n_results=top_k
+        )
+
+        if not results["documents"] or not results["documents"][0]:
+            return []  # case of failed chunk retrieval
+
+        return [
+            {
+                "text": doc,
+                "pages": meta["pages"],
+                "source": meta.get("source", "unknown"),
+                "similarity": 1 - dist
+            }
+            for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0])
+        ]
+
+    # --- Evolution-only chunk store ---
 
     def index_chunks_for_week(self, chunks, week_key, doc_name):
         """Persist embedded chunks under `week_key`, additively (never wiped
@@ -982,24 +793,6 @@ Only return the JSON object, no other text."""
             if similarities[i] > 0.15
         ]
 
-    def retrieve_chunks(self, query, top_k=3):
-        if not self.chunk_store:
-            return []
-        query_embedding  = self.model.encode([query.lower()])
-        chunk_embeddings = np.array([c["embedding"] for c in self.chunk_store])
-        similarities     = cosine_similarity(query_embedding, chunk_embeddings)[0]
-        top_indices      = np.argsort(similarities)[-top_k:][::-1]
-        
-        return [
-            {
-                "text":       self.chunk_store[i]["text"],
-                "pages":      self.chunk_store[i]["pages"],
-                "similarity": round(float(similarities[i]), 3),
-            }
-            for i in top_indices
-            if similarities[i] > 0.2  # lowered threshold from 0.4
-        ]
-
     @staticmethod
     def format_citation(pages):
         if not pages:
@@ -1016,8 +809,7 @@ Only return the JSON object, no other text."""
         Returns concise, well-cited answers.
         """
         retrieved = self.retrieve_chunks(query, top_k=3)
-        
-        # If no text chunks found, return early
+
         if not retrieved:
             return {
                 "answer": "No relevant text chunks found in your documents. Try a different query.",
@@ -1029,20 +821,22 @@ Only return the JSON object, no other text."""
                 "graph_search_depth": 0
             }
 
-        # Build context from retrieved chunks with visible citations
-        context_blocks, all_cited_pages = [], []
+        context_blocks, all_cited_pages, sources = [], [], []
         for r in retrieved:
             citation = self.format_citation(r["pages"])
             header = f"[{citation}]" if citation else "[unknown page]"
-            # Truncate chunk text to keep prompt reasonable
             chunk_text = r["text"][:400]
             context_blocks.append(f"{header}\n{chunk_text}")
             all_cited_pages.extend(r["pages"])
+            sources.append({
+                "fileName": r.get("source") or "document.pdf",
+                "page_number": r["pages"][0] if r.get("pages") else 1,
+                "snippet": (r["text"][:120] + "...") if len(r["text"]) > 120 else r["text"],
+            })
 
         context_text = "\n\n".join(context_blocks)
         unique_pages = sorted(set(all_cited_pages))
 
-        # Optional: add graph context if available
         graph_section = ""
         working_edges = self.fused_edges if self.fused_edges else self.edges
         if working_edges:
@@ -1052,10 +846,10 @@ Only return the JSON object, no other text."""
                 "edges": multi_hop_result.get("edges", []),
                 "is_fused": bool(self.fused_edges)
             }
-            
+
             if subgraph.get("edges"):
                 graph_lines = ["Related concepts from the graph:"]
-                for e in subgraph.get("edges", [])[:5]:  # limit to 5 edges
+                for e in subgraph.get("edges", [])[:5]:
                     graph_lines.append(f"  {e['from']} [{e['relation']}] {e['to']}")
                 graph_section = "\n".join(graph_lines)
         else:
@@ -1096,6 +890,7 @@ Only return the JSON object, no other text."""
             "answer": answer,
             "citations": unique_pages,
             "citation_label": self.format_citation(unique_pages),
+            "sources": sources,
             "chunks_used": len(retrieved),
             "chunks": [
                 {
@@ -1111,17 +906,28 @@ Only return the JSON object, no other text."""
             "fusion_status": "fused" if self.fused_edges else "raw"
         }
 
+async def extract_with_exp_backoff(text, retries=5):
+    """
+    Helper method to extract concepts and relationships with exponential
+    backoff.
+    """
+    delay = 5
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+    for attempt in range(retries):
+        try:
+            return await (engine.extract_knowledge(text))
+        except RateLimitError as e:
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise Exception("Maximum retries exceeded!")
 
+# API Endpoints
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
 
 
-async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upload_start, min_mentions=2):
+async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, max_nodes, min_mentions):
     """
     Everything slow and LLM-dependent about an upload: seed generation (first
     upload only), chunk extraction, graph building, and — for every concept
@@ -1142,15 +948,16 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
     never asked for their full cross-week history.
     """
     try:
-        if not engine.seed_entities:  # Only generate seeds on the first upload
-            engine.generate_seeds(pages)
-            save_seed_entities(engine.seed_entities)
+        safe_name = Path(filename).name
 
-        chunks = engine.get_chunks(pages)
-        engine.index_chunks_for_week(chunks, week_key, filename)
+        engine.generate_seeds(pages)
+        save_seed_entities(engine.seed_entities)
+
+        chunks = engine.get_chunks(pages, source=safe_name, week_key=week_key)
+
         extraction_tasks = [
-            engine.extract_knowledge(chunk["text"])
-            for chunk in chunks[:15]
+            extract_with_exp_backoff(chunk["text"])
+            for chunk in chunks
         ]
         results = await asyncio.gather(*extraction_tasks)
 
@@ -1160,10 +967,8 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
             engine.add_to_graph(data, filename, week_key, max_nodes_per_doc=max_nodes, pages=chunks[i].get("pages"))
             print(f"Processed chunk {i + 1}/{len(results)}")
 
-        # Filter out one-off, unconnected, non-seed concepts before they
-        # ever reach the graph or get a chance to generate an evolution
-        # summary later — see prune_low_value_concepts.
-        engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
+        if min_mentions > 1:
+            engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
 
         # Description precompute: one cheap-tier summary per surviving
         # concept from this document, batched (see BATCH_SIZE in
@@ -1185,7 +990,18 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
             working_edges
         )
 
-        engine.upload_latency = round(time.time() - upload_start, 3)
+        upload_latency = round(time.time() - upload_start, 3)
+        save_extraction_result(
+            {
+                "number of chunks": len(chunks),
+                "latency": upload_latency,
+                "time per chunk": upload_latency / len(chunks) if chunks else 0
+            },
+            engine.concepts,
+            working_edges
+        )
+        engine.upload_latency = upload_latency
+
         engine.pipeline_status = {
             "stage": "done",
             "operation": "upload",
@@ -1193,13 +1009,16 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
             "filename": filename,
             "chunks": len(chunks),
             "seeds_generated": len(engine.seed_entities),
-            "total_concepts": len(engine.concepts),
+            "seed_entities": engine.seed_entities,
+            "raw_concepts": len(engine.concepts),
             "total_edges": len(working_edges),
             "graph_saved_to": graph_save_path,
             "error": None,
         }
     except Exception as e:
         print(f"Background upload pipeline failed for {filename}: {e}")
+        import traceback
+        traceback.print_exc()
         engine.pipeline_status = {
             "stage": "error", "operation": "upload",
             "week": week_key, "filename": filename, "error": str(e),
@@ -1207,30 +1026,33 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, max_nodes, upl
 
 
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm", max_nodes: int = None, min_mentions: int = 2):
+async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_mentions: int = 1):
     """
     Upload a PDF. Only the fast, local, deterministic steps (read the file,
-    parse its text) happen before this responds — extraction, graph
-    building, and evolution-summary generation all happen afterward in a
-    background task (see _run_upload_pipeline), so this endpoint always
+    save it to disk, parse its text, assign a week) happen before this
+    responds. Extraction and graph building happen afterward in a
+    background task (see _run_upload_pipeline) — this endpoint always
     returns quickly regardless of how much Groq rate-limit backoff the
-    actual pipeline ends up needing. Poll GET /api/upload/status for
-    progress; the response here is just an acknowledgment, not the result.
+    pipeline needs. Poll GET /api/upload/status for progress.
 
     max_nodes: optional hard cap on distinct concepts admitted from this
-    document, regardless of quality.
+    document (default: no cap).
 
-    min_mentions: "key concept" threshold — a concept extracted fewer than
-    this many times from the document, and not one of the curated
-    seed_entities, is dropped before it reaches the graph or generates an
-    evolution summary. Raise this to cut down on low-value nodes and Groq
-    calls further; set to 1 to disable pruning entirely.
+    min_mentions: "key concept" threshold for pruning low-value concepts
+    after extraction. Default 1 == pruning disabled. Raise to 2+ to drop
+    concepts extracted only once and not in seed_entities.
     """
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="The AI Service is temporarily down. Please try again later."
+        )
+
     global engine
     upload_start = time.time()
 
     if engine is None:
-        engine = StudyGraphEngine(seed_method=seed_method)
+        engine = StudyGraphEngine(get_collection(1))
 
     # Strip any directory components a client could send (path traversal) —
     # this sanitized name is used as doc_name everywhere below, consistent
@@ -1273,12 +1095,23 @@ async def upload_pdf(file: UploadFile = File(...), seed_method: str = "llm", max
 
 @app.get("/api/upload/status")
 async def get_pipeline_status():
-    """Poll target for the background upload/fuse pipeline (see StudyGraphEngine.pipeline_status)."""
+    """Poll target for the background upload pipeline (see StudyGraphEngine.pipeline_status)."""
     global engine
     if engine is None:
         return {"stage": "idle"}
     return engine.pipeline_status
 
+@app.get("/api/files/{filename}")
+async def serve_uploaded_file(filename: str):
+    safe_name = Path(filename).name
+    upload_path = UPLOAD_DIR / safe_name
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        upload_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=\"{safe_name}\""},
+    )
 
 @app.get("/api/documents/file/{filename}")
 async def get_document_file(filename: str):
@@ -1311,16 +1144,13 @@ def _source_page_fields(pages):
 
 @app.get("/api/graph")
 async def get_graph():
-    """Get current knowledge graph (uses fused graph if available)"""
+    """Get current knowledge graph (uses fused graph if available), with
+    week-based color coding for the evolution feature."""
     global engine
     if engine is None:
         return GraphResponse(nodes=[], edges=[])
 
-    # --- Color-coding Logic ---
-    # Palette lives in evolution_data so the main graph, the evolution graph,
-    # and the per-concept timeline subgraph all agree on what each color means.
     week_color_map = evolution_data.get_week_color_map(engine)
-    # --- End Color-coding Logic ---
 
     working_edges = engine.fused_edges if engine.fused_edges else engine.edges
 
@@ -1335,8 +1165,7 @@ async def get_graph():
         concept_relations[from_node].append(f"{e['relation']} → {to_node}")
         concept_relations[to_node].append(f"{from_node} → {e['relation']}")
 
-    nodes = []
-    # Use a dictionary to aggregate concepts by name, as they can appear multiple times
+    # collapse duplicate concept entries by canonical name, tracking weeks/sources
     aggregated_concepts = {}
     for c in engine.concepts:
         canonical_name = engine.canonical_nodes.get(c["name"], c["name"])
@@ -1353,6 +1182,7 @@ async def get_graph():
         if week:
             aggregated_concepts[canonical_name]["weeks"].add(week)
 
+    nodes = []
     for name, data in aggregated_concepts.items():
         appears_in_weeks = len(data["weeks"])
         node_color = evolution_data.DEFAULT_COLOR
@@ -1413,8 +1243,6 @@ async def get_graph():
         "inferred_edges": len(engine.inferred_edges)
     })
 
-    # Legend: tells the frontend what each color on the graph means, so it
-    # doesn't have to hardcode (and risk drifting from) this palette.
     legend = {
         "weeks": [{"week": week, "color": color} for week, color in week_color_map.items()],
         "multi_week": {"label": "Spans multiple weeks", "color": evolution_data.MULTI_WEEK_COLOR},
@@ -1438,6 +1266,11 @@ async def get_graph():
 @app.post("/api/query")
 async def query_rag(request: QueryRequest):
     """Query the knowledge graph with RAG"""
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="The AI Service is temporarily down. Please try again later."
+        )
     global engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
@@ -1445,22 +1278,23 @@ async def query_rag(request: QueryRequest):
     try:
         result = engine.rag_query(request.query)
         return result
+    except HTTPException as e:
+        if e.status_code in [401, 402, 403, 429]:
+            raise HTTPException(
+                status_code=503,
+                detail="The service is temporarily down. Please try again soon."
+            )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.post("/api/fuse")
 async def fuse_knowledge_graph():
     """
     Trigger the Global Knowledge Fusion pipeline (Phase 3 of BATCH-STREAM-BATCH).
-    Call this endpoint after all documents are uploaded. Entity merging and
-    conflict resolution (both deterministic, no LLM calls) are the only work
-    here, so this runs and returns fully synchronously — there's no
-    background phase to poll for anymore. Cross-week comparisons only
-    become meaningful once fusion has decided which raw names are the same
-    canonical concept, but they're no longer precomputed for every concept
-    here; they're generated on demand per-concept when a user explicitly
-    asks to see that concept's evolution (see evolution_data.get_concept_detail).
+    Call this endpoint after all documents are uploaded.
     """
     global engine
     if engine is None:
@@ -1479,7 +1313,7 @@ async def fuse_knowledge_graph():
 
         return {
             "status": "success",
-            "message": "Knowledge graph fusion complete.",
+            "message": "Knowledge graph fusion complete",
             "pipeline_phase": "batch_fusion",
             "canonical_nodes_created": len(engine.canonical_nodes),
             "fused_edges": len(engine.fused_edges),
@@ -1492,17 +1326,24 @@ async def fuse_knowledge_graph():
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# --- Concept-evolution endpoints ---
+
 @app.get("/api/evolution/graph")
 async def get_evolution_graph_data(week: str = None):
     """Get the main evolution graph data, optionally filtered by week."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
     return evolution_data.get_graph_data(engine, week)
 
 
 @app.get("/api/evolution/concept/{concept_name}/description")
 async def get_evolution_concept_description(concept_name: str):
     """Cheap tier: a single grounded summary from the concept's
-    earliest-appearance week only. Meant to back a plain node click in
-    either graph view — see get_concept_description."""
+    earliest-appearance week only. Meant to back a plain node click."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
     description = await evolution_data.get_concept_description(engine, concept_name, client)
     if not description:
         raise HTTPException(status_code=404, detail="Concept not found")
@@ -1513,8 +1354,10 @@ async def get_evolution_concept_description(concept_name: str):
 async def get_evolution_concept_detail(concept_name: str):
     """Full tier: every week's summary plus every week-to-week comparison.
     Generates and caches lazily on first request — meant to back the
-    explicit "show concept evolution" action, not a plain node click (see
-    get_concept_description for that cheaper tier). See get_concept_detail."""
+    explicit "show concept evolution" action."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
     details = await evolution_data.get_concept_detail(engine, concept_name, client)
     if not details:
         raise HTTPException(status_code=404, detail="Concept not found")
@@ -1524,6 +1367,9 @@ async def get_evolution_concept_detail(concept_name: str):
 @app.get("/api/evolution/subgraph/{concept_name}")
 async def get_evolution_concept_subgraph(concept_name: str):
     """Get the D3-ready subgraph for a concept's weekly evolution."""
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
     subgraph = evolution_data.get_concept_subgraph(engine, concept_name)
     if not subgraph:
         raise HTTPException(status_code=404, detail="Concept not found")

@@ -57,7 +57,6 @@ function _docFromUploadResponse(file, uploadResult) {
     model: 'llama-3.3-70b-versatile',
     nodes: uploadResult?.total_concepts ?? 0,
     relationships: uploadResult?.total_edges ?? 0,
-    seed_method_used: uploadResult?.benchmark?.seed_method_used ?? null,
     raw: uploadResult,
   }
 }
@@ -98,12 +97,13 @@ export async function uploadDocument(file, seedMethod = 'llm', maxNodes = null, 
   const formData = new FormData()
   formData.append('file', file)
 
+  // seed_method is a query param on the backend, not a form field
+  const url = `${API_BASE_URL}/api/upload`
   // seed_method, max_nodes, and min_mentions are query params on the backend, not form fields
-  const params = new URLSearchParams({ seed_method: seedMethod })
+  const params = new URLSearchParams()
   if (maxNodes) params.set('max_nodes', maxNodes)
   if (minMentions) params.set('min_mentions', minMentions)
-  const url = `${API_BASE_URL}/api/upload?${params.toString()}`
-  await safeFetchJson(url, { method: 'POST', body: formData })
+  const uploadResult = await safeFetchJson(url, { method: 'POST', body: formData })
 
   // The request above only acknowledges receipt — extraction happens
   // afterward in a background task, so wait for that to actually finish
@@ -131,16 +131,7 @@ export async function deleteDocument(id) {
 }
 
 export async function generateGraph(_docIds, _provider, _model) {
-  // Closest real equivalent to "generate graph" is /api/fuse, which fuses
-  // everything uploaded so far. Backend has no per-document scoping or
-  // per-call model override, so those args are accepted but unused.
-  //
-  // Entity merging + conflict resolution run synchronously inside /api/fuse
-  // (no LLM calls, so no reason to background them); cross-week comparison
-  // generation continues afterward in a background task on the server —
-  // poll getPipelineStatus() if the caller needs to know when that's done.
-  // The fuse response itself doesn't carry the full node/edge payload, so
-  // /api/graph is read afterward for what actually gets rendered.
+
   await safeFetchJson(`${API_BASE_URL}/api/fuse`, { method: 'POST' })
   return fetchGraph()
 }

@@ -28,7 +28,7 @@ export default function NodeDetails({
       {node && (
         <>
           <div className="panel-header">
-            <h2 className="panel-title">{node.name}</h2>
+            <h2 className="panel-title">{conceptName}</h2>
             <button className="close-btn" onClick={onClose}>
               ×
             </button>
@@ -80,9 +80,9 @@ export default function NodeDetails({
 
           <div className="section-title">
             SOURCES
-            {node.source.length > 1 && (
+            {sources.length > 1 && (
               <span className="source-multi-tag" style={{ marginLeft: "auto" }}>
-                Found in {node.source.length} docs
+                Found in {sources.length} docs
               </span>
             )}
           </div>

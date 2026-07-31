@@ -88,6 +88,7 @@ export default function Builder() {
       const ids = selected.size ? Array.from(selected) : docs.map(d => d.id)
       const result = await generateGraph(ids, modelSel.provider, modelSel.model)
       setGraphData({ nodes: result?.nodes || [], edges: result?.edges || [], legend: result?.legend || null })
+      setGraphOpen(true)
       console.log(result)
       await loadDocs()
       // Keep users on the generation page so the embedded Q&A panel is immediately available.
