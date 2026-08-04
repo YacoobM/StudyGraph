@@ -53,7 +53,11 @@ export default function Builder() {
     fetchGraph()
       .then((result) => {
         if (result?.nodes?.length) {
-          setGraphData({ nodes: result.nodes, edges: result.edges || [], legend: result.legend || null })
+          const nextGraphData = { nodes: result.nodes, edges: result.edges || [], legend: result.legend || null }
+          setGraphData(nextGraphData)
+          if (import.meta.env.DEV) {
+            console.log('[StudyGraph] Loaded graph', nextGraphData)
+          }
         }
       })
       .catch(() => {}) // no graph yet (fresh backend) — nothing to restore
@@ -87,9 +91,12 @@ export default function Builder() {
     try {
       const ids = selected.size ? Array.from(selected) : docs.map(d => d.id)
       const result = await generateGraph(ids, modelSel.provider, modelSel.model)
-      setGraphData({ nodes: result?.nodes || [], edges: result?.edges || [], legend: result?.legend || null })
+      const nextGraphData = { nodes: result?.nodes || [], edges: result?.edges || [], legend: result?.legend || null }
+      setGraphData(nextGraphData)
       setGraphOpen(true)
-      console.log(result)
+      if (import.meta.env.DEV) {
+        console.log('[StudyGraph] Generated graph', nextGraphData)
+      }
       await loadDocs()
       // Keep users on the generation page so the embedded Q&A panel is immediately available.
     } catch (e) {

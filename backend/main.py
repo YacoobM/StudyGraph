@@ -334,17 +334,23 @@ class StudyGraphEngine:
 
     Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.
     Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+    For each relationship, include both:
+    - summary: a short explanation (one sentence max)
+    - context: the exact phrase or sentence from the source text that supports the relationship
 
     Respond with ONLY this exact JSON structure:
-    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables"}}]}}"""
+    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "summary": "Short explanation of the supporting text segment.", "context": "Exact phrase or sentence from the source text."}}]}}"""
         else:
             prompt = """You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
     Extract academic concepts and relationships from the text.
     Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+    For each relationship, include both:
+    - summary: a short explanation (one sentence max)
+    - context: the exact phrase or sentence from the source text that supports the relationship
 
     Respond with ONLY this exact JSON structure:
-    {"concepts": ["concept1", "concept2"], "relationships": [{"from": "concept1", "to": "concept2", "relation": "enables"}]}"""
+    {"concepts": ["concept1", "concept2"], "relationships": [{"from": "concept1", "to": "concept2", "relation": "enables", "summary": "Short explanation of the supporting text segment.", "context": "Exact phrase or sentence from the source text."}]}"""
 
         try:
             async with EXTRACTION_SEMAPHORE:
@@ -369,7 +375,13 @@ class StudyGraphEngine:
             return {
                 "concepts": validated.concepts,
                 "relationships": [
-                    {"from": r.from_, "to": r.to, "relation": r.relation}
+                    {
+                        "from": r.from_,
+                        "to": r.to,
+                        "relation": r.relation,
+                        "summary": getattr(r, "summary", "") or "",
+                        "context": getattr(r, "context", "") or "",
+                    }
                     for r in validated.relationships
                 ]
             }
@@ -409,9 +421,18 @@ class StudyGraphEngine:
             from_node = r.get("from", "").lower().strip()
             to_node   = r.get("to", "").lower().strip()
             relation  = r.get("relation", "").lower().strip()
+            summary   = (r.get("summary") or "").strip()
             if from_node and to_node:
+                context = (r.get("context") or "").strip()
                 self.edges.append(
-                    {"from": from_node, "to": to_node, "relation": relation, "source": doc_name}
+                    {
+                        "from": from_node,
+                        "to": to_node,
+                        "relation": relation,
+                        "source": doc_name,
+                        "summary": summary,
+                        "context": context,
+                    }
                 )
 
     def prune_low_value_concepts(self, doc_name, week_key, min_mentions=2):
@@ -1082,7 +1103,7 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
         "week": current_week_key, "filename": safe_filename, "error": None,
     }
     asyncio.create_task(
-        _run_upload_pipeline(engine, pages, safe_filename, current_week_key, max_nodes, upload_start, min_mentions)
+        _run_upload_pipeline(engine, pages, safe_filename, current_week_key, upload_start, max_nodes, min_mentions)
     )
 
     return {
@@ -1217,6 +1238,8 @@ async def get_graph():
             "target": e["to"].replace(" ", "_"),
             "label": e["relation"],
             "relation": e["relation"],
+            "summary": e.get("summary", ""),
+            "context": e.get("context", ""),
             "conflict_resolved": e.get("conflict_resolved", False)
         }
         for e in working_edges
@@ -1233,6 +1256,8 @@ async def get_graph():
                     "target": e["to"].replace(" ", "_"),
                     "label": e["relation"],
                     "relation": e["relation"],
+                    "summary": e.get("summary", ""),
+                    "context": e.get("context", ""),
                     "conflict_resolved": False,
                     "is_inferred": True
                 })

@@ -1,0 +1,186 @@
+{
+  "step3-evidence-v3|llama-3.3-70b-versatile|flow control||pressure control": {
+    "verdict": "related",
+    "relation": "is part of",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "B",
+    "explanation": "control aspect"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|collapse misattribution||controlled collapse theory": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "no direct link"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|dynamic run velocity||dynamic run velocity (drv)": {
+    "verdict": "same",
+    "relation": "",
+    "direction": "",
+    "canonical": "A",
+    "broader": "",
+    "explanation": "same concept"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|dynamic run velocity||run rate optimization": {
+    "verdict": "related",
+    "relation": "causes",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "direct cause"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|net run rate||net run rate relative (nrrrel)": {
+    "verdict": "related",
+    "relation": "is a type of",
+    "direction": "B_to_A",
+    "canonical": "",
+    "broader": "A",
+    "explanation": "specific type"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|net run rate||run rate optimization": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "No direct relation found"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|session dominance model||session dominance model (sdm)": {
+    "verdict": "same",
+    "relation": "",
+    "direction": "",
+    "canonical": "A",
+    "broader": "",
+    "explanation": "Same concept described"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|strike pressure index||strike pressure index (spi)": {
+    "verdict": "same",
+    "relation": "",
+    "direction": "",
+    "canonical": "A",
+    "broader": "",
+    "explanation": "Same concept described"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|tempo elasticity||tempo maximization": {
+    "verdict": "related",
+    "relation": "explains",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "Tempo elasticity explains tempo"
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|blitzball philosophy||run rate optimization": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|momentum windows||orthodox attritional batting": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|orthodox attritional batting||risk budget allocation": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|orthodox attritional batting||strike pressure index": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|run rate optimization||strike pressure index": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|run rate optimization||tempo elasticity": {
+    "verdict": "related",
+    "relation": "involves optimizing",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "A",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|blitzball philosophy||session drift": {
+    "verdict": "related",
+    "relation": "addresses issue of",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|controlled collapse theory||run rate optimization": {
+    "verdict": "related",
+    "relation": "enables improved",
+    "direction": "B_to_A",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|blitzball philosophy||wicket preservation": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|momentum windows||wicket preservation": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|tempo elasticity||wicket preservation": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|controlled collapse theory||orthodox attritional batting": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|dynamic run velocity||orthodox attritional batting": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  },
+  "step5-evidence-v3|llama-3.3-70b-versatile|tempo maximization||wicket preservation": {
+    "verdict": "unrelated",
+    "relation": "None",
+    "direction": "None",
+    "canonical": "",
+    "broader": "NONE",
+    "explanation": ""
+  }
+}
