@@ -201,7 +201,7 @@ export default function Builder() {
               ref={fileRef}
               type="file"
               multiple
-              accept=".pdf,.pptx,.docx,.txt,.md"
+              accept=".pdf,.pptx,.docx,.txt,.md,.png,.jpg,.jpeg"
               onChange={(e) => onFiles(e.target.files)}
               style={{ display: 'none' }}
             />

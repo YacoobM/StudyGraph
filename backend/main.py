@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
 import json
-import fitz
+from services.document_service import extract_text
 from groq import Groq, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -292,10 +292,7 @@ class StudyGraphEngine:
         print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
-    def extract_text(self, file_bytes, filename=None):
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        pages = [{"page": i + 1, "text": p.get_text()} for i, p in enumerate(doc)]
-        return pages
+    
 
     def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
         chunks = []
@@ -1083,7 +1080,7 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
 
     try:
         file_bytes = await file.read()
-        pages = engine.extract_text(file_bytes, safe_filename)
+        pages = extract_text(file_bytes, safe_filename)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
