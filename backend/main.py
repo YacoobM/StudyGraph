@@ -2,13 +2,6 @@ import sys
 from pathlib import Path
 from collections import defaultdict, Counter
 
-# Windows defaults stdout/stderr to the system ANSI codepage (cp1252), not
-# UTF-8 — any print() of extracted PDF text hits this the moment a document
-# contains a character outside that codepage (e.g. the "fl"/"fi" typographic
-# ligatures common in professionally-typeset academic PDFs), crashing the
-# whole background upload pipeline with UnicodeEncodeError. errors="replace"
-# rather than just switching to utf-8 so an unprintable character degrades
-# to "?" instead of still being able to crash a misconfigured terminal.
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if sys.stderr.encoding != "utf-8":
@@ -21,7 +14,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
 import json
-import fitz
+from services.document_service import extract_text
 from groq import Groq, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -35,7 +28,6 @@ from chromadb import Client
 from schemas import *
 from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
 
-# make evolution_data importable regardless of cwd
 backend_dir = Path(__file__).resolve().parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
@@ -55,9 +47,6 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Uploaded PDFs, kept around (keyed by sanitized filename, same identity used
-# everywhere else as doc_name) so a concept's source can be opened later —
-# previously the bytes were read for text extraction and then discarded.
 UPLOADS_DIR = Path(__file__).parent / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
@@ -69,10 +58,6 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    # Vite picks the next free port whenever its default is already taken
-    # (3000 -> 3001 -> 3002 ...), so a fixed origin list breaks the moment
-    # something else is holding the usual port — match any localhost port
-    # instead of hardcoding one.
     allow_origin_regex=r"http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
@@ -83,12 +68,12 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 engine = None
 
-EXTRACTION_SEMAPHORE = asyncio.Semaphore(5)
+EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
 EXTRACTION_MAX_RETRIES = 40  # matches evolution_data.py's MAX_RETRIES
 
-engine = None
+SEED_ENTITY_PRIORITY_COUNT = 10   # how many of this doc's own seeds go in the prompt's priority line
+CROSS_WEEK_CONCEPT_COUNT = 10     # how many known concepts from earlier weeks go in the prompt's known-concept line
 
-EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
 
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
@@ -201,30 +186,23 @@ class StudyGraphEngine:
         self.week_counter = 1                    # Tracks upload batches as "weeks"
         self.uploads_by_week = {}                 # week_key -> filename
         self.chunks_by_week = defaultdict(list)   # week_key -> [{text, pages, doc_name, embedding}] (in-memory, separate from ChromaDB)
+
+        # Concept names admitted from completed uploads, across all weeks.
+        # Populated after each upload (see _run_upload_pipeline) and consulted
+        # by extract_knowledge for later uploads, so a concept established in
+        # an earlier week can still be extracted from a later document even if
+        # it isn't among that document's own top seed entities.
+        self.known_concepts = set()
+        self.known_concept_embeddings = None   # np.ndarray aligned with sorted(known_concepts), rebuilt on update
+        self._known_concepts_list = []          # sorted(known_concepts), kept alongside known_concept_embeddings
+
         self.concept_week_chunks = {}                       # (name, week) -> retrieved chunk list
         self.concept_week_summaries = {}                     # (name, week) -> LLM summary text
         self.concept_consecutive_comparisons = {}             # canonical concept_name -> [{from_week, to_week, comparison}]
         self.concept_overall_comparison = {}                  # canonical concept_name -> comparison text (first week vs. latest week)
 
-        # Single-slot status for the background upload pipeline. One slot,
-        # not one per upload — a second upload started before the first
-        # finishes overwrites this rather than queuing. Fine for a
-        # single-user setup; not safe under concurrent uploads.
         self.pipeline_status = {"stage": "idle"}
 
-        # --- Concept-evolution cache ---
-        # Populated eagerly, during the upload/fuse pipeline itself
-        # (see upload_pdf and fuse_knowledge_graph), using the same
-        # get_concept_detail() that used to run lazily on first click. Once
-        # generated, a (concept, week) pair is cached forever — viewing it
-        # again, from any endpoint, costs nothing.
-        self.concept_week_chunks = {}                        # (name, week) -> retrieved chunk list
-        self.concept_week_summaries = {}                      # (name, week) -> LLM summary text
-        self.concept_consecutive_comparisons = {}              # canonical concept_name -> [{from_week, to_week, comparison}]
-        self.concept_overall_comparison = {}                   # canonical concept_name -> comparison text (first week vs. latest week)
-        # (name, week) pairs whose concept_week_summaries entry is the raw-excerpt
-        # fallback (Groq generation failed) rather than an actual LLM summary — lets
-        # the API flag it and the /regenerate endpoint know what's worth retrying.
         self.degraded_summary_keys = set()
 
     def generate_seeds(self, all_pages):
@@ -292,11 +270,6 @@ class StudyGraphEngine:
         print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
-    def extract_text(self, file_bytes, filename=None):
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        pages = [{"page": i + 1, "text": p.get_text()} for i, p in enumerate(doc)]
-        return pages
-
     def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
         chunks = []
         full_text = ""
@@ -325,26 +298,52 @@ class StudyGraphEngine:
 
         return chunks
 
-    async def extract_knowledge(self, text_batch):
+    def rebuild_known_concept_embeddings(self):
+        """Recompute the embedding index for known_concepts. Call after
+        known_concepts changes, before relevant_known_concepts is used."""
+        self._known_concepts_list = sorted(self.known_concepts)
+        if self._known_concepts_list:
+            self.known_concept_embeddings = self.model.encode(self._known_concepts_list)
+        else:
+            self.known_concept_embeddings = None
+
+    def relevant_known_concepts(self, text, top_k=CROSS_WEEK_CONCEPT_COUNT):
+        """Known concepts (from prior weeks) most relevant to `text`, ranked
+        by embedding similarity rather than a flat alphabetical slice."""
+        if not self._known_concepts_list or self.known_concept_embeddings is None:
+            return []
+        query_embedding = self.model.encode([text[:2000].lower()])
+        sims = cosine_similarity(query_embedding, self.known_concept_embeddings)[0]
+        top_idx = np.argsort(sims)[::-1][:top_k]
+        return [self._known_concepts_list[i] for i in top_idx]
+
+    async def extract_knowledge(self, text_batch, known_concepts=None):
         raw_data = None  # ← initialize here so except blocks can always reference it
 
         if self.seed_entities:
-            seed_list = ", ".join(self.seed_entities[:10])
-            prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
-
-    Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.
-    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
-
-    Respond with ONLY this exact JSON structure:
-    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables"}}]}}"""
+            seed_list = ", ".join(self.seed_entities[:SEED_ENTITY_PRIORITY_COUNT])
+            priority_line = f"Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.\n"
         else:
-            prompt = """You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
+            priority_line = "Extract academic concepts and relationships from the text.\n"
 
-    Extract academic concepts and relationships from the text.
+        known_line = ""
+        if known_concepts:
+            known_list = ", ".join(known_concepts)
+            known_line = (
+                f"If any of these concepts are referenced in this text, even in passing, "
+                f"extract them too using this exact name: {known_list}.\n"
+            )
+
+        prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
+
+    {priority_line}{known_line}
     Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+    For each relationship, include both:
+    - summary: a short explanation (one sentence max)
+    - context: the exact phrase or sentence from the source text that supports the relationship
 
     Respond with ONLY this exact JSON structure:
-    {"concepts": ["concept1", "concept2"], "relationships": [{"from": "concept1", "to": "concept2", "relation": "enables"}]}"""
+    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "summary": "Short explanation of the supporting text segment.", "context": "Exact phrase or sentence from the source text."}}]}}"""
 
         try:
             async with EXTRACTION_SEMAPHORE:
@@ -369,7 +368,13 @@ class StudyGraphEngine:
             return {
                 "concepts": validated.concepts,
                 "relationships": [
-                    {"from": r.from_, "to": r.to, "relation": r.relation}
+                    {
+                        "from": r.from_,
+                        "to": r.to,
+                        "relation": r.relation,
+                        "summary": getattr(r, "summary", "") or "",
+                        "context": getattr(r, "context", "") or "",
+                    }
                     for r in validated.relationships
                 ]
             }
@@ -409,9 +414,18 @@ class StudyGraphEngine:
             from_node = r.get("from", "").lower().strip()
             to_node   = r.get("to", "").lower().strip()
             relation  = r.get("relation", "").lower().strip()
+            summary   = (r.get("summary") or "").strip()
             if from_node and to_node:
+                context = (r.get("context") or "").strip()
                 self.edges.append(
-                    {"from": from_node, "to": to_node, "relation": relation, "source": doc_name}
+                    {
+                        "from": from_node,
+                        "to": to_node,
+                        "relation": relation,
+                        "source": doc_name,
+                        "summary": summary,
+                        "context": context,
+                    }
                 )
 
     def prune_low_value_concepts(self, doc_name, week_key, min_mentions=2):
@@ -906,7 +920,7 @@ class StudyGraphEngine:
             "fusion_status": "fused" if self.fused_edges else "raw"
         }
 
-async def extract_with_exp_backoff(text, retries=5):
+async def extract_with_exp_backoff(text, known_concepts=None, retries=5):
     """
     Helper method to extract concepts and relationships with exponential
     backoff.
@@ -915,7 +929,7 @@ async def extract_with_exp_backoff(text, retries=5):
 
     for attempt in range(retries):
         try:
-            return await (engine.extract_knowledge(text))
+            return await (engine.extract_knowledge(text, known_concepts=known_concepts))
         except RateLimitError as e:
             await asyncio.sleep(delay)
             delay *= 2
@@ -932,20 +946,11 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, 
     Everything slow and LLM-dependent about an upload: seed generation (first
     upload only), chunk extraction, graph building, and — for every concept
     that survives pruning — its cheap-tier description (see
-    evolution_data.precompute_week_summaries), so a node's DESCRIPTION and
-    SOURCES are both already sitting in cache by the time this pipeline
-    reports "done," rather than firing a live Groq call the first time
-    someone clicks it. Runs as a background task with no HTTP request
-    attached, so Groq rate-limit retries/backoff can take as long as they
-    need without risking a request timeout or leaving the browser hanging on
-    a spinner for minutes — the same freedom a standalone offline script
-    would have.
+    evolution_data.precompute_week_summaries).
 
     The full evolution tier (every week's summary + every week-to-week
     comparison — see get_concept_detail) is deliberately NOT precomputed
-    here — it's the expensive tier, gated behind the explicit "View Full
-    Evolution" action, since most concepts a document ever surfaces are
-    never asked for their full cross-week history.
+    here — it's gated behind the explicit "View Full Evolution" action.
     """
     try:
         safe_name = Path(filename).name
@@ -955,14 +960,19 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, 
 
         chunks = engine.get_chunks(pages, source=safe_name, week_key=week_key)
 
+        # Snapshot known_concepts before this document contributes anything,
+        # so extraction is only nudged toward concepts from earlier weeks.
+        engine.rebuild_known_concept_embeddings()
+
         extraction_tasks = [
-            extract_with_exp_backoff(chunk["text"])
+            extract_with_exp_backoff(
+                chunk["text"],
+                known_concepts=engine.relevant_known_concepts(chunk["text"]),
+            )
             for chunk in chunks
         ]
         results = await asyncio.gather(*extraction_tasks)
 
-        # Add to graph sequentially (order doesn't matter here). results[i]
-        # came from chunks[:15][i], so chunks[i]'s spanned pages line up with it.
         for i, data in enumerate(results):
             engine.add_to_graph(data, filename, week_key, max_nodes_per_doc=max_nodes, pages=chunks[i].get("pages"))
             print(f"Processed chunk {i + 1}/{len(results)}")
@@ -970,20 +980,17 @@ async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, 
         if min_mentions > 1:
             engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
 
-        # Description precompute: one cheap-tier summary per surviving
-        # concept from this document, batched (see BATCH_SIZE in
-        # evolution_data) rather than the one-call-per-click this used to
-        # be. Fusion hasn't run yet at this point in the pipeline, so raw
-        # names here are genuinely distinct concepts, not spelling variants
-        # of one canonical concept — no dedup pass needed (contrast
-        # get_concept_detail, which dedupes post-fusion spellings).
+        engine.known_concepts.update(
+            c["name"] for c in engine.concepts
+            if c["source"] == filename and c["week"] == week_key
+        )
+
         doc_week_pairs = {
             (c["name"], c["week"]) for c in engine.concepts
             if c["source"] == filename and c["week"] == week_key
         }
         await evolution_data.precompute_week_summaries(engine, client, doc_week_pairs)
 
-        # Save current graph state (for debugging/persistence)
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
         graph_save_path = save_graph_json(
             [{"name": c["name"], "source": c["source"]} for c in engine.concepts],
@@ -1031,9 +1038,8 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
     Upload a PDF. Only the fast, local, deterministic steps (read the file,
     save it to disk, parse its text, assign a week) happen before this
     responds. Extraction and graph building happen afterward in a
-    background task (see _run_upload_pipeline) — this endpoint always
-    returns quickly regardless of how much Groq rate-limit backoff the
-    pipeline needs. Poll GET /api/upload/status for progress.
+    background task (see _run_upload_pipeline). Poll GET /api/upload/status
+    for progress.
 
     max_nodes: optional hard cap on distinct concepts admitted from this
     document (default: no cap).
@@ -1054,25 +1060,16 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
     if engine is None:
         engine = StudyGraphEngine(get_collection(1))
 
-    # Strip any directory components a client could send (path traversal) —
-    # this sanitized name is used as doc_name everywhere below, consistent
-    # with how the rest of the app already treats filename as the document's
-    # identity (there's no separate document-id scheme).
     safe_filename = Path(file.filename).name
 
     try:
         file_bytes = await file.read()
-        pages = engine.extract_text(file_bytes, safe_filename)
+        pages = extract_text(file_bytes, safe_filename)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Persisted so a concept's source can be opened later (see
-    # GET /api/documents/file/{filename}) — previously these bytes were
-    # discarded right after text extraction.
     (UPLOADS_DIR / safe_filename).write_bytes(file_bytes)
 
-    # Assigned synchronously (not inside the background task) so a second
-    # upload started before this one finishes still gets a distinct week.
     current_week_key = f"Week {engine.week_counter}"
     engine.week_counter += 1
     engine.uploads_by_week[current_week_key] = safe_filename
@@ -1082,7 +1079,7 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
         "week": current_week_key, "filename": safe_filename, "error": None,
     }
     asyncio.create_task(
-        _run_upload_pipeline(engine, pages, safe_filename, current_week_key, max_nodes, upload_start, min_mentions)
+        _run_upload_pipeline(engine, pages, safe_filename, current_week_key, upload_start, max_nodes, min_mentions)
     )
 
     return {
@@ -1116,7 +1113,7 @@ async def serve_uploaded_file(filename: str):
 @app.get("/api/documents/file/{filename}")
 async def get_document_file(filename: str):
     """Serves a previously-uploaded PDF back (e.g. for the 'open source at page N' viewer)."""
-    safe_name = Path(filename).name  # no path traversal via the URL param either
+    safe_name = Path(filename).name
     pdf_path = UPLOADS_DIR / safe_name
     if not pdf_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -1127,9 +1124,7 @@ def _source_page_fields(pages):
     """
     pages: sorted list of distinct page ints a concept appeared on within one
     source file. Returns the jump target for the PDF viewer (first page) plus
-    a compact human-readable label ("43", "43-48", "43, 47, 50") — mirrors
-    StudyGraphEngine.format_citation's range-compaction but without its
-    "p./pp." prefix, since the frontend supplies its own "Pg." label.
+    a compact human-readable label ("43", "43-48", "43, 47, 50").
     """
     if not pages:
         return {"page": None, "pageLabel": None}
@@ -1165,19 +1160,14 @@ async def get_graph():
         concept_relations[from_node].append(f"{e['relation']} → {to_node}")
         concept_relations[to_node].append(f"{from_node} → {e['relation']}")
 
-    # collapse duplicate concept entries by canonical name, tracking weeks/sources
     aggregated_concepts = {}
     for c in engine.concepts:
         canonical_name = engine.canonical_nodes.get(c["name"], c["name"])
         if canonical_name not in aggregated_concepts:
             aggregated_concepts[canonical_name] = {"sources": defaultdict(set), "weeks": set()}
-        # Union pages across every chunk this concept was pulled from for this
-        # file — the same concept can turn up in several chunks of one doc.
         aggregated_concepts[canonical_name]["sources"][c["source"]].update(
             p for p in (c.get("pages") or []) if isinstance(p, int)
         )
-        # Defensive check: Only add the week if it exists on the concept object.
-        # This prevents crashes and incorrect counts if data is malformed.
         week = c.get("week")
         if week:
             aggregated_concepts[canonical_name]["weeks"].add(week)
@@ -1193,7 +1183,6 @@ async def get_graph():
             first_week = list(data["weeks"])[0]
             node_color = week_color_map.get(first_week, evolution_data.DEFAULT_COLOR)
 
-        # Now create the final node object for the response
         if not any(n["name"] == name for n in nodes):
             nodes.append({
                 "id": name.replace(" ", "_"),
@@ -1217,6 +1206,8 @@ async def get_graph():
             "target": e["to"].replace(" ", "_"),
             "label": e["relation"],
             "relation": e["relation"],
+            "summary": e.get("summary", ""),
+            "context": e.get("context", ""),
             "conflict_resolved": e.get("conflict_resolved", False)
         }
         for e in working_edges
@@ -1233,6 +1224,8 @@ async def get_graph():
                     "target": e["to"].replace(" ", "_"),
                     "label": e["relation"],
                     "relation": e["relation"],
+                    "summary": e.get("summary", ""),
+                    "context": e.get("context", ""),
                     "conflict_resolved": False,
                     "is_inferred": True
                 })
@@ -1381,11 +1374,7 @@ async def regenerate_evolution_concept(concept_name: str):
     """
     Clears cached summaries/comparisons for a concept so the next request
     for its description or full detail regenerates them from Groq instead
-    of reusing whatever's cached — the only way to recover a concept whose
-    summary permanently stuck as the raw-excerpt fallback (see
-    precompute_week_summaries) or that's just wrong for any other reason.
-    Retrieval (concept_week_chunks) is left alone since it's free/local and
-    unaffected by why the summary was bad.
+    of reusing whatever's cached.
     """
     global engine
     if engine is None:

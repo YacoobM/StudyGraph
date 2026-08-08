@@ -556,7 +556,7 @@ def merge_graph(engine, client, log=print):
     edge_groups = {}
     skipped = 0
 
-    def _add_edge(frm, to, relation, discovered_by, doc=None):
+    def _add_edge(frm, to, relation, discovered_by, doc=None, summary="", context=""):
         nonlocal skipped
         relation = _clean_relation(relation)
         f, t = _final_canon(frm), _final_canon(to)
@@ -570,8 +570,14 @@ def merge_graph(engine, client, log=print):
         rec = edge_groups.get(key)
         if rec is None:
             rec = {"from": f, "to": t, "relation": relation, "sources": set(),
-                   "evidence": 0, "discovered_by": discovered_by}
+                   "evidence": 0, "discovered_by": discovered_by,
+                   "summary": summary or "", "context": context or ""}
             edge_groups[key] = rec
+        else:
+            if not rec.get("summary") and summary:
+                rec["summary"] = summary
+            if not rec.get("context") and context:
+                rec["context"] = context
         rec["evidence"] += 1
         if doc:
             rec["sources"].add(doc)
@@ -579,9 +585,24 @@ def merge_graph(engine, client, log=print):
             rec["discovered_by"] = "extraction"
 
     for e in engine.edges:
-        _add_edge(e["from"], e["to"], e["relation"], "extraction", doc=e.get("source"))
+        _add_edge(
+            e["from"],
+            e["to"],
+            e["relation"],
+            "extraction",
+            doc=e.get("source"),
+            summary=e.get("summary", ""),
+            context=e.get("context", ""),
+        )
     for e in step3_new_edges:
-        _add_edge(e["from"], e["to"], e["relation"], "llm_eval")
+        _add_edge(
+            e["from"],
+            e["to"],
+            e["relation"],
+            "llm_eval",
+            summary=e.get("summary", ""),
+            context=e.get("context", ""),
+        )
 
     input_edges = len(engine.edges) + len(step3_new_edges)
     exact_count = len(edge_groups)
@@ -619,7 +640,8 @@ def merge_graph(engine, client, log=print):
             continue
         src = set(final_nodes[fe["from"]]["sources"]) | set(final_nodes[fe["to"]]["sources"])
         rec = {"from": fe["from"], "to": fe["to"], "relation": fe["relation"],
-               "sources": src, "evidence": 1, "discovered_by": "bridge_fusion"}
+               "sources": src, "evidence": 1, "discovered_by": "bridge_fusion",
+               "summary": fe.get("summary", ""), "context": fe.get("context", "")}
         edge_groups[key] = rec
         edge_list.append(rec)
 
@@ -639,6 +661,8 @@ def merge_graph(engine, client, log=print):
             "from": rec["from"],
             "to": rec["to"],
             "relation": rec["relation"],
+            "summary": rec.get("summary", ""),
+            "context": rec.get("context", ""),
             "strength": "medium",        # reserved field; no grading logic exists
             "source": sorted(rec["sources"])[0] if rec["sources"] else "unknown",
             "discovered_by": rec["discovered_by"],

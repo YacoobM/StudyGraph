@@ -58,6 +58,8 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
           label: l.label,
           direction: isSource ? '→' : '←',
           strength: l.strength,
+          summary: l.summary || l.properties?.summary || '',
+          context: l.context || l.properties?.context || '',
         }
       })
   }

@@ -52,6 +52,8 @@ GRAPH_EDGE_SCHEMA = {
         "target": {"type": "string", "description": "Target node ID"},
         "label": {"type": "string", "description": "Relationship label"},
         "relation": {"type": "string", "description": "Relationship type (canonical form)"},
+        "summary": {"type": "string", "description": "Short explanation of the text segment supporting this relationship"},
+        "context": {"type": "string", "description": "Exact phrase or sentence from the source text that supports this relationship"},
         "conflict_resolved": {"type": "boolean", "description": "Whether this edge resulted from conflict resolution"},
         "is_inferred": {"type": "boolean", "description": "Whether this edge was inferred via transitive reasoning"},
         "source_doc": {"type": "string", "description": "Original source document"}
@@ -171,7 +173,9 @@ KNOWLEDGE_EXTRACTION_SCHEMA = {
                 "properties": {
                     "from": {"type": "string", "description": "Source concept"},
                     "to": {"type": "string", "description": "Target concept"},
-                    "relation": {"type": "string", "description": "Relationship type"}
+                    "relation": {"type": "string", "description": "Relationship type"},
+                    "summary": {"type": "string", "description": "Short explanation of the text segment supporting this relationship"},
+                    "context": {"type": "string", "description": "Exact phrase or sentence from the source text that supports this relationship"}
                 },
                 "required": ["from", "to", "relation"]
             }

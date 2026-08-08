@@ -17,6 +17,17 @@ from groq import RateLimitError, BadRequestError
 #     comparison, for the explicit "show concept evolution" action.
 # Both cache forever once generated, so re-viewing the same concept (or
 # viewing it in the other tier afterward) is always a pure cache read.
+#
+# Grounding: weekly summaries and comparisons are built primarily from each
+# concept's already-extracted relationship evidence — the 'summary' (short
+# explanation) and 'context' (exact supporting phrase) fields that live on
+# engine.edges, produced once by extract_knowledge's prompt and refined by
+# graph_fusion.py — rather than by re-embedding a query and re-retrieving
+# raw chunk text from the vector store. This is cheaper (smaller prompts)
+# and reuses evidence that's already been validated once at extraction
+# time. Raw chunk retrieval (engine.retrieve_chunks_for_week) is kept only
+# as a fallback for a concept that has no edges at all for a given week —
+# a genuinely isolated node with no relationship evidence to draw on.
 
 # --- Shared color palette ---
 # Single source of truth for week coloring, used by the main graph
@@ -291,13 +302,96 @@ COMPARISON_TOKENS_PER_ITEM = 180
 BATCH_TOKEN_OVERHEAD = 150
 
 
+# ---------------------------------------------------------------------------
+# Relationship-evidence grounding
+# ---------------------------------------------------------------------------
+# Weekly summaries and comparisons are grounded primarily in each concept's
+# already-extracted relationships (engine.edges' 'summary'/'context' fields)
+# rather than freshly re-retrieved raw chunk text — that evidence already
+# exists, is already validated, and is cheaper to prompt with. Raw chunk
+# retrieval (engine.retrieve_chunks_for_week) remains only as a fallback for
+# a concept with no edges in a given week.
+
+def _invert_uploads_by_week(engine):
+    """filename -> week_key, the reverse of engine.uploads_by_week. Lets an
+    edge (which only knows its source filename) be matched back to the week
+    it belongs to."""
+    return {doc: week for week, doc in engine.uploads_by_week.items()}
+
+
+def _relations_for_concept_week(engine, raw_name, week, doc_to_week):
+    """
+    The extracted relationship evidence for `raw_name` within `week`, read
+    straight off engine.edges — the same 'summary' (one-sentence explanation)
+    and 'context' (exact supporting phrase) fields produced by
+    extract_knowledge's prompt and refined by graph_fusion.py — rather than
+    re-embedding a query and re-retrieving chunk text. An edge belongs to
+    `week` when its source document is the one uploaded for that week.
+    """
+    out = []
+    for e in engine.edges:
+        if doc_to_week.get(e.get("source")) != week:
+            continue
+        if e["from"] == raw_name:
+            out.append({"direction": "from", "other": e["to"], "relation": e["relation"],
+                        "summary": e.get("summary", ""), "context": e.get("context", "")})
+        elif e["to"] == raw_name:
+            out.append({"direction": "to", "other": e["from"], "relation": e["relation"],
+                        "summary": e.get("summary", ""), "context": e.get("context", "")})
+    return out
+
+
+def _format_relation_evidence(concept_name, relations):
+    """
+    Render a concept's extracted relationships for one week as compact
+    grounded text. This is the material summarize_weeks_batch and
+    summarize_comparisons_batch build their prompts from — in place of
+    600-char raw chunk excerpts — smaller prompts, and grounded in material
+    that was already validated once at extraction time.
+    """
+    if not relations:
+        return ""
+    lines = []
+    for r in relations:
+        if r["direction"] == "from":
+            phrase = f"{concept_name} {r['relation']} {r['other']}"
+        else:
+            phrase = f"{r['other']} {r['relation']} {concept_name}"
+        detail = r["summary"] or r["context"]
+        lines.append(f"- {phrase}" + (f": {detail}" if detail else ""))
+    return "\n".join(lines)
+
+
+def _fallback_text_from_relations(relations, chunks, format_citation, docs_label):
+    """
+    Fallback text when Groq generation fails — prefers relation evidence
+    (already-extracted summary/context) over a raw chunk excerpt, and only
+    falls back further to an "appeared in document(s)" note if neither
+    exists.
+    """
+    if relations:
+        pieces = [r["summary"] or r["context"] for r in relations if (r["summary"] or r["context"])]
+        if pieces:
+            return " ".join(dict.fromkeys(pieces))  # dedupe, preserve order
+    if chunks:
+        excerpt = chunks[0]["text"].strip()
+        snippet = excerpt[:500].rsplit(". ", 1)[0] + "." if len(excerpt) > 500 else excerpt
+        citation = format_citation(chunks[0]["pages"])
+        citation_str = f" ({citation})" if citation else ""
+        return f"{snippet}{citation_str}"
+    return f"Appeared in document(s): {docs_label or 'unknown'} — no relationship evidence or excerpt could be retrieved."
+
+
 async def summarize_weeks_batch(client, requests, engine):
     """
     Batches many (concept, week) weekly-summary requests into a handful of
     LLM calls instead of one call per concept — the biggest lever against
     hitting Groq's per-minute request limit during a big upload.
 
-    `requests`: list of {"key", "concept_name", "week", "chunks"}.
+    `requests`: list of {"key", "concept_name", "week", "evidence", "chunks"}.
+    `evidence` is the pre-formatted relationship-evidence text (see
+    _format_relation_evidence); `chunks` is only used as a fallback when
+    `evidence` is empty (a concept with no edges that week).
     Returns dict key -> summary text (missing/failed keys are simply absent,
     so the caller can fall back to a plain template for those).
     """
@@ -306,12 +400,16 @@ async def summarize_weeks_batch(client, requests, engine):
 
     results = {}
     system_prompt = (
-        "You are a study assistant. For each concept below, given an excerpt of course "
-        "material, explain how that concept was presented in it: its definition, scope, and "
-        "any notable details. Write 2-4 sentences per concept, in your own words, grounded "
-        "only in its excerpt — do not invent information that isn't there. End each summary "
-        "with a citation in the form '(Covered in Slide N)' or '(Covered in Slide N-M)', using "
-        "the page number(s) shown in that concept's [brackets]. "
+        "You are a study assistant. For each concept below, you are given the "
+        "relationships it was extracted with during that week's material — each "
+        "line is a directed relationship plus a short grounded explanation. "
+        "Synthesize these into 2-4 sentences describing how the concept was "
+        "presented that week: its role, scope, and connections. Do not invent "
+        "any detail beyond what the relationships state. Some concepts instead "
+        "give a raw text excerpt in [page] brackets — in that case, explain how "
+        "the concept was presented, and end with a citation like "
+        "'(Covered in Slide N)' or '(Covered in Slide N-M)' using the page "
+        "number(s) shown. "
         'Respond with JSON: {"items": [{"key": "<the exact KEY given>", "text": "<the summary>"}, ...]}, '
         "one entry per concept below, in the same order."
     )
@@ -323,14 +421,17 @@ async def summarize_weeks_batch(client, requests, engine):
         print(f"Evolution summaries: batch {i}/{total} ({len(batch)} concepts)")
         sections = []
         for req in batch:
-            blocks = []
-            for c in req["chunks"]:
-                citation = engine.format_citation(c["pages"])
-                header = f"[{citation}]" if citation else "[unknown page]"
-                blocks.append(f"{header}\n{c['text'][:600]}")
-            context_text = "\n\n".join(blocks) or "(no excerpt available)"
+            if req.get("evidence"):
+                material = req["evidence"]
+            else:
+                blocks = []
+                for c in req.get("chunks", []):
+                    citation = engine.format_citation(c["pages"])
+                    header = f"[{citation}]" if citation else "[unknown page]"
+                    blocks.append(f"{header}\n{c['text'][:600]}")
+                material = "\n\n".join(blocks) or "(no evidence available)"
             sections.append(
-                f'KEY: {req["key"]}\nCONCEPT: {req["concept_name"]}\n{req["week"]} EXCERPT:\n{context_text}'
+                f'KEY: {req["key"]}\nCONCEPT: {req["concept_name"]}\n{req["week"]} EVIDENCE:\n{material}'
             )
         user_prompt = "\n\n---\n\n".join(sections)
 
@@ -350,7 +451,9 @@ async def summarize_comparisons_batch(client, requests):
     """
     Batches many week-to-week comparison requests into a handful of LLM
     calls. `requests`: list of {"key", "concept_name", "from_week",
-    "from_text", "to_week", "to_text"}. Returns dict key -> comparison text.
+    "from_text", "to_week", "to_text"}. `from_text`/`to_text` are now
+    relationship-evidence text (see excerpt_for in get_concept_detail)
+    rather than raw chunk excerpts. Returns dict key -> comparison text.
     """
     if not requests:
         return {}
@@ -358,14 +461,15 @@ async def summarize_comparisons_batch(client, requests):
     results = {}
     system_prompt = (
         "You are a study assistant. For each concept below, contrast how it was presented in "
-        "two different weeks of course material. Your answer must name the CONCRETE DIFFERENCE "
-        "between the weeks — e.g. what specific detail, example, formula, scope, or nuance is "
-        "new, dropped, or expanded in the later week compared to the earlier one. Do not write "
-        "vague continuity statements like 'it continued to be discussed' or 'it was reinforced' "
-        "without saying what actually changed. Write 1-3 sentences per concept, grounded only in "
-        "the excerpts given — do not invent information that isn't there. If the excerpts truly "
-        "show no difference in how the concept is treated, say so explicitly and name what stayed "
-        "the same (e.g. 'both weeks give the same definition, with no new detail added'). "
+        "two different weeks of course material, based on the relationship evidence given for "
+        "each week. Your answer must name the CONCRETE DIFFERENCE between the weeks — e.g. what "
+        "specific relationship, connection, or detail is new, dropped, or expanded in the later "
+        "week compared to the earlier one. Do not write vague continuity statements like 'it "
+        "continued to be discussed' or 'it was reinforced' without saying what actually changed. "
+        "Write 1-3 sentences per concept, grounded only in the evidence given — do not invent "
+        "information that isn't there. If the evidence truly shows no difference in how the "
+        "concept is treated, say so explicitly and name what stayed the same (e.g. 'both weeks "
+        "show the same relationships, with no new connection added'). "
         'Respond with JSON: {"items": [{"key": "<the exact KEY given>", "text": "<the comparison>"}, ...]}, '
         "one entry per concept below, in the same order."
     )
@@ -381,8 +485,8 @@ async def summarize_comparisons_batch(client, requests):
                 continue
             sections.append(
                 f'KEY: {req["key"]}\nCONCEPT: {req["concept_name"]}\n'
-                f'{req["from_week"]} EXCERPT:\n{req["from_text"][:600]}\n\n'
-                f'{req["to_week"]} EXCERPT:\n{req["to_text"][:600]}'
+                f'{req["from_week"]} EVIDENCE:\n{req["from_text"][:600]}\n\n'
+                f'{req["to_week"]} EVIDENCE:\n{req["to_text"][:600]}'
             )
         if not sections:
             print(f"Evolution comparisons: batch {i}/{total} skipped (nothing to compare)")
@@ -404,7 +508,15 @@ async def summarize_comparisons_batch(client, requests):
 async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pairs=None):
     """
     Given a set of (raw_concept_name, week) pairs, retrieves/caches their
-    source excerpts (no LLM) and generates any missing weekly summaries.
+    grounding evidence (no LLM) and generates any missing weekly summaries.
+
+    Grounding evidence is, for each pair, preferentially the concept's
+    extracted relationship evidence for that week (see
+    _relations_for_concept_week / _format_relation_evidence) — read
+    straight off engine.edges, so this costs nothing beyond a dict scan.
+    Only when a concept has no edges at all for that week (an isolated
+    node) does this fall back to engine.retrieve_chunks_for_week, exactly
+    as before.
 
     Callers should pass as many pairs as they have available in one call —
     summarize_weeks_batch groups whatever it's given into BATCH_SIZE-sized
@@ -415,7 +527,7 @@ async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pair
     3-at-a-time LLM calls into one call per concept.
 
     `summary_pairs`, if given, restricts which pairs actually get a *new*
-    summary generated — retrieval still runs for every pair in
+    summary generated — evidence retrieval still runs for every pair in
     raw_week_pairs regardless (it's free/local). Defaults to raw_week_pairs
     itself. get_concept_detail passes a deduped subset here: several raw
     spellings that fuse into one canonical concept can share a week (e.g.
@@ -429,17 +541,33 @@ async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pair
     if not raw_week_pairs:
         return
 
-    # Cheap, local-only: make sure a retrieved excerpt is cached for every
-    # (raw name, week) pair (no LLM call).
+    doc_to_week = _invert_uploads_by_week(engine)
+
+    # Cheap, local-only: make sure grounding evidence is cached for every
+    # (raw name, week) pair (no LLM call). Each cache entry is
+    # {"relations": [...], "chunks": [...]} — relations from engine.edges
+    # when available, chunks only as a fallback for an isolated concept.
     for raw, week in raw_week_pairs:
         if (raw, week) not in engine.concept_week_chunks:
-            query = f"Detailed explanation and definition of {raw}, not just a passing mention"
-            engine.concept_week_chunks[(raw, week)] = engine.retrieve_chunks_for_week(query, week, top_k=3)
+            relations = _relations_for_concept_week(engine, raw, week, doc_to_week)
+            if relations:
+                engine.concept_week_chunks[(raw, week)] = {"relations": relations, "chunks": []}
+            else:
+                query = f"Detailed explanation and definition of {raw}, not just a passing mention"
+                chunks = engine.retrieve_chunks_for_week(query, week, top_k=3)
+                engine.concept_week_chunks[(raw, week)] = {"relations": [], "chunks": chunks}
 
     target_pairs = summary_pairs if summary_pairs is not None else raw_week_pairs
     summary_requests = [
-        {"key": f"{raw}|{week}", "concept_name": raw, "week": week,
-         "chunks": engine.concept_week_chunks.get((raw, week), [])}
+        {
+            "key": f"{raw}|{week}",
+            "concept_name": raw,
+            "week": week,
+            "evidence": _format_relation_evidence(
+                raw, engine.concept_week_chunks.get((raw, week), {}).get("relations", [])
+            ),
+            "chunks": engine.concept_week_chunks.get((raw, week), {}).get("chunks", []),
+        }
         for raw, week in target_pairs
         if (raw, week) not in engine.concept_week_summaries
     ]
@@ -460,24 +588,21 @@ async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pair
             # exactly the click-triggers-an-LLM-call behavior the caching
             # in get_concept_detail is meant to avoid.
             #
-            # The fallback itself is grounded in the actual retrieved PDF
-            # excerpt (already fetched above, no extra LLM call) rather than
-            # a content-free "appeared in document X" note — a concept whose
-            # summary generation failed should still show real material from
-            # the source, not a stub with no explanation of the concept.
-            chunks = req["chunks"]
-            if chunks:
-                excerpt = chunks[0]["text"].strip()
-                snippet = excerpt[:500].rsplit(". ", 1)[0] + "." if len(excerpt) > 500 else excerpt
-                citation = engine.format_citation(chunks[0]["pages"])
-                citation_str = f" ({citation})" if citation else ""
-                text = f"{snippet}{citation_str}"
-            else:
-                docs = sorted({
-                    c["source"] for c in engine.concepts
-                    if c["name"] == req["concept_name"] and c["week"] == req["week"]
-                })
-                text = f"Appeared in document(s): {', '.join(docs) if docs else 'unknown'} — no excerpt could be retrieved."
+            # The fallback prefers the concept's own extracted relationship
+            # evidence (already fetched above, no extra LLM call), then a
+            # raw excerpt, and only as a last resort a content-free
+            # "appeared in document X" note.
+            entry = engine.concept_week_chunks.get(key, {})
+            docs = sorted({
+                c["source"] for c in engine.concepts
+                if c["name"] == req["concept_name"] and c["week"] == req["week"]
+            })
+            text = _fallback_text_from_relations(
+                entry.get("relations", []),
+                entry.get("chunks", []),
+                engine.format_citation,
+                ", ".join(docs),
+            )
             engine.degraded_summary_keys.add(key)
         engine.concept_week_summaries[key] = text
 
@@ -512,14 +637,14 @@ async def synthesize_overall_evolution(client, concept_name, consecutive_compari
     """
     Synthesizes a concept's first-to-last "overall evolution" summary from
     the per-transition comparisons already generated for it, instead of
-    re-sending raw first-week/last-week excerpts through another Groq call
+    re-sending raw first-week/last-week evidence through another Groq call
     (as summarize_comparisons_batch would). Cheaper — the input is a
-    handful of already-grounded sentences rather than ~1200 chars of raw
-    excerpt — and arguably more accurate too, since it's built from
-    verified per-transition diffs instead of asking the model to eyeball
-    two distant excerpts directly. Only used for concepts spanning more
-    than 2 weeks; the 2-week case reuses its single consecutive comparison
-    directly (see get_concept_detail).
+    handful of already-grounded sentences rather than a full evidence
+    block — and arguably more accurate too, since it's built from verified
+    per-transition diffs instead of asking the model to eyeball two distant
+    weeks directly. Only used for concepts spanning more than 2 weeks; the
+    2-week case reuses its single consecutive comparison directly (see
+    get_concept_detail).
     """
     system_prompt = (
         "You are a study assistant. You are given a chronological sequence of "
@@ -614,19 +739,32 @@ async def get_concept_detail(engine, concept_name, client):
     # have one yet — this is the concept's core "what is it" explanation,
     # needed whether or not it turns out to span multiple weeks. Delegates
     # to precompute_week_summaries so a single concept viewed on-demand and
-    # a whole document precomputed in bulk share the same batching path.
-    # summary_pairs is deduped to one raw spelling per week (see
-    # _dedupe_summary_targets) — retrieval still happens for every spelling,
-    # but only one per week ever gets an LLM summary requested, since only
-    # one is ever shown in weeks_data below.
+    # a whole document precomputed in bulk share the same batching path,
+    # and so both draw on relationship evidence first, chunk text only as
+    # a fallback. summary_pairs is deduped to one raw spelling per week
+    # (see _dedupe_summary_targets) — evidence retrieval still happens for
+    # every spelling, but only one per week ever gets an LLM summary
+    # requested, since only one is ever shown in weeks_data below.
     await precompute_week_summaries(engine, client, raw_week_pairs, summary_pairs=_dedupe_summary_targets(raw_week_pairs, engine))
 
     def excerpt_for(week):
-        texts = []
+        """
+        Grounding text for `week`, used to build comparison requests below.
+        Prefers each raw spelling's relationship evidence (already cached
+        by precompute_week_summaries); falls back to raw chunk text only
+        for a spelling that had no edges that week.
+        """
+        pieces = []
         for raw, w in raw_week_pairs:
-            if w == week:
-                texts.extend(c["text"] for c in engine.concept_week_chunks.get((raw, week), []))
-        return " ".join(texts)
+            if w != week:
+                continue
+            entry = engine.concept_week_chunks.get((raw, week), {})
+            ev = _format_relation_evidence(raw, entry.get("relations", []))
+            if ev:
+                pieces.append(ev)
+            else:
+                pieces.extend(c["text"] for c in entry.get("chunks", []))
+        return "\n".join(pieces)
 
     def fallback_week_summary(week):
         docs = ", ".join(set(weeks_data_raw[week]))

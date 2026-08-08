@@ -23,12 +23,14 @@ export default function NodeDetails({
   onRegenerate, regenerating,
   onOpenSource,
 }) {
+  const sources = Array.isArray(node?.source) ? node.source : []
+
   return (
     <div className={`kg-side-panel ${node ? "open" : ""}`}>
       {node && (
         <>
           <div className="panel-header">
-            <h2 className="panel-title">{conceptName}</h2>
+            <h2 className="panel-title">{node?.name || 'Concept'}</h2>
             <button className="close-btn" onClick={onClose}>
               ×
             </button>
@@ -87,7 +89,7 @@ export default function NodeDetails({
             )}
           </div>
           <div className="source-grid">
-            {node.source.map((src, i) => (
+            {sources.map((src, i) => (
               <div
                 key={i}
                 className="source-item source-item-clickable"
@@ -113,6 +115,7 @@ export default function NodeDetails({
                   <p>
                     <span>{conn.direction}</span> {conn.label}
                   </p>
+                  {conn.context ? <p style={{ marginTop: '6px', color: 'var(--gv-text-secondary)' }}>{conn.context}</p> : conn.summary ? <p style={{ marginTop: '6px', color: 'var(--gv-text-secondary)' }}>{conn.summary}</p> : null}
                 </div>
                 <div className={`conn-badge ${conn.strength || "medium"}`}>
                   {(conn.strength || "MEDIUM").toUpperCase()}

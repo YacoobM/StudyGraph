@@ -182,13 +182,17 @@ function buildGraphPayload(raw) {
   const relationshipsSource = raw.edges || raw.relationships || []
   const relationships = Array.isArray(relationshipsSource)
     ? relationshipsSource.map((rel) => {
-      const { id, source, target, relation, label, ...rest } = rel
+      const { id, source, target, relation, label, summary, context, ...rest } = rel
       return {
         id: id || `${source}_${target}`,
         source,
         target,
         type: relation || label || 'RELATED_TO',
-        properties: rest,
+        properties: {
+          ...rest,
+          ...(summary ? { summary } : {}),
+          ...(context ? { context } : {}),
+        },
       }
     })
     : []
