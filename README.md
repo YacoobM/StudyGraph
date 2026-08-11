@@ -1,4 +1,4 @@
-# StudyGraph — Frontend
+# StudyGraph —Frontend
 
 This is the **frontend module** of StudyGraph: the landing page, login, and the
 graph-processing workspace (upload, model selection, document table, and the
