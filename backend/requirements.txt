@@ -13,3 +13,9 @@ chromadb
 scikit-learn
 numpy
 pydantic
+python-docx
+python-pptx
+easyocr
+opencv-python
+Pillow
+google-genai
