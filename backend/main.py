@@ -27,6 +27,8 @@ import asyncio
 from chromadb import Client
 from schemas import *
 from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
+from services.quiz_service import * 
+from models.quiz_models import *
 
 backend_dir = Path(__file__).resolve().parent
 if str(backend_dir) not in sys.path:
@@ -49,6 +51,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 UPLOADS_DIR = Path(__file__).parent / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
+
 
 app = FastAPI(
     title="StudyGraph API",
@@ -73,6 +76,7 @@ EXTRACTION_MAX_RETRIES = 40  # matches evolution_data.py's MAX_RETRIES
 
 SEED_ENTITY_PRIORITY_COUNT = 10   # how many of this doc's own seeds go in the prompt's priority line
 CROSS_WEEK_CONCEPT_COUNT = 10     # how many known concepts from earlier weeks go in the prompt's known-concept line
+DEFAULT_QUIZ_QUESTION_COUNT = 10
 
 
 def save_seed_entities(seed_entities):
@@ -204,6 +208,7 @@ class StudyGraphEngine:
         self.pipeline_status = {"stage": "idle"}
 
         self.degraded_summary_keys = set()
+        self.quiz_sessions = {}
 
     def generate_seeds(self, all_pages):
         """
@@ -1393,6 +1398,53 @@ async def regenerate_evolution_concept(concept_name: str):
 
     return {"ok": True, "cleared": len(raw_week_pairs)}
 
+@app.get("/api/quiz")
+async def get_quiz(count: int = DEFAULT_QUIZ_QUESTION_COUNT):
+    """
+    Generate a relationship quiz from the current graph.
+ 
+    Notes: Uses fused_edges if fusion has run, otherwise raw edges.
+    A new quiz session is created on every call (not cached), since
+    question selection is randomized by design.
+    """
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
+ 
+    questions = generate_relationship_quiz(engine, count=count)
+    if not questions:
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough relationship data to build a quiz yet.",
+        )
+ 
+    quiz_id = str(uuid.uuid4())
+    engine.quiz_sessions[quiz_id] = {"questions": questions}
+    return {"quiz_id": quiz_id, "questions": questions}
+ 
+ 
+@app.post("/api/quiz/{quiz_id}/submit")
+async def submit_quiz(quiz_id: str, submission: QuizSubmission):
+    """
+    Score a submitted quiz against its stored questions.
+ 
+    Notes: quiz_sessions is in-memory and single-user, same as the rest
+    of the engine's state.
+    """
+    global engine
+    if engine is None:
+        raise HTTPException(status_code=404, detail="No graph loaded")
+ 
+    session = engine.quiz_sessions.get(quiz_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Quiz session not found")
+ 
+    correct_count, results = score_submission(session["questions"], submission.answers)
+    return {
+        "score": correct_count,
+        "total": len(session["questions"]),
+        "results": results,
+    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -31,6 +31,17 @@
   color: var(--text-1);
   transition: all 120ms;
 }
+
+.workspace-grid {
+  grid-template-columns: 1fr 320px 320px; /* docs table, chat, quiz */
+}
+
+.quiz-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .icon-btn:hover {
   background: var(--bg-2);
   color: var(--text-0);

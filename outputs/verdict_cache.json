@@ -1318,5 +1318,29 @@
     "canonical": "",
     "broader": "B",
     "explanation": "Schrödinger equation"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|data structures||database systems": {
+    "verdict": "related",
+    "relation": "operates on",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "data structures in database"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|dijkstras algorithm||graph algorithms": {
+    "verdict": "related",
+    "relation": "is a type of",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "B",
+    "explanation": "dijkstra in graph"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|fibonacci heap operations||fibonacci heaps": {
+    "verdict": "related",
+    "relation": "includes",
+    "direction": "B_to_A",
+    "canonical": "",
+    "broader": "B",
+    "explanation": "heap operations"
   }
 }

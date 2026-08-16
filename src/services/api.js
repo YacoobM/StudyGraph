@@ -235,3 +235,18 @@ export async function fetchConcept(conceptName) {
 export async function fetchConceptSubgraph(conceptName) {
   return safeFetchJson(`${API_BASE_URL}/api/evolution/subgraph/${encodeURIComponent(conceptName)}`)
 }
+
+// Relationship quiz, generated fresh from the current graph on every call
+// (question selection is randomized server-side, so this isn't cached like
+// fetchConceptDescription/fetchConcept are).
+export async function generateQuiz(count = 5) {
+  return safeFetchJson(`${API_BASE_URL}/api/quiz?count=${count}`)
+}
+
+export async function submitQuizAnswers(quizId, answers) {
+  return safeFetchJson(`${API_BASE_URL}/api/quiz/${encodeURIComponent(quizId)}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  })
+}
