@@ -29,6 +29,7 @@ from schemas import *
 from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
 from services.quiz_service import * 
 from models.quiz_models import *
+DEFAULT_QUIZ_QUESTION_COUNT = 5
 
 backend_dir = Path(__file__).resolve().parent
 if str(backend_dir) not in sys.path:
@@ -68,6 +69,8 @@ app.add_middleware(
 )
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+ce_client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
 
 engine = None
 
@@ -147,15 +150,28 @@ def get_collection(project_id, user_id="default"):
     )
 
 def call_groq(prompt, text_batch):
-    return client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": text_batch},
-        ],
-        model="llama-3.3-70b-versatile",
-        response_format={"type": "json_object"},
-    )
-
+    try:
+        return client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text_batch},
+            ],
+            model="openai/gpt-oss-20b",
+            response_format={"type": "json_object"},
+        )
+    except Exception as e:
+        # If strict JSON mode failed on validation, fall back without response_format constraints
+        if "json_validate_failed" in str(e):
+            print("Groq strict JSON validation failed. Retrying with explicit prompt...")
+            return client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": prompt + "\nRespond in pure raw JSON only."},
+                    {"role": "user", "content": text_batch},
+                ],
+                model="openai/gpt-oss-20b",
+            )
+        raise e
+    
 def call_cerebras(prompt, text_batch):
     return ce_client.chat.completions.create(
         messages=[
@@ -224,11 +240,13 @@ class StudyGraphEngine:
         if not full_text.strip():
             return
 
-        seed_prompt = """You are a JSON-only engine. Respond with ONLY a valid JSON object, no markdown, no explanation.
-
-    Analyze the academic material and identify the TOP 20 most fundamental concepts.
-    Respond with ONLY this structure:
-    {"seed_concepts": ["concept1", "concept2", "concept3"]}"""
+        # Explicitly instruct JSON-only and avoid asking for markdown blocks
+        seed_prompt = (
+            "You are a helpful assistant that outputs JSON. "
+            "Analyze the academic material and identify the TOP 20 most fundamental concepts. "
+            "Return a single JSON object with a key 'seed_concepts' containing an array of strings. "
+            "Do NOT include markdown formatting or code blocks."
+        )
 
         try:
             response = call_llm(seed_prompt, f"Material:\n{full_text[:5000]}")
@@ -239,8 +257,9 @@ class StudyGraphEngine:
                 self.seed_entities = []
                 return
 
+            # Clean potential markdown wrappers if the model generated them
             content = content.strip()
-            if content.startswith("```"):
+            if "```" in content:
                 content = content.split("```")[1]
                 if content.startswith("json"):
                     content = content[4:]
@@ -898,7 +917,7 @@ class StudyGraphEngine:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="llama-3.3-70b-versatile",
+                model="openai/gpt-oss-20b",
             )
             answer = response.choices[0].message.content
         except Exception as e:
@@ -1397,26 +1416,33 @@ async def regenerate_evolution_concept(concept_name: str):
     engine.concept_consecutive_comparisons.pop(concept_name, None)
 
     return {"ok": True, "cleared": len(raw_week_pairs)}
-
-@app.get("/api/quiz")
-async def get_quiz(count: int = DEFAULT_QUIZ_QUESTION_COUNT):
-    """
-    Generate a relationship quiz from the current graph.
  
-    Notes: Uses fused_edges if fusion has run, otherwise raw edges.
-    A new quiz session is created on every call (not cached), since
-    question selection is randomized by design.
+ 
+@app.get("/api/quiz")
+async def get_quiz(count: int = DEFAULT_QUIZ_QUESTION_COUNT, type: str = "relationship"):
+    """
+    Generate a quiz from the current graph and material.
+ 
+    type: "relationship" (default, deterministic, no LLM call) or
+    "ai" (Groq-generated, grounded in chunk text). A new quiz session is
+    created on every call, since question selection is randomized.
     """
     global engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
  
-    questions = generate_relationship_quiz(engine, count=count)
+    if type == "ai":
+        questions = await generate_ai_quiz(client, engine, count=count)
+    else:
+        questions = generate_relationship_quiz(engine, count=count)
+ 
     if not questions:
-        raise HTTPException(
-            status_code=400,
-            detail="Not enough relationship data to build a quiz yet.",
+        detail = (
+            "Not enough relationship data to build a quiz yet."
+            if type != "ai" else
+            "Not enough material to build an AI quiz yet."
         )
+        raise HTTPException(status_code=400, detail=detail)
  
     quiz_id = str(uuid.uuid4())
     engine.quiz_sessions[quiz_id] = {"questions": questions}
@@ -1445,7 +1471,6 @@ async def submit_quiz(quiz_id: str, submission: QuizSubmission):
         "total": len(session["questions"]),
         "results": results,
     }
-
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

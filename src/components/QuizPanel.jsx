@@ -4,6 +4,7 @@ import './ChatPanel.css'
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 export default function QuizPanel({ onClose, embedded = false }) {
+  const [quizType, setQuizType] = useState('relationship') // 'relationship' | 'ai'
   const [questions, setQuestions] = useState([])
   const [quizId, setQuizId] = useState(null)
   const [selected, setSelected] = useState({})
@@ -17,7 +18,7 @@ export default function QuizPanel({ onClose, embedded = false }) {
     setResults(null)
     setSelected({})
     try {
-      const res = await fetch(`${API_BASE_URL}/api/quiz?count=5`)
+      const res = await fetch(`${API_BASE_URL}/api/quiz?count=5&type=${quizType}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail || 'Failed to generate quiz')
@@ -65,6 +66,8 @@ export default function QuizPanel({ onClose, embedded = false }) {
 
   const allAnswered = questions.length > 0 && questions.every((q) => selected[q.id] !== undefined)
 
+  const showTypeSwitch = questions.length === 0 && !busy
+
   return (
     <div className={embedded ? 'chat-drawer chat-panel-embedded' : 'chat-drawer'}>
       <div className="chat-head">
@@ -79,10 +82,33 @@ export default function QuizPanel({ onClose, embedded = false }) {
       </div>
 
       <div className="chat-body">
-        {questions.length === 0 && !busy && (
+        {showTypeSwitch && (
           <div className="bubble bubble-assistant">
             <div className="bubble-content">
-              Generate a relationship quiz from your uploaded documents.
+              <div style={{ marginBottom: '10px' }}>
+                Choose a quiz type, then generate.
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className={`btn ${quizType === 'relationship' ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setQuizType('relationship')}
+                >
+                  Relationship
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${quizType === 'ai' ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setQuizType('ai')}
+                >
+                  AI Generated
+                </button>
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '0.8rem', color: 'var(--gv-text-secondary)' }}>
+                {quizType === 'relationship'
+                  ? 'Built instantly from the graph — tests how concepts connect.'
+                  : 'Written by the model from your source material — takes a few seconds.'}
+              </div>
             </div>
           </div>
         )}

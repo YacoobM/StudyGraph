@@ -37,7 +37,7 @@ WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff",
 MULTI_WEEK_COLOR = "#fcf6bd"  # Concepts spanning multiple weeks
 DEFAULT_COLOR = "#d1d5db"     # Concepts with no week data
 
-LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "openai/gpt-oss-20b"
 
 
 def get_week_color_map(engine):
@@ -118,7 +118,7 @@ BATCH_SIZE = 6  # concepts per LLM call. Was 3, tuned for llama-3.1-8b-instant's
                 # 6,000 TPM cap — a 15-concept batch there was ~10,500 tokens,
                 # rejected outright (413) no matter how many times it's
                 # retried, since retrying an oversized request just fails
-                # identically. LLM_MODEL is now llama-3.3-70b-versatile,
+                # identically. LLM_MODEL is now openai/gpt-oss-20b,
                 # confirmed on console.groq.com/settings/limits at 12,000 TPM
                 # (double llama-3.1-8b-instant's, not lower as once assumed —
                 # see TPM_BUDGET below), so batches can run bigger: a 6-concept
@@ -127,15 +127,17 @@ BATCH_SIZE = 6  # concepts per LLM call. Was 3, tuned for llama-3.1-8b-instant's
                 # request cap (1,000 RPD) is far tighter than 8b-instant's
                 # (14,400 RPD).
 
-# Batches within a single summarize_*_batch() call used to all fire via
+# Batches within a single summarize_*_batch() call USED TO fire via
 # asyncio.gather with no cap — a course with many concepts could dispatch
 # a dozen simultaneous requests the instant the previous phase finished,
 # which is enough to blow through a per-minute limit in under a second
 # even if the account's steady-state throughput would have been fine.
-# This throttles how many of THIS module's requests are in flight at once.
+# NOW: batches execute SERIALLY (one at a time, each waits for previous to
+# complete) so pacing actually works. The pacer is still kept as a safety
+# valve against unexpected surges, but serial execution is the primary guard.
 GROQ_CONCURRENCY = asyncio.Semaphore(2)
 
-# Confirmed on console.groq.com/settings/limits: llama-3.3-70b-versatile is
+# Confirmed on console.groq.com/settings/limits: openai/gpt-oss-20b is
 # 12,000 TPM (llama-3.1-8b-instant, despite being the smaller model, is only
 # 6,000 TPM on this account — the opposite of what was originally assumed
 # here). 10,500 keeps a -1,500 margin below the real 12,000 cap, since
@@ -443,7 +445,14 @@ async def summarize_weeks_batch(client, requests, engine):
                 results[req["key"]] = text.strip()
         print(f"Evolution summaries: batch {i}/{total} done")
 
-    await asyncio.gather(*[run_batch(i, b) for i, b in enumerate(batches, start=1)])
+    # ========== FIXED: Serial batch execution instead of concurrent ==========
+    # Previously: await asyncio.gather(*[run_batch(i, b) for i, b in enumerate(batches, start=1)])
+    # This caused concurrent bursts that exceeded TPM limits.
+    # Now: Execute batches one at a time, each waits for previous to complete.
+    for i, b in enumerate(batches, start=1):
+        await run_batch(i, b)
+    # =========================================================================
+
     return results
 
 
@@ -501,7 +510,14 @@ async def summarize_comparisons_batch(client, requests):
                 results[req["key"]] = text.strip()
         print(f"Evolution comparisons: batch {i}/{total} done")
 
-    await asyncio.gather(*[run_batch(i, b) for i, b in enumerate(batches, start=1)])
+    # ========== FIXED: Serial batch execution instead of concurrent ==========
+    # Previously: await asyncio.gather(*[run_batch(i, b) for i, b in enumerate(batches, start=1)])
+    # This caused concurrent bursts that exceeded TPM limits.
+    # Now: Execute batches one at a time, each waits for previous to complete.
+    for i, b in enumerate(batches, start=1):
+        await run_batch(i, b)
+    # =========================================================================
+
     return results
 
 
