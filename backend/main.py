@@ -33,6 +33,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 import evolution_data
 import graph_fusion
+from auth_documents import router as auth_router
 
 load_dotenv()
 
@@ -58,11 +59,14 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://localhost:\d+",
+    allow_origin_regex=r"(http://localhost:\d+|http://127\.0\.0\.1:\d+|null)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth + document management (see backend/auth_documents.py)
+app.include_router(auth_router)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -148,7 +152,7 @@ def call_groq(prompt, text_batch):
             {"role": "system", "content": prompt},
             {"role": "user", "content": text_batch},
         ],
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         response_format={"type": "json_object"},
     )
 
@@ -893,7 +897,7 @@ class StudyGraphEngine:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="llama-3.3-70b-versatile",
+                model="openai/gpt-oss-120b",
             )
             answer = response.choices[0].message.content
         except Exception as e:

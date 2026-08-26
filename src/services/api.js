@@ -39,38 +39,7 @@ async function pollUntilDone(pollFn, { intervalMs = 1500, timeoutMs = 10 * 60 * 
   }
 }
 
-// Backend has no document store — just one global engine that accumulates
-// everything uploaded. We track upload metadata client-side so the docs
-// table has real rows, built only from actual /api/upload responses.
-let _documents = []
-let _nextDocId = 1
 
-function _docFromUploadResponse(file, uploadResult) {
-  return {
-    id: _nextDocId++,
-    name: file.name,
-    status: 'Completed',
-    upload_status: 'Uploaded',
-    size_kb: Math.round(file.size / 1024),
-    source: 'upload',
-    type: file.type || 'application/pdf',
-    model: 'llama-3.3-70b-versatile',
-    nodes: uploadResult?.total_concepts ?? 0,
-    relationships: uploadResult?.total_edges ?? 0,
-    raw: uploadResult,
-  }
-}
-
-// Dummy — backend has no /api/auth/* routes. Exists so useAuth() doesn't crash.
-export async function login(email, _password) {
-  const user = { id: 'local-user', name: email.split('@')[0] || 'User', email }
-  return { user, token: 'dummy-local-token', dummy: true }
-}
-
-export async function register(email, _password, name) {
-  const user = { id: 'local-user', name: name || email.split('@')[0] || 'User', email }
-  return { user, token: 'dummy-local-token', dummy: true }
-}
 
 // Backend hardcodes the model server-side and has no /api/models route.
 export async function listModels() {
@@ -89,46 +58,8 @@ export async function listModels() {
   }
 }
 
-export async function listDocuments() {
-  return { documents: _documents }
-}
 
-export async function uploadDocument(file, seedMethod = 'llm', maxNodes = null, onStatus = null, minMentions = null) {
-  const formData = new FormData()
-  formData.append('file', file)
 
-  // seed_method is a query param on the backend, not a form field
-  const url = `${API_BASE_URL}/api/upload`
-  // seed_method, max_nodes, and min_mentions are query params on the backend, not form fields
-  const params = new URLSearchParams()
-  if (maxNodes) params.set('max_nodes', maxNodes)
-  if (minMentions) params.set('min_mentions', minMentions)
-  const uploadResult = await safeFetchJson(url, { method: 'POST', body: formData })
-
-  // The request above only acknowledges receipt — extraction happens
-  // afterward in a background task, so wait for that to actually finish
-  // before treating the upload as done.
-  const finalStatus = await pollUntilDone(async () => {
-    const status = await getPipelineStatus()
-    if (onStatus) onStatus(status)
-    return status
-  })
-
-  if (finalStatus.stage === 'error') {
-    throw new Error(finalStatus.error || 'Upload processing failed')
-  }
-
-  const doc = _docFromUploadResponse(file, finalStatus)
-  _documents.push(doc)
-  return { document: doc, raw: finalStatus }
-}
-
-export async function deleteDocument(id) {
-  // Dummy — backend has no per-document delete, this only removes the row locally
-  const before = _documents.length
-  _documents = _documents.filter((d) => d.id !== id)
-  return { deleted: before !== _documents.length, dummy: true }
-}
 
 export async function generateGraph(_docIds, _provider, _model) {
 
@@ -167,7 +98,7 @@ function buildGraphPayload(raw) {
         id,
         label: name || 'Concept',
         // Use the color from the backend, with a fallback for older data structures.
-        color: color || (is_canonical ? '#a3e635' : '#8b5cf6'),
+        color: color || (is_canonical ? '#4D7C0F' : '#6D28D9'),
         properties: {
           ...rest,
           ...(name ? { name } : {}),
@@ -234,4 +165,220 @@ export async function fetchConcept(conceptName) {
 
 export async function fetchConceptSubgraph(conceptName) {
   return safeFetchJson(`${API_BASE_URL}/api/evolution/subgraph/${encodeURIComponent(conceptName)}`)
+}
+
+// ---------------------------------------------------------------------------
+// token plumbing
+// ---------------------------------------------------------------------------
+
+// Same key auth.jsx already uses, so AuthProvider and these calls stay in step.
+function authToken() {
+  try {
+    return localStorage.getItem('sg_token')
+  } catch {
+    return null   // storage throws in some sandboxed/private contexts
+  }
+}
+
+function authHeaders(extra = {}) {
+  const token = authToken()
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra
+}
+
+/** Turns a transport failure into a message that names the real cause. */
+async function apiFetch(url, options = {}) {
+  let response
+  try {
+    response = await fetch(url, options)
+  } catch {
+    const err = new Error(
+      `Cannot reach the backend at ${API_BASE_URL}. Start it with: python dev_server.py`
+    )
+    err.offline = true
+    throw err
+  }
+  return handleResponse(response)
+}
+
+// ---------------------------------------------------------------------------
+// auth
+// ---------------------------------------------------------------------------
+
+export async function login(email, password) {
+  return apiFetch(`${API_BASE_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export async function register(email, password, name) {
+  return apiFetch(`${API_BASE_URL}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, name: name || '' }),
+  })
+}
+
+export async function logout() {
+  try {
+    return await apiFetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+  } catch {
+    return { ok: true }   // the local token is cleared regardless
+  }
+}
+
+/** Confirms a restored token is still valid. Throws 401 if it isn't. */
+export async function me() {
+  return apiFetch(`${API_BASE_URL}/api/auth/me`, { headers: authHeaders() })
+}
+
+// ---------------------------------------------------------------------------
+// row shape
+// ---------------------------------------------------------------------------
+
+/**
+ * The backend returns filename/concepts/size_kb; Builder's table renders
+ * name/nodes/type/upload_status. Map between them here rather than editing
+ * Builder, so the existing table keeps working untouched. Backend names are
+ * preserved alongside, so newer components can use either.
+ */
+function toRow(doc) {
+  const ext = (doc.filename?.split('.').pop() || '').toUpperCase()
+  const label = {
+    done: 'Processed', ready: 'Processed', error: 'Failed',
+    queued: 'Queued', running: 'Processing',
+  }[(doc.status || '').toLowerCase()] || 'Uploaded'
+
+  return {
+    ...doc,
+    name: doc.filename,
+    type: ext,
+    size: doc.size_kb,
+    status: doc.status === 'done' ? 'Ready' : (doc.status || 'New'),
+    upload_status: label,
+    nodes: doc.concepts ?? 0,
+    relationships: doc.relationships ?? 0,
+    source: doc.week || 'upload',
+    model: 'openai/gpt-oss-120b',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// documents
+// ---------------------------------------------------------------------------
+
+export async function listDocuments() {
+  const data = await apiFetch(`${API_BASE_URL}/api/documents`, { headers: authHeaders() })
+  return { ...data, documents: (data.documents || []).map(toRow) }
+}
+
+export async function patchDocument(id, fields) {
+  return apiFetch(`${API_BASE_URL}/api/documents/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(fields),
+  })
+}
+
+export async function deleteDocument(id) {
+  return apiFetch(`${API_BASE_URL}/api/documents/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+}
+
+/**
+ * Upload is deliberately two calls:
+ *   1. POST /api/documents  — our row, so the table shows the file at once
+ *   2. POST /api/upload     — main.py's extraction pipeline
+ * Extraction runs in a background task, so the status comes from polling
+ * /api/upload/status rather than from the upload response.
+ *
+ * onStatus receives each pipeline status object, for a progress line.
+ */
+export async function uploadDocument(
+  file,
+  seedMethod = 'llm',
+  maxNodes = null,
+  onStatus = null,
+  minMentions = null,
+) {
+  // Signature kept as Builder already calls it. seedMethod / maxNodes /
+  // minMentions are accepted and ignored: main.py's /api/upload takes
+  // max_nodes and min_mentions as query params, which the current pipeline
+  // does not act on, and inventing behaviour here would be worse than saying
+  // so plainly.
+  const form = new FormData()
+  form.append('file', file)
+
+  const created = await apiFetch(`${API_BASE_URL}/api/documents`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  })
+  const doc = created.document
+
+  try {
+    await patchDocument(doc.id, { status: 'running' })
+
+    const form2 = new FormData()
+    form2.append('file', file)
+    const ack = await apiFetch(`${API_BASE_URL}/api/upload`, {
+      method: 'POST',
+      body: form2,
+    })
+    if (ack?.week) await patchDocument(doc.id, { week: ack.week })
+
+    // Reuses the repo's existing pollUntilDone(pollFn, opts) helper rather
+    // than defining a second polling loop.
+    const final = await pollUntilDone(
+      async () => {
+        const status = await getPipelineStatus()
+        if (onStatus) onStatus(status)
+        return status
+      },
+      { intervalMs: 1500 },
+    )
+
+    if (final?.stage === 'error') {
+      const updated = await patchDocument(doc.id, {
+        status: 'error',
+        error: final.error || 'Extraction failed.',
+      })
+      return { document: toRow(updated.document), raw: final }
+    }
+
+    const updated = await patchDocument(doc.id, {
+      status: 'done',
+      concepts: final?.total_concepts ?? 0,
+      relationships: final?.total_edges ?? 0,
+    })
+    return { document: toRow(updated.document), raw: final }
+  } catch (err) {
+    // The row exists and the file is stored; only extraction failed. Record
+    // that on the row rather than losing the upload.
+    await patchDocument(doc.id, { status: 'error', error: err.message }).catch(() => {})
+    throw err
+  }
+}
+
+// ---------------------------------------------------------------------------
+// quiz
+// ---------------------------------------------------------------------------
+
+/** Topics and questions generated from the concepts in the uploaded documents. */
+export async function fetchQuiz() {
+  return apiFetch(`${API_BASE_URL}/api/quiz`, { headers: authHeaders() })
+}
+
+export async function saveQuizResult(quizId, correct, total, points) {
+  return apiFetch(`${API_BASE_URL}/api/quiz/results`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ quiz_id: quizId, correct, total, points }),
+  })
 }
