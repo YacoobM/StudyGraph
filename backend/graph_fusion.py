@@ -222,7 +222,7 @@ def _save_verdict_cache(cache):
 def _pair_key(version, a, b):
     """Cache key for a pair; keep the model string in step with _verdict_call."""
     x, y = sorted((a, b))
-    return f"{version}|llama-3.3-70b-versatile|{x}||{y}"
+    return f"{version}|openai/gpt-oss-120b|{x}||{y}"
 
 
 def _to_cache_record(a, b, r):
@@ -276,7 +276,7 @@ def _verdict_attempt(client, system, payload, log, tag):
                     {"role": "system", "content": system},
                     {"role": "user", "content": "PAIRS:\n" + json.dumps(payload, ensure_ascii=False)},
                 ],
-                model="llama-3.3-70b-versatile",
+                model="openai/gpt-oss-120b",
                 response_format={"type": "json_object"},
             )
             data = json.loads(completion.choices[0].message.content)

@@ -18,7 +18,27 @@ load_dotenv()
 # Initialize EasyOCR reader (better for handwriting than Paddle)
 # Set gpu=True if you have CUDA for faster processing
 reader = easyocr.Reader(['en'], gpu=False)
-ai_client = genai.Client(api_key=os.getenv("GEMINI_VISION_API_KEY"))
+# Built on first use, not at import time. main.py imports this module at
+# startup, and constructing the client with no GEMINI_VISION_API_KEY set
+# raises ValueError — which took the entire server down before it could
+# serve anything. Only the image-OCR fallback needs it, so PDFs, Word and
+# PowerPoint files now work without a Gemini key.
+_ai_client = None
+
+
+def get_ai_client():
+    global _ai_client
+    if _ai_client is None:
+        key = os.getenv("GEMINI_VISION_API_KEY")
+        if not key:
+            raise RuntimeError(
+                "GEMINI_VISION_API_KEY is not set. It is only needed to read "
+                "text out of images and handwriting — PDF, DOCX and PPTX "
+                "files do not use it. Add the key to backend/.env to turn "
+                "image OCR on."
+            )
+        _ai_client = genai.Client(api_key=key)
+    return _ai_client
 
 def extract_text(file_bytes, filename=None):
     suffix = Path(filename).suffix.lower()
@@ -121,7 +141,7 @@ def extract_image_ocr(file_bytes):
         "Return ONLY the transcribed text."
     )
     
-    response = ai_client.models.generate_content(
+    response = get_ai_client().models.generate_content(
         model='gemini-flash-latest',
         contents=[pil_image, prompt]
     )

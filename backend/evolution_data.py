@@ -37,7 +37,7 @@ WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff",
 MULTI_WEEK_COLOR = "#fcf6bd"  # Concepts spanning multiple weeks
 DEFAULT_COLOR = "#d1d5db"     # Concepts with no week data
 
-LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "openai/gpt-oss-120b"
 
 
 def get_week_color_map(engine):
