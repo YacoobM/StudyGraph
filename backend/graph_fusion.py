@@ -222,7 +222,7 @@ def _save_verdict_cache(cache):
 def _pair_key(version, a, b):
     """Cache key for a pair; keep the model string in step with _verdict_call."""
     x, y = sorted((a, b))
-    return f"{version}|open|{x}||{y}"
+    return f"{version}|openai/gpt-oss-20b|{x}||{y}"
 
 
 def _to_cache_record(a, b, r):

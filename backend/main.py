@@ -36,6 +36,8 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 import evolution_data
 import graph_fusion
+from auth_documents import router as auth_router
+from quiz_service import router as quiz_router, set_graph_source
 
 load_dotenv()
 
@@ -62,11 +64,18 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://localhost:\d+",
+    allow_origin_regex=r"(http://localhost:\d+|http://127\.0\.0\.1:\d+|null)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth + document management (see backend/auth_documents.py)
+app.include_router(auth_router)
+
+# Quiz generation from the extracted graph (see backend/quiz_service.py)
+app.include_router(quiz_router)
+set_graph_source(lambda: engine)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -1219,6 +1228,13 @@ async def get_graph():
                 "is_canonical": name in engine.canonical_nodes.values(),
                 "color": node_color,
                 "appears_in_weeks": appears_in_weeks,
+                # The weeks themselves, not just how many. The client needs
+                # these to drive the week slider and to colour concepts that
+                # arrived in the week being viewed.
+                "weeks": sorted(
+                    data["weeks"],
+                    key=lambda w: int(w.split(" ")[1]) if " " in w else 0,
+                ),
             })
 
     valid_node_ids = {n["id"] for n in nodes}
