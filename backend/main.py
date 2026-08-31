@@ -7,7 +7,8 @@ if sys.stdout.encoding != "utf-8":
 if sys.stderr.encoding != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import re    
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -27,8 +28,10 @@ import asyncio
 from chromadb import Client
 from schemas import *
 from cerebras.cloud.sdk import Cerebras, RateLimitError as RLE
-from services.quiz_service import * 
 from models.quiz_models import *
+from auth_documents import current_user
+from services.quiz_service import router as quiz_router, set_graph_source
+    
 DEFAULT_QUIZ_QUESTION_COUNT = 5
 
 backend_dir = Path(__file__).resolve().parent
@@ -37,7 +40,6 @@ if str(backend_dir) not in sys.path:
 import evolution_data
 import graph_fusion
 from auth_documents import router as auth_router
-from quiz_service import router as quiz_router, set_graph_source
 
 load_dotenv()
 
@@ -73,7 +75,6 @@ app.add_middleware(
 # Auth + document management (see backend/auth_documents.py)
 app.include_router(auth_router)
 
-# Quiz generation from the extracted graph (see backend/quiz_service.py)
 app.include_router(quiz_router)
 set_graph_source(lambda: engine)
 
@@ -89,7 +90,7 @@ EXTRACTION_MAX_RETRIES = 40  # matches evolution_data.py's MAX_RETRIES
 SEED_ENTITY_PRIORITY_COUNT = 10   # how many of this doc's own seeds go in the prompt's priority line
 CROSS_WEEK_CONCEPT_COUNT = 10     # how many known concepts from earlier weeks go in the prompt's known-concept line
 DEFAULT_QUIZ_QUESTION_COUNT = 10
-
+LLM_MODEL = "qwen/qwen3.6-27b"
 
 def save_seed_entities(seed_entities):
     """Save seed entities to graph_entities.json"""
@@ -107,6 +108,12 @@ def save_seed_entities(seed_entities):
     except Exception as e:
         print(f"Error saving seed entities: {e}")
         return None
+
+class QuizResult(BaseModel):
+    quiz_id: str
+    correct: int
+    total: int
+    points: int
 
 def save_extraction_result(timings, nodes, edges):
     try:
@@ -165,7 +172,8 @@ def call_groq(prompt, text_batch):
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": text_batch},
             ],
-            model="openai/gpt-oss-20b",
+            model=LLM_MODEL,
+            reasoning_effort="none",
             response_format={"type": "json_object"},
         )
     except Exception as e:
@@ -177,7 +185,9 @@ def call_groq(prompt, text_batch):
                     {"role": "system", "content": prompt + "\nRespond in pure raw JSON only."},
                     {"role": "user", "content": text_batch},
                 ],
-                model="openai/gpt-oss-20b",
+                model=LLM_MODEL,
+                reasoning_effort="none",
+                response_format={"type": "json_object"},
             )
         raise e
     
@@ -192,7 +202,19 @@ def call_cerebras(prompt, text_batch):
     )
 
 def call_llm(prompt, text_batch):
-    return call_groq(prompt, text_batch)
+    try:
+        return client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text_batch},
+            ],
+            model=LLM_MODEL,
+            reasoning_effort="none",
+            response_format={"type": "json_object"}
+        )
+    except Exception as e:
+        print(f"LLM call failed: {e}")
+        raise
 
 class StudyGraphEngine:
     def __init__(self, collections):
@@ -249,12 +271,9 @@ class StudyGraphEngine:
         if not full_text.strip():
             return
 
-        # Explicitly instruct JSON-only and avoid asking for markdown blocks
         seed_prompt = (
-            "You are a helpful assistant that outputs JSON. "
-            "Analyze the academic material and identify the TOP 20 most fundamental concepts. "
-            "Return a single JSON object with a key 'seed_concepts' containing an array of strings. "
-            "Do NOT include markdown formatting or code blocks."
+            "Extract the TOP 20 most fundamental academic concepts from this material. "
+            "Respond with ONLY a JSON object: {\"seed_concepts\": [\"concept1\", \"concept2\", ...]}"
         )
 
         try:
@@ -262,13 +281,12 @@ class StudyGraphEngine:
             content = response.choices[0].message.content
 
             if not content or not content.strip():
-                print("Empty response from LLM for seed generation")
+                print("Empty response from LLM")
                 self.seed_entities = []
                 return
 
-            # Clean potential markdown wrappers if the model generated them
             content = content.strip()
-            if "```" in content:
+            if content.startswith("```"):
                 content = content.split("```")[1]
                 if content.startswith("json"):
                     content = content[4:]
@@ -276,9 +294,9 @@ class StudyGraphEngine:
 
             seed_json = json.loads(content)
             self.seed_entities = [s.lower().strip() for s in seed_json.get("seed_concepts", [])]
-            print(f"LLM generated {len(self.seed_entities)} seed entities: {self.seed_entities}")
+            print(f"Generated {len(self.seed_entities)} seeds: {self.seed_entities}")
         except Exception as e:
-            print(f"Error generating seeds (LLM): {e}")
+            print(f"Seed generation failed: {e}")
             self.seed_entities = []
 
     def _deduplicate_seeds_semantically(self, seeds, threshold=0.85):
@@ -369,14 +387,14 @@ class StudyGraphEngine:
 
         prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
-    {priority_line}{known_line}
-    Relationship types: prerequisite, causes, part_of, explains, enables, related_to
-    For each relationship, include both:
-    - summary: a short explanation (one sentence max)
-    - context: the exact phrase or sentence from the source text that supports the relationship
+{priority_line}{known_line}
+Relationship types: prerequisite, causes, part_of, explains, enables, related_to
+For each relationship, include both:
+- summary: a short explanation (one sentence max)
+- context: the exact phrase or sentence from the source text that supports the relationship
 
-    Respond with ONLY this exact JSON structure:
-    {{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "summary": "Short explanation of the supporting text segment.", "context": "Exact phrase or sentence from the source text."}}]}}"""
+Respond with ONLY this exact JSON structure:
+{{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "summary": "Short explanation.", "context": "Exact phrase."}}]}}"""
 
         try:
             async with EXTRACTION_SEMAPHORE:
@@ -926,7 +944,7 @@ class StudyGraphEngine:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="openai/gpt-oss-20b",
+                model=LLM_MODEL,
             )
             answer = response.choices[0].message.content
         except Exception as e:
@@ -1434,59 +1452,110 @@ async def regenerate_evolution_concept(concept_name: str):
     return {"ok": True, "cleared": len(raw_week_pairs)}
  
  
-@app.get("/api/quiz")
-async def get_quiz(count: int = DEFAULT_QUIZ_QUESTION_COUNT, type: str = "relationship"):
-    """
-    Generate a quiz from the current graph and material.
- 
-    type: "relationship" (default, deterministic, no LLM call) or
-    "ai" (Groq-generated, grounded in chunk text). A new quiz session is
-    created on every call, since question selection is randomized.
-    """
-    global engine
-    if engine is None:
-        raise HTTPException(status_code=400, detail="No documents uploaded yet")
- 
-    if type == "ai":
-        questions = await generate_ai_quiz(client, engine, count=count)
-    else:
-        questions = generate_relationship_quiz(engine, count=count)
- 
-    if not questions:
-        detail = (
-            "Not enough relationship data to build a quiz yet."
-            if type != "ai" else
-            "Not enough material to build an AI quiz yet."
-        )
-        raise HTTPException(status_code=400, detail=detail)
- 
-    quiz_id = str(uuid.uuid4())
-    engine.quiz_sessions[quiz_id] = {"questions": questions}
-    return {"quiz_id": quiz_id, "questions": questions}
- 
- 
-@app.post("/api/quiz/{quiz_id}/submit")
-async def submit_quiz(quiz_id: str, submission: QuizSubmission):
-    """
-    Score a submitted quiz against its stored questions.
- 
-    Notes: quiz_sessions is in-memory and single-user, same as the rest
-    of the engine's state.
-    """
-    global engine
-    if engine is None:
-        raise HTTPException(status_code=404, detail="No graph loaded")
- 
-    session = engine.quiz_sessions.get(quiz_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Quiz session not found")
- 
-    correct_count, results = score_submission(session["questions"], submission.answers)
-    return {
-        "score": correct_count,
-        "total": len(session["questions"]),
-        "results": results,
-    }
+# @app.get("/api/quiz")
+# async def get_quiz(user=Depends(current_user)):
+#     global engine
+#     if engine is None:
+#         return {
+#             "topics": [],
+#             "quizzes": [],
+#             "generated": False,
+#             "reason": "No documents have been processed yet.",
+#         }
+    
+#     by_week = defaultdict(list)
+#     for c in engine.concepts:
+#         week = c.get("week") or "Week 1"
+#         by_week[week].append(c)
+    
+#     topics = []
+#     quizzes = []
+    
+#     for week in sorted(by_week, key=lambda w: int(re.sub(r'\D+', '', w or '1'))):
+#         members = by_week[week]
+#         names = sorted({c["name"] for c in members})
+        
+#         if len(names) < 4:
+#             continue
+        
+#         topic_id = f"w{len(topics) + 1}"
+#         sources = sorted({c.get("source", "") for c in members if c.get("source")})
+        
+#         topics.append({
+#             "id": topic_id,
+#             "day": len(topics) + 1,
+#             "name": f"{week} — {names[0]}",
+#             "desc": f"{len(names)} concepts from {', '.join(sources) or 'your uploads'}.",
+#         })
+        
+#         # Generate 3 quiz sets per topic
+#         for i in range(3):
+#             quiz_id = f"{topic_id}-{i+1}"
+            
+#             # Try AI quiz first, fallback to relationship quiz
+#             questions = await generate_ai_quiz(client, engine, count=3)
+#             if not questions:
+#                 questions = generate_relationship_quiz(engine, count=3)
+            
+#             if not questions:
+#                 continue
+            
+#             # Transform questions to match React frontend expectations
+#             transformed_questions = []
+#             for q in questions:
+#                 transformed_questions.append({
+#                     "q": q.get("question") or q.get("q"),  # question text
+#                     "o": q.get("options") or q.get("o"),   # options array
+#                     "a": q.get("correct_index") or q.get("a"),  # correct answer index
+#                     "d": q.get("difficulty") or q.get("d") or "medium",  # difficulty
+#                     "why": q.get("explanation") or q.get("why"),  # explanation
+#                 })
+            
+#             # Find hardest difficulty
+#             difficulties = [q["d"] for q in transformed_questions]
+#             hardest = max(difficulties) if difficulties else "medium"
+            
+#             quizzes.append({
+#                 "id": quiz_id,
+#                 "topic": topic_id,
+#                 "title": f"Set {i+1}",
+#                 "difficulty": hardest,
+#                 "questions": transformed_questions,
+#             })
+    
+#     return {
+#         "topics": topics,
+#         "quizzes": quizzes,
+#         "generated": bool(quizzes),
+#         "reason": None if quizzes else "Not enough concepts yet.",
+#     }
+    
+# @app.post("/api/quiz/results")
+# async def save_result(body: QuizResult, user=Depends(current_user)):
+#     """Record an attempt. Best score wins."""
+#     if body.total <= 0:
+#         raise HTTPException(status_code=422, detail="A quiz needs at least one question.")
+    
+#     passed = body.correct / body.total >= 2 / 3
+    
+#     # Store per-user (you'll need a DB or session store for this)
+#     # For now, in-memory:
+#     if not hasattr(save_result, "storage"):
+#         save_result.storage = {}
+    
+#     save_result.storage.setdefault(user["id"], {})
+#     prev = save_result.storage[user["id"]].get(body.quiz_id)
+    
+#     if prev is None or body.points > prev["points"]:
+#         save_result.storage[user["id"]][body.quiz_id] = {
+#             "correct": body.correct,
+#             "total": body.total,
+#             "points": body.points,
+#             "passed": passed,
+#         }
+    
+#     return {"result": save_result.storage[user["id"]][body.quiz_id], "passed": passed}
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
