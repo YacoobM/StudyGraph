@@ -16,15 +16,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize EasyOCR reader (better for handwriting than Paddle)
-# Set gpu=True if you have CUDA for faster processing
 reader = easyocr.Reader(['en'], gpu=False)
-# Built on first use, not at import time. main.py imports this module at
-# startup, and constructing the client with no GEMINI_VISION_API_KEY set
-# raises ValueError — which took the entire server down before it could
-# serve anything. Only the image-OCR fallback needs it, so PDFs, Word and
-# PowerPoint files now work without a Gemini key.
 _ai_client = None
-
 
 def get_ai_client():
     global _ai_client
@@ -145,9 +138,7 @@ def extract_image_ocr(file_bytes):
         model='gemini-flash-latest',
         contents=[pil_image, prompt]
     )
-    
-    print("Used Gemini OCR")
-    
+        
     return [
         {
             "page": 1,
