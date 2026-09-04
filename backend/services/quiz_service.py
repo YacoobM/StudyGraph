@@ -14,7 +14,7 @@ changed topic generates in the background and reports status "generating"
 until ready.
 
 Mount:
-    from quiz_service import router as quiz_router, set_graph_source
+    from services.quiz_service import router as quiz_router, set_graph_source
     app.include_router(quiz_router)
     set_graph_source(lambda: engine)
 """
@@ -33,7 +33,8 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth_documents import current_user
+from api.routes.auth import current_user
+from models.quiz_models import TopicResult
 
 router = APIRouter(tags=["quiz"])
 
@@ -323,13 +324,6 @@ async def document_stats(user=Depends(current_user)):
         by_source[src]["edges"] = sum(1 for e in edges if e["from"] in names and e["to"] in names)
 
     return {"stats": by_source}
-
-
-class TopicResult(BaseModel):
-    topic_id: str
-    correct: int
-    total: int
-    points: int
 
 
 @router.post("/api/quiz/results")

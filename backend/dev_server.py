@@ -12,7 +12,7 @@ This server gives the frontend the same HTTP contract as main.py, with:
     the real backend
 
 Run:  python dev_server.py          (defaults to port 8000, same as main.py)
-Real: uvicorn main:app --port 8000  (needs GROQ_API_KEY + requirements.txt)
+Real: uvicorn app.main:app --port 8000  (needs GROQ_API_KEY + requirements.txt)
 
 Every stubbed route is marked STUB in its docstring and returns
 "stub": true in its payload so nothing silently passes for real extraction.
@@ -30,8 +30,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from auth_documents import router as auth_router
-from quiz_service import router as quiz_router, set_graph_source
+from app.config import UPLOADS_DIR
+from api.routes.auth import router as auth_router
+from api.routes.documents import router as documents_router
+from api.routes.quiz import router as quiz_router, set_graph_source
 
 app = FastAPI(
     title="StudyGraph API (dev)",
@@ -50,14 +52,11 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(documents_router)
 app.include_router(quiz_router)
 
 # Quizzes are generated from whatever the engine currently holds.
 set_graph_source(lambda: engine)
-
-UPLOADS_DIR = Path(__file__).parent / "uploads"
-UPLOADS_DIR.mkdir(exist_ok=True)
-
 
 # ---------------------------------------------------------------------------
 # stub engine state — mirrors StudyGraphEngine's public surface only

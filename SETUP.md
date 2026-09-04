@@ -149,7 +149,6 @@ With the backend running:
 ```bash
 node verify_workspace.mjs                  # 13 checks, the full workspace flow
 node verify_quiz.mjs                       # 14 checks, quiz generation
-cd backend && python test_integration.py   # 74 backend tests
 npx vite build                             # production build
 ```
 
@@ -170,7 +169,7 @@ from your own PDFs:
 cd backend && source .venv/bin/activate
 pip install -r requirements.txt     # spacy, chromadb, torch — several GB
 echo "GROQ_API_KEY=gsk_your_key" > .env
-uvicorn main:app --port 8000 --reload
+uvicorn app.main:app --port 8000 --reload
 ```
 
 Free Groq key, no card: https://console.groq.com — `GEMINI_VISION_API_KEY` is

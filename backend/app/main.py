@@ -11,36 +11,21 @@ if sys.stdout.encoding != "utf-8":
 if sys.stderr.encoding != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 import os
 import json
-from app.config import OUTPUT_DIR, UPLOADS_DIR
-from services.document_service import extract_text
-from groq import Groq, RateLimitError
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-from datetime import datetime
-import time
-import asyncio
+from groq import Groq
 from chromadb import Client
-from schemas.extraction import ExtractionResult
 from schemas.graph import GraphResponse
 from schemas.query import QueryRequest
 from api.routes.auth import router as auth_router
 from api.routes.documents import router as documents_router
 from api.routes.quiz import router as quiz_router, set_graph_source
-from services.graph_engine import StudyGraphEngine
-from services.graph_runtime import (
-    call_llm,
-    get_collection,
-    save_extraction_result,
-    save_graph_json,
-    save_seed_entities,
-)
+from api.routes.upload import router as upload_router
+from app import state as runtime_state
+from services.graph_runtime import save_graph_json
 
 from services import evolution_data, graph_fusion
 
@@ -68,216 +53,21 @@ app.add_middleware(
 # Auth + document management (see backend/auth_documents.py)
 app.include_router(auth_router)
 app.include_router(documents_router)
+app.include_router(upload_router)
 
 app.include_router(quiz_router)
-set_graph_source(lambda: engine)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
-engine = None
+runtime_state.configure_runtime(client, chroma)
+set_graph_source(lambda: runtime_state.engine)
 
 LLM_MODEL = "qwen/qwen3.6-27b"
 RAG_MODEL = "openai/gpt-oss-20b"
 
-async def extract_with_exp_backoff(text, known_concepts=None, retries=5):
-    """
-    Helper method to extract concepts and relationships with exponential
-    backoff.
-    """
-    delay = 5
 
-    for attempt in range(retries):
-        try:
-            return await (engine.extract_knowledge(text, known_concepts=known_concepts))
-        except RateLimitError as e:
-            await asyncio.sleep(delay)
-            delay *= 2
-    raise Exception("Maximum retries exceeded!")
-
-# API Endpoints
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
-
-
-async def _run_upload_pipeline(engine, pages, filename, week_key, upload_start, max_nodes, min_mentions):
-    """
-    Everything slow and LLM-dependent about an upload: seed generation (first
-    upload only), chunk extraction, graph building, and â€” for every concept
-    that survives pruning â€” its cheap-tier description (see
-    evolution_data.precompute_week_summaries).
-
-    The full evolution tier (every week's summary + every week-to-week
-    comparison â€” see get_concept_detail) is deliberately NOT precomputed
-    here â€” it's gated behind the explicit "View Full Evolution" action.
-    """
-    try:
-        safe_name = Path(filename).name
-
-        engine.generate_seeds(pages)
-        save_seed_entities(engine.seed_entities)
-
-        chunks = engine.get_chunks(pages, source=safe_name, week_key=week_key)
-
-        # Snapshot known_concepts before this document contributes anything,
-        # so extraction is only nudged toward concepts from earlier weeks.
-        engine.rebuild_known_concept_embeddings()
-
-        extraction_tasks = [
-            extract_with_exp_backoff(
-                chunk["text"],
-                known_concepts=engine.relevant_known_concepts(chunk["text"]),
-            )
-            for chunk in chunks
-        ]
-        results = await asyncio.gather(*extraction_tasks)
-
-        for i, data in enumerate(results):
-            engine.add_to_graph(data, filename, week_key, max_nodes_per_doc=max_nodes, pages=chunks[i].get("pages"))
-            print(f"Processed chunk {i + 1}/{len(results)}")
-
-        if min_mentions > 1:
-            engine.prune_low_value_concepts(filename, week_key, min_mentions=min_mentions)
-
-        engine.known_concepts.update(
-            c["name"] for c in engine.concepts
-            if c["source"] == filename and c["week"] == week_key
-        )
-
-        doc_week_pairs = {
-            (c["name"], c["week"]) for c in engine.concepts
-            if c["source"] == filename and c["week"] == week_key
-        }
-        await evolution_data.precompute_week_summaries(engine, client, doc_week_pairs)
-
-        working_edges = engine.fused_edges if engine.fused_edges else engine.edges
-        graph_save_path = save_graph_json(
-            [{"name": c["name"], "source": c["source"]} for c in engine.concepts],
-            working_edges
-        )
-
-        upload_latency = round(time.time() - upload_start, 3)
-        save_extraction_result(
-            {
-                "number of chunks": len(chunks),
-                "latency": upload_latency,
-                "time per chunk": upload_latency / len(chunks) if chunks else 0
-            },
-            engine.concepts,
-            working_edges
-        )
-        engine.upload_latency = upload_latency
-
-        engine.pipeline_status = {
-            "stage": "done",
-            "operation": "upload",
-            "week": week_key,
-            "filename": filename,
-            "chunks": len(chunks),
-            "seeds_generated": len(engine.seed_entities),
-            "seed_entities": engine.seed_entities,
-            "raw_concepts": len(engine.concepts),
-            "total_edges": len(working_edges),
-            "graph_saved_to": graph_save_path,
-            "error": None,
-        }
-    except Exception as e:
-        print(f"Background upload pipeline failed for {filename}: {e}")
-        import traceback
-        traceback.print_exc()
-        engine.pipeline_status = {
-            "stage": "error", "operation": "upload",
-            "week": week_key, "filename": filename, "error": str(e),
-        }
-
-
-@app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_mentions: int = 1):
-    """
-    Upload a PDF. Only the fast, local, deterministic steps (read the file,
-    save it to disk, parse its text, assign a week) happen before this
-    responds. Extraction and graph building happen afterward in a
-    background task (see _run_upload_pipeline). Poll GET /api/upload/status
-    for progress.
-
-    max_nodes: optional hard cap on distinct concepts admitted from this
-    document (default: no cap).
-
-    min_mentions: "key concept" threshold for pruning low-value concepts
-    after extraction. Default 1 == pruning disabled. Raise to 2+ to drop
-    concepts extracted only once and not in seed_entities.
-    """
-    if not os.getenv("GROQ_API_KEY"):
-        raise HTTPException(
-            status_code=503,
-            detail="The AI Service is temporarily down. Please try again later."
-        )
-
-    global engine
-    upload_start = time.time()
-
-    if engine is None:
-        engine = StudyGraphEngine(get_collection(chroma, 1), client, LLM_MODEL, RAG_MODEL)
-
-    safe_filename = Path(file.filename).name
-
-    try:
-        file_bytes = await file.read()
-        pages = extract_text(file_bytes, safe_filename)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    (UPLOADS_DIR / safe_filename).write_bytes(file_bytes)
-
-    current_week_key = f"Week {engine.week_counter}"
-    engine.week_counter += 1
-    engine.uploads_by_week[current_week_key] = safe_filename
-
-    engine.pipeline_status = {
-        "stage": "running", "operation": "upload",
-        "week": current_week_key, "filename": safe_filename, "error": None,
-    }
-    asyncio.create_task(
-        _run_upload_pipeline(engine, pages, safe_filename, current_week_key, upload_start, max_nodes, min_mentions)
-    )
-
-    return {
-        "status": "processing",
-        "message": f"Received {len(pages)} pages â€” processing in the background.",
-        "week": current_week_key,
-        "filename": safe_filename,
-    }
-
-
-@app.get("/api/upload/status")
-async def get_pipeline_status():
-    """Poll target for the background upload pipeline (see StudyGraphEngine.pipeline_status)."""
-    global engine
-    if engine is None:
-        return {"stage": "idle"}
-    return engine.pipeline_status
-
-@app.get("/api/files/{filename}")
-async def serve_uploaded_file(filename: str):
-    safe_name = Path(filename).name
-    upload_path = UPLOADS_DIR / safe_name
-    if not upload_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(
-        upload_path,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=\"{safe_name}\""},
-    )
-
-@app.get("/api/documents/file/{filename}")
-async def get_document_file(filename: str):
-    """Serves a previously-uploaded PDF back (e.g. for the 'open source at page N' viewer)."""
-    safe_name = Path(filename).name
-    pdf_path = UPLOADS_DIR / safe_name
-    if not pdf_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(pdf_path, media_type="application/pdf", filename=safe_name)
-
 
 def _source_page_fields(pages):
     """
@@ -300,7 +90,7 @@ def _source_page_fields(pages):
 async def get_graph():
     """Get current knowledge graph (uses fused graph if available), with
     week-based color coding for the evolution feature."""
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         return GraphResponse(nodes=[], edges=[])
 
@@ -430,7 +220,7 @@ async def query_rag(request: QueryRequest):
             status_code=503,
             detail="The AI Service is temporarily down. Please try again later."
         )
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
 
@@ -455,7 +245,7 @@ async def fuse_knowledge_graph():
     Trigger the Global Knowledge Fusion pipeline (Phase 3 of BATCH-STREAM-BATCH).
     Call this endpoint after all documents are uploaded.
     """
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
 
@@ -490,7 +280,7 @@ async def fuse_knowledge_graph():
 @app.get("/api/evolution/graph")
 async def get_evolution_graph_data(week: str = None):
     """Get the main evolution graph data, optionally filtered by week."""
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
     return evolution_data.get_graph_data(engine, week)
@@ -500,7 +290,7 @@ async def get_evolution_graph_data(week: str = None):
 async def get_evolution_concept_description(concept_name: str):
     """Cheap tier: a single grounded summary from the concept's
     earliest-appearance week only. Meant to back a plain node click."""
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
     description = await evolution_data.get_concept_description(engine, concept_name, client)
@@ -514,7 +304,7 @@ async def get_evolution_concept_detail(concept_name: str):
     """Full tier: every week's summary plus every week-to-week comparison.
     Generates and caches lazily on first request â€” meant to back the
     explicit "show concept evolution" action."""
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
     details = await evolution_data.get_concept_detail(engine, concept_name, client)
@@ -526,7 +316,7 @@ async def get_evolution_concept_detail(concept_name: str):
 @app.get("/api/evolution/subgraph/{concept_name}")
 async def get_evolution_concept_subgraph(concept_name: str):
     """Get the D3-ready subgraph for a concept's weekly evolution."""
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
     subgraph = evolution_data.get_concept_subgraph(engine, concept_name)
@@ -542,7 +332,7 @@ async def regenerate_evolution_concept(concept_name: str):
     for its description or full detail regenerates them from Groq instead
     of reusing whatever's cached.
     """
-    global engine
+    engine = runtime_state.engine
     if engine is None:
         raise HTTPException(status_code=404, detail="No graph loaded")
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 from groq import BadRequestError, RateLimitError
 from sklearn.metrics.pairwise import cosine_similarity
+from app.config import OUTPUT_DIR
 
 AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55
@@ -22,7 +23,7 @@ _STEP3_PROMPT_VERSION = "step3-evidence-v3"
 _STEP5_PROMPT_VERSION = "step5-evidence-v3"
 _CLUSTER_PROMPT_VERSION = "cluster-verify-v1"
 
-VERDICT_CACHE_FILE = Path(__file__).parent.parent / "outputs" / "verdict_cache.json"
+VERDICT_CACHE_FILE = OUTPUT_DIR / "verdict_cache.json"
 
 _BRIDGE_MIN_SHARED_NEIGHBOURS = 2
 _HUB_DEGREE_PERCENTILE = 90.0

@@ -30,3 +30,10 @@ class QuizResponse(BaseModel):
     """
     quiz_id: str
     questions: list[QuizQuestion]
+
+
+class TopicResult(BaseModel):
+    topic_id: str
+    correct: int
+    total: int
+    points: int
