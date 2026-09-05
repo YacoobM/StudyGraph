@@ -1318,5 +1318,157 @@
     "canonical": "",
     "broader": "B",
     "explanation": "Schrödinger equation"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|data structures||database systems": {
+    "verdict": "related",
+    "relation": "operates on",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "data structures in database"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|dijkstras algorithm||graph algorithms": {
+    "verdict": "related",
+    "relation": "is a type of",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "B",
+    "explanation": "dijkstra in graph"
+  },
+  "step3-evidence-v3|llama-3.3-70b-versatile|fibonacci heap operations||fibonacci heaps": {
+    "verdict": "related",
+    "relation": "includes",
+    "direction": "B_to_A",
+    "canonical": "",
+    "broader": "B",
+    "explanation": "heap operations"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|delivery systems||urban logistics": {
+    "verdict": "related",
+    "relation": "includes",
+    "direction": "B_to_A",
+    "canonical": "",
+    "broader": "B",
+    "explanation": "Urban logistics includes delivery systems"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|dynamic route optimization||speed optimization": {
+    "verdict": "related",
+    "relation": "enables",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "Dynamic route optimization enables speed optimization"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|block||block addressable": {
+    "verdict": "related",
+    "relation": "is type of",
+    "direction": "B_to_A",
+    "canonical": "",
+    "broader": "A",
+    "explanation": "block addressable describes block"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|block||block size": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "no evidence linking block and block size"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|device controller||dma controller": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "no evidence linking device controller and dma controller"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|device controller||i/o devices": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "no evidence linking device controller and i/o devices"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|disk||file system": {
+    "verdict": "related",
+    "relation": "provides storage for",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "disk supplies storage to file system"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|file attributes||file attributes and block addresses": {
+    "verdict": "related",
+    "relation": "adds addresses",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "A",
+    "explanation": "file attributes expanded with addresses"
+  },
+  "step3-evidence-v3|openai/gpt-oss-20b|i/o devices||memory mapped i/o": {
+    "verdict": "related",
+    "relation": "enables memory mapping",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "A",
+    "explanation": "I/O devices facilitate memory-mapped I/O"
+  },
+  "step3-evidence-v3|open|control valve||flow control": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": ""
+  },
+  "step3-evidence-v3|open|control valve||instrumentation valve": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": ""
+  },
+  "step3-evidence-v3|open|control valve||pressure control": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": ""
+  },
+  "step3-evidence-v3|open|flow control||pressure control": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": ""
+  },
+  "step3-evidence-v3|open|pressure control||pressure relief device": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "No direct link evidence"
+  },
+  "step3-evidence-v3|open|acceleration||kinematics": {
+    "verdict": "unrelated",
+    "relation": "",
+    "direction": "",
+    "canonical": "",
+    "broader": "",
+    "explanation": "No evidence linking them"
+  },
+  "step3-evidence-v3|open|acceleration||newtons second law": {
+    "verdict": "related",
+    "relation": "explains",
+    "direction": "A_to_B",
+    "canonical": "",
+    "broader": "",
+    "explanation": "Acceleration clarifies Newton's second law."
   }
 }

@@ -1,56 +1,62 @@
 /* =========================================================================
    StudyGraph — global theme
-   Mirrors the Neo4j dark builder UI from the reference screenshots
+
+   The paper palette from the StudyGraph design: warm off-white surfaces, ink
+   text, a forest-green accent and copper for in-progress states. Every
+   component reads these tokens, so the whole app follows from this block.
    ========================================================================= */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 :root {
-  /* core surfaces */
-  --bg-0: #0a0d12;
-  --bg-1: #11151c;
-  --bg-2: #181d26;
-  --bg-3: #1f2630;
-  --bg-elev: #232a36;
-  --border: #2c3440;
-  --border-strong: #3a4453;
+  /* core surfaces — bg-0 is the page, higher numbers sit closer to the reader */
+  --bg-0: #FBF8F2;
+  --bg-1: #FFFFFF;
+  --bg-2: #F7F3E9;
+  --bg-3: #F1EAD9;
+  --bg-elev: #FFFFFF;
+  --border: #E4DAC2;
+  --border-strong: #D2C4A4;
 
-  /* text */
-  --text-0: #f5f7fa;
-  --text-1: #c7cfdb;
-  --text-2: #8a94a4;
-  --text-3: #5b6473;
+  /* text — text-0 is primary, text-3 the faintest still-legible grey */
+  --text-0: #1C1A16;
+  --text-1: #3B372F;
+  --text-2: #5C5648;
+  --text-3: #736D5E;
 
-  /* accents (mirroring the neo4j teal in the reference) */
-  --accent: #5dd4c4;
-  --accent-hover: #7be3d3;
-  --accent-soft: rgba(93, 212, 196, 0.12);
-  --accent-strong: rgba(93, 212, 196, 0.32);
+  /* accent */
+  --accent: #22503C;
+  --accent-hover: #173A2B;
+  --accent-soft: rgba(34, 80, 60, 0.09);
+  --accent-strong: rgba(34, 80, 60, 0.28);
 
-  --warn: #f5a524;
-  --danger: #ef4444;
-  --success: #22c55e;
+  --warn: #B25A28;   /* copper, darkened to clear AA on paper */
+  --danger: #B3402A;
+  --success: #2E7D4F;
 
-  /* node label palette */
-  --n-chunk: #f9a8d4;
-  --n-document: #22d3ee;
-  --n-algorithm: #fbbf24;
-  --n-concept: #a3e635;
-  --n-course: #ec4899;
-  --n-lecture: #fb923c;
-  --n-organization: #fde68a;
-  --n-phase: #a78bfa;
-  --n-problem: #fb923c;
-  --n-rule: #f87171;
-  --n-software: #60a5fa;
-  --n-string: #bef264;
-  --n-term: #facc15;
-  --n-tool: #d8b4fe;
-  --n-university: #fbcfe8;
-  --n-week: #a3e635;
+  /* node label palette — darkened from the dark-theme originals so they keep
+     their contrast against a light background */
+  --n-chunk: #B85C8A;
+  --n-document: #0E7490;
+  --n-algorithm: #B45309;
+  --n-concept: #4D7C0F;
+  --n-course: #BE185D;
+  --n-lecture: #C2410C;
+  --n-organization: #A16207;
+  --n-phase: #6D28D9;
+  --n-problem: #C2410C;
+  --n-rule: #B91C1C;
+  --n-software: #1D4ED8;
+  --n-string: #3F6212;
+  --n-term: #A16207;
+  --n-tool: #7E22CE;
+  --n-university: #9D174D;
+  --n-week: #4D7C0F;
 
-  --radius-sm: 6px;
+  --radius-sm: 8px;
   --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-lg: 14px;
 
-  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-display: 'Inter', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }

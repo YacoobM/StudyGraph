@@ -1,124 +1,204 @@
-.login-page {
+/* Auth page — one undivided screen for both signing in and creating an
+   account.
+
+   Colours come from the tokens in src/styles/global.css so this matches the
+   rest of the app rather than importing the standalone page's light palette.
+   Everything is scoped under .sg-auth because .field and .btn-primary already
+   exist globally and would otherwise collide. */
+
+.sg-auth {
   min-height: 100vh;
-  background: var(--bg-0);
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  padding: 24px;
+  padding: 44px 24px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--font-body);
 }
-.login-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.6;
-}
-.login-bg svg { width: 100%; height: 100%; }
 
-.back-home {
-  position: absolute;
-  top: 24px;
-  left: 32px;
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 500;
-  z-index: 2;
-}
-.back-home:hover { color: var(--text-0); }
-
-.login-card {
-  position: relative;
-  z-index: 1;
+.sg-auth .auth-card {
   width: 100%;
-  max-width: 440px;
-  background: rgba(17, 21, 28, 0.85);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 44px 40px 32px;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  max-width: 404px;
 }
 
-.login-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.sg-auth .auth-mark {
+  display: block;
+  margin: 0 auto 30px;
+  background: none;
+  border: none;
+  cursor: pointer;
   font-family: var(--font-display);
+  font-size: 17px;
   font-weight: 700;
-  font-size: 18px;
-  margin-bottom: 32px;
+  letter-spacing: -0.01em;
+  color: var(--text-0);
 }
 
-.login-title {
+.sg-auth h1 {
+  margin: 0;
+  text-align: center;
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
-  margin: 0 0 8px;
   letter-spacing: -0.02em;
-}
-.login-sub {
-  color: var(--text-2);
-  font-size: 14px;
-  margin: 0 0 28px;
+  line-height: 1.2;
 }
 
-.login-form {
+.sg-auth .auth-sub {
+  margin: 9px 0 0;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+/* Segmented control */
+.sg-auth .seg {
+  display: flex;
+  gap: 3px;
+  margin: 26px 0 22px;
+  padding: 3px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.sg-auth .seg button {
+  flex: 1;
+  padding: 9px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sg-auth .seg button:hover { color: var(--text-0); }
+
+.sg-auth .seg button.on {
+  background: var(--bg-elev);
+  color: var(--text-0);
+}
+
+.sg-auth .seg button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Fields */
+.sg-auth .auth-fields {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field label {
-  font-size: 12px;
+
+.sg-auth .sg-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-1);
-  letter-spacing: 0.02em;
 }
 
-.form-err {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
-  padding: 10px 14px;
+.sg-auth .sg-field label .opt {
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.sg-auth .sg-field input {
+  width: 100%;
+  padding: 11px 13px;
+  background: var(--bg-2);
+  border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+  font-size: 14.5px;
+  color: var(--text-0);
+  transition: border-color 0.15s ease;
 }
 
-.login-submit {
-  justify-content: center;
-  margin-top: 8px;
+.sg-auth .sg-field input::placeholder { color: var(--text-3); }
+.sg-auth .sg-field input:focus { border-color: var(--accent); }
+.sg-auth .sg-field input.bad { border-color: var(--danger); }
+
+.sg-auth .sg-field .hint {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-3);
 }
 
-.login-switch {
-  text-align: center;
-  font-size: 13px;
+.sg-auth .sg-field .err {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* Password reveal. This replaces a confirm-password field: being able to read
+   what you typed does the same job without typing it twice. */
+.sg-auth .pw-wrap { position: relative; }
+.sg-auth .pw-wrap input { padding-right: 62px; }
+
+.sg-auth .pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-2);
-  margin-top: 8px;
 }
-.login-switch button {
-  color: var(--accent);
-  font-weight: 600;
-  padding: 0;
-}
-.login-switch button:hover { color: var(--accent-hover); }
 
-.demo-hint {
-  margin-top: 28px;
-  padding: 12px 16px;
-  background: rgba(34, 197, 94, 0.08);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  color: var(--text-1);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.sg-auth .pw-toggle:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
 }
-.demo-hint code {
-  font-family: var(--font-mono);
-  background: var(--bg-1);
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--accent);
-  font-size: 11px;
+
+/* Submit */
+.sg-auth .auth-submit {
+  width: 100%;
+  margin-top: 20px;
+  padding: 13px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--bg-0);           /* dark text on the teal, for contrast */
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+
+.sg-auth .auth-submit:hover:not(:disabled) { background: var(--accent-hover); }
+.sg-auth .auth-submit:disabled { opacity: 0.55; cursor: default; }
+
+.sg-auth .auth-formerr {
+  margin-top: 15px;
+  padding: 10px 13px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: rgba(239, 68, 68, 0.1);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+.sg-auth .auth-note {
+  margin-top: 22px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
 }
