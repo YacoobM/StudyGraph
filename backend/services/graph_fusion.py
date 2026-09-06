@@ -15,6 +15,10 @@ NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "m
 
 _VERDICT_PAIR_BATCH = 4
 _VERDICT_MAX_RETRIES = 4
+# Cap on how many pairs a failed batch may be re-asked one at a time. Without
+# it, splitting a batch costs 5 + 5 per pair — being rate limited would make
+# fusion call more, not less. See _verdict_call.
+_VERDICT_MAX_SINGLES = 4
 _NEIGHBOURS_PER_NODE = 5
 _EVIDENCE_CHUNKS_PER_NODE = 1
 _EVIDENCE_SNIPPET_CHARS = 200
@@ -196,6 +200,39 @@ def _from_cache_record(a, b, rec):
     return {**rec, "direction": direction, "canonical": canonical, "broader": broader}
 
 
+# The schema line asks for "same" | "related" | "unrelated", but the prompt's
+# own prose says "SAME, DIFFERENT BUT RELATED, or UNRELATED" and the model
+# sometimes answers in that wording. An unrecognised verdict used to fall
+# through to the unrelated branch and drop the edge without a word, so the
+# variants the prompt itself uses are accepted here and anything still
+# unmatched is logged rather than lost.
+_VERDICT_SYNONYMS = {
+    "same": "same",
+    "related": "related",
+    "unrelated": "unrelated",
+    "different but related": "related",
+    "different-but-related": "related",
+    "different, but related": "related",
+}
+
+
+def _normalise_verdict(raw):
+    """Canonical verdict, or None when the answer is not one we recognise."""
+    return _VERDICT_SYNONYMS.get(_WS.sub(" ", str(raw or "").strip().lower()))
+
+
+def _verdict_or_unrelated(raw, log, tag, a, b):
+    """Canonical verdict, defaulting to unrelated but never silently: an
+    answer we cannot map is reported with the pair it came from."""
+    verdict = _normalise_verdict(raw)
+    if verdict is None:
+        if str(raw or "").strip():
+            log(f"{tag} unrecognised verdict {str(raw)!r} for {a!r} / {b!r} "
+                f"— treated as unrelated, edge dropped")
+        return "unrelated"
+    return verdict
+
+
 class _MalformedVerdict(Exception):
     pass
 
@@ -223,7 +260,7 @@ def _verdict_attempt(client, system, payload, log, tag):
             results = data["results"]
             if payload and not results:
                 raise _MalformedVerdict("empty 'results' for non-empty batch")
-            return results
+            return results, None
         except RateLimitError as e:
             reason = "rate limited"
             try:
@@ -235,32 +272,45 @@ def _verdict_attempt(client, system, payload, log, tag):
         except BadRequestError as e:
             if not _is_json_validate_failed(e):
                 log(f"{tag} rejected — defaults to unrelated")
-                return None
+                return None, "rejected"
             reason = "json_validate_failed"
         except Exception as e:
             reason = f"{type(e).__name__}"
 
         if attempt == _VERDICT_MAX_RETRIES:
             log(f"{tag} failed after {_VERDICT_MAX_RETRIES} retries ({reason})")
-            return None
+            return None, reason
         delay = retry_after if retry_after is not None else min(60, 5 * (3 ** attempt))
         log(f"{tag} {reason} (attempt {attempt + 1}/{_VERDICT_MAX_RETRIES}) — waiting {delay:.1f}s")
         time.sleep(delay)
-    return None
+    return None, reason
 
 
 def _verdict_call(client, system, payload, log, tag):
-    results = _verdict_attempt(client, system, payload, log, tag)
+    results, reason = _verdict_attempt(client, system, payload, log, tag)
     if results is not None:
         return results
     if len(payload) <= 1:
         log(f"{tag} defaults to unrelated (not cached)")
         return []
 
-    log(f"{tag} splitting batch of {len(payload)} into singles")
+    # Splitting isolates one malformed pair out of a batch. It cannot help a
+    # rate limit or a rejection — those fail again per single, so the response
+    # to being throttled would be to make several times as many calls. Split
+    # only for malformed output, and only for the first _VERDICT_MAX_SINGLES.
+    if reason is None or not str(reason).startswith(("malformed", "json_validate_failed")):
+        log(f"{tag} not splitting after {reason} — {len(payload)} pair(s) default to unrelated")
+        return []
+
+    head = payload[:_VERDICT_MAX_SINGLES]
+    if len(payload) > len(head):
+        log(f"{tag} splitting {len(head)} of {len(payload)}; "
+            f"{len(payload) - len(head)} default to unrelated")
+    else:
+        log(f"{tag} splitting batch of {len(payload)} into singles")
     salvaged = []
-    for item in payload:
-        one = _verdict_attempt(client, system, [item], log, f"{tag} [id={item.get('id')}]")
+    for item in head:
+        one, _ = _verdict_attempt(client, system, [item], log, f"{tag} [id={item.get('id')}]")
         if one:
             salvaged.extend(one)
     log(f"{tag} recovered {len(salvaged)}/{len(payload)} from singles")
@@ -627,27 +677,17 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
             resolved[(a, b)] = _from_cache_record(a, b, rec)
         else:
             to_ask.append((a, b, sim))
-    log(f"Fusion step 3: {len(resolved)} cache hits, {len(to_ask)} LLM calls")
+    calls = -(-len(to_ask) // _VERDICT_PAIR_BATCH)
+    log(f"Fusion step 3: {len(resolved)} cache hits, {len(to_ask)} pair(s) "
+        f"to ask in {calls} call(s)")
+
+    # Built once: it stacks every document's chunk-embedding matrix, and that
+    # does not change between batches.
+    evidence = _EvidencePool(engine, log, name_vecs)
 
     cache_dirty = False
     for start in range(0, len(to_ask), _VERDICT_PAIR_BATCH):
         sub = to_ask[start:start + _VERDICT_PAIR_BATCH]
-        payload = []
-        for idx, (a, b, sim) in enumerate(sub):
-            item = {"id": idx, "a": a, "b": b, "similarity": round(sim, 3),
-                    "a_sources": sorted(nodes[a]["sources"]),
-                    "b_sources": sorted(nodes[b]["sources"]),
-                    "a_neighbours": _neighbours(a, interim_cmap, adjacency, _NEIGHBOURS_PER_NODE),
-                    "b_neighbours": _neighbours(b, interim_cmap, adjacency, _NEIGHBOURS_PER_NODE)}
-            a_ev = evidence.snippets(nodes[a]["sources"], b) if 'evidence' in locals() else []
-            b_ev = evidence.snippets(nodes[b]["sources"], a) if 'evidence' in locals() else []
-            if a_ev:
-                item["a_evidence"] = a_ev
-            if b_ev:
-                item["b_evidence"] = b_ev
-            payload.append(item)
-
-        evidence = _EvidencePool(engine, log, name_vecs)
         payload = []
         for idx, (a, b, sim) in enumerate(sub):
             item = {"id": idx, "a": a, "b": b, "similarity": round(sim, 3),
@@ -680,7 +720,7 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
     n_same = n_related = n_unrelated = 0
     for (a, b, sim) in candidates:
         r = resolved.get((a, b), {})
-        verdict = r.get("verdict", "unrelated")
+        verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b)
         if verdict == "same":
             merges.append((a, b))
             canonical = str(r.get("canonical", "")).strip().upper()
@@ -866,7 +906,7 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log):
     fusion_edges = []
     for (a, b, common) in candidates:
         r = resolved.get((a, b), {})
-        if r.get("verdict") != "related":
+        if _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 5:", a, b) != "related":
             continue
         frm, to, relation = _orient_relation(
             a, b, r.get("relation") or "", r.get("direction") or "A_to_B",
