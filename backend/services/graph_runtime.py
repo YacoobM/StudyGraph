@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 
 from app.config import OUTPUT_DIR
+from services.llm_gateway import estimate_tokens, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +71,12 @@ def get_collection(chroma, project_id, user_id="default"):
     return chroma.get_or_create_collection(name=f"user_{user_id}_project_{project_id}")
 
 
-def call_llm(client, model, prompt, text_batch):
+def call_llm(client, model, prompt, text_batch, max_tokens=1000):
     try:
+        limiter.acquire_sync(
+            estimate_tokens(prompt) + estimate_tokens(text_batch),
+            max_tokens,
+        )
         return client.chat.completions.create(
             messages=[
                 {"role": "system", "content": prompt},
@@ -79,6 +84,7 @@ def call_llm(client, model, prompt, text_batch):
             ],
             model=model,
             reasoning_effort="none",
+            max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
     except Exception as error:

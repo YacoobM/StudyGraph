@@ -5,6 +5,7 @@ import time
 from collections import Counter, defaultdict
 
 from groq import RateLimitError, BadRequestError
+from services.llm_gateway import estimate_tokens, limiter
 
 WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#bdb2ff", "#ffc6ff"]
 MULTI_WEEK_COLOR = "#fcf6bd"
@@ -75,42 +76,9 @@ def get_graph_data(engine, week=None):
 
 
 MAX_RETRIES = 5
-BATCH_SIZE = 6
+BATCH_SIZE = 3
 
 GROQ_CONCURRENCY = asyncio.Semaphore(2)
-TPM_BUDGET = 10500
-
-
-class _TokenPacer:
-    def __init__(self, tpm_budget):
-        self.tpm_budget = tpm_budget
-        self._window_start = time.monotonic()
-        self._used = 0
-        self._lock = asyncio.Lock()
-
-    async def acquire(self, estimated_tokens):
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._window_start
-            if elapsed >= 60:
-                self._window_start = now
-                self._used = 0
-                elapsed = 0
-            if self._used + estimated_tokens > self.tpm_budget:
-                wait = 60 - elapsed
-                if wait > 0:
-                    logger.info("evolution_token_pacing wait_seconds=%.1f", wait)
-                    await asyncio.sleep(wait)
-                self._window_start = time.monotonic()
-                self._used = 0
-            self._used += estimated_tokens
-
-
-_pacer = _TokenPacer(TPM_BUDGET)
-
-
-def _estimate_tokens(text):
-    return max(1, len(text) // 4)
 
 
 async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, temperature=0.2, max_tokens=None):
@@ -130,11 +98,12 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
             kwargs["response_format"] = {"type": "json_object"}
         return client.chat.completions.create(**kwargs)
 
-    estimated_tokens = _estimate_tokens(system_prompt) + _estimate_tokens(user_prompt) + (max_tokens or 0)
+    estimated_input_tokens = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
+    estimated_output_tokens = max_tokens or 1
 
     for attempt in range(MAX_RETRIES + 1):
         try:
-            await _pacer.acquire(estimated_tokens)
+            await limiter.acquire(estimated_input_tokens, estimated_output_tokens)
             async with GROQ_CONCURRENCY:
                 response = await asyncio.to_thread(call)
             return response.choices[0].message.content
@@ -214,14 +183,16 @@ def _relations_for_concept_week(engine, raw_name, week, doc_to_week):
             continue
         if e["from"] == raw_name:
             out.append({"direction": "from", "other": e["to"], "relation": e["relation"],
-                        "summary": e.get("summary", ""), "context": e.get("context", "")})
+                        "summary": e.get("summary", ""),
+                        "chunk_ids": e.get("chunk_ids", [e.get("chunk_id", "")])})
         elif e["to"] == raw_name:
             out.append({"direction": "to", "other": e["from"], "relation": e["relation"],
-                        "summary": e.get("summary", ""), "context": e.get("context", "")})
+                        "summary": e.get("summary", ""),
+                        "chunk_ids": e.get("chunk_ids", [e.get("chunk_id", "")])})
     return out
 
 
-def _format_relation_evidence(concept_name, relations):
+def _format_relation_evidence(concept_name, relations, engine=None):
     if not relations:
         return ""
     lines = []
@@ -230,14 +201,28 @@ def _format_relation_evidence(concept_name, relations):
             phrase = f"{concept_name} {r['relation']} {r['other']}"
         else:
             phrase = f"{r['other']} {r['relation']} {concept_name}"
-        detail = r["summary"] or r["context"]
-        lines.append(f"- {phrase}" + (f": {detail}" if detail else ""))
+        detail = r["summary"]
+        evidence = ""
+        if engine:
+            resolved = []
+            for chunk_id in r.get("chunk_ids", []):
+                if chunk_id:
+                    chunk = engine.resolve_chunk(chunk_id)
+                    if chunk:
+                        citation = engine.format_citation(chunk["pages"])
+                        resolved.append(
+                            f"[{citation}]\n{chunk['text'][:800]}"
+                            if citation else chunk["text"][:800]
+                        )
+            if resolved:
+                evidence = "\n".join(resolved)
+        lines.append(f"- {phrase}" + (f": {detail}" if detail else "") + evidence)
     return "\n".join(lines)
 
 
 def _fallback_text_from_relations(relations, chunks, format_citation, docs_label):
     if relations:
-        pieces = [r["summary"] or r["context"] for r in relations if (r["summary"] or r["context"])]
+        pieces = [r["summary"] for r in relations if r.get("summary")]
         if pieces:
             return " ".join(dict.fromkeys(pieces))
     if chunks:
@@ -374,7 +359,9 @@ async def precompute_week_summaries(engine, client, raw_week_pairs, summary_pair
             "concept_name": raw,
             "week": week,
             "evidence": _format_relation_evidence(
-                raw, engine.concept_week_chunks.get((raw, week), {}).get("relations", [])
+                raw,
+                engine.concept_week_chunks.get((raw, week), {}).get("relations", []),
+                engine,
             ),
             "chunks": engine.concept_week_chunks.get((raw, week), {}).get("chunks", []),
         }

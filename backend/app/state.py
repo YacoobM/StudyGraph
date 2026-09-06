@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from chromadb import Client as ChromaClient
 from groq import Groq
 

@@ -61,7 +61,7 @@ app.include_router(upload_router)
 
 app.include_router(quiz_router)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 runtime_state.configure_runtime(client, chroma)
 set_graph_source(lambda: runtime_state.engine)
 
@@ -169,6 +169,7 @@ async def get_graph():
             "relation": e["relation"],
             "summary": e.get("summary", ""),
             "context": e.get("context", ""),
+            "chunk_ids": e.get("chunk_ids", [e["chunk_id"]] if e.get("chunk_id") else []),
             "conflict_resolved": e.get("conflict_resolved", False)
         }
         for e in working_edges

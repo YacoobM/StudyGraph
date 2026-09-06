@@ -9,6 +9,7 @@ import numpy as np
 from groq import BadRequestError, RateLimitError
 from sklearn.metrics.pairwise import cosine_similarity
 from app.config import OUTPUT_DIR
+from services.llm_gateway import estimate_tokens, limiter
 
 AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55
@@ -207,16 +208,23 @@ def _is_json_validate_failed(e):
 
 
 def _verdict_attempt(client, system, payload, log, tag):
+    user_content = "PAIRS:\n" + json.dumps(payload, ensure_ascii=False)
+    max_tokens = max(250, min(700, 180 * max(1, len(payload))))
     for attempt in range(_VERDICT_MAX_RETRIES + 1):
         reason, retry_after = None, None
         try:
+            limiter.acquire_sync(
+                estimate_tokens(system) + estimate_tokens(user_content),
+                max_tokens,
+            )
             completion = client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": system},
-                    {"role": "user", "content": "PAIRS:\n" + json.dumps(payload, ensure_ascii=False)},
+                    {"role": "user", "content": user_content},
                 ],
                 model="qwen/qwen3.6-27b",
                 reasoning_effort="none",
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"},
             )
             data = json.loads(completion.choices[0].message.content)
@@ -382,7 +390,7 @@ def merge_graph(engine, client, log=logger.info):
     llm_candidates = []
     auto_merged = blocked = 0
     if len(unique_names) >= 2:
-        name_embeddings = engine.model.encode(unique_names)
+        name_embeddings = engine.model.encode(unique_names, show_progress_bar=False)
         sim_matrix = cosine_similarity(name_embeddings)
         for i in range(len(unique_names)):
             for j in range(i + 1, len(unique_names)):
@@ -416,7 +424,7 @@ def merge_graph(engine, client, log=logger.info):
     step3_new_edges = []
     if llm_candidates:
         ask_names = sorted({n for (a, b, _s) in llm_candidates for n in (a, b)})
-        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names))}
+        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names, show_progress_bar=False))}
         
         merges, step3_new_edges, canonical_votes = _llm_evaluate_pairs(
             llm_candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log)
@@ -444,7 +452,7 @@ def merge_graph(engine, client, log=logger.info):
     edge_groups = {}
     skipped = 0
 
-    def _add_edge(frm, to, relation, discovered_by, doc=None, summary="", context=""):
+    def _add_edge(frm, to, relation, discovered_by, doc=None, summary="", context="", chunk_id=""):
         nonlocal skipped
         relation = _clean_relation(relation)
         f, t = _final_canon(frm), _final_canon(to)
@@ -459,7 +467,8 @@ def merge_graph(engine, client, log=logger.info):
         if rec is None:
             rec = {"from": f, "to": t, "relation": relation, "sources": set(),
                    "evidence": 0, "discovered_by": discovered_by,
-                   "summary": summary or "", "context": context or ""}
+                     "summary": summary or "", "context": context or "",
+                     "chunk_ids": set()}
             edge_groups[key] = rec
         else:
             if not rec.get("summary") and summary:
@@ -467,15 +476,19 @@ def merge_graph(engine, client, log=logger.info):
             if not rec.get("context") and context:
                 rec["context"] = context
         rec["evidence"] += 1
+        if chunk_id:
+            rec["chunk_ids"].add(chunk_id)
         if doc:
             rec["sources"].add(doc)
         if discovered_by == "extraction":
             rec["discovered_by"] = "extraction"
 
     for e in engine.edges:
-        _add_edge(e["from"], e["to"], e["relation"], "extraction",
-                  doc=e.get("source"), summary=e.get("summary", ""),
-                  context=e.get("context", ""))
+        edge_chunk_ids = e.get("chunk_ids") or ([e["chunk_id"]] if e.get("chunk_id") else [])
+        for chunk_id in edge_chunk_ids or [""]:
+            _add_edge(e["from"], e["to"], e["relation"], "extraction",
+                      doc=e.get("source"), summary=e.get("summary", ""),
+                      context=e.get("context", ""), chunk_id=chunk_id)
     for e in step3_new_edges:
         _add_edge(e["from"], e["to"], e["relation"], "llm_eval",
                   summary=e.get("summary", ""), context=e.get("context", ""))
@@ -528,6 +541,7 @@ def merge_graph(engine, client, log=logger.info):
             "relation": rec["relation"],
             "summary": rec.get("summary", ""),
             "context": rec.get("context", ""),
+            "chunk_ids": sorted(rec.get("chunk_ids", set())),
             "strength": "medium",
             "source": sorted(rec["sources"])[0] if rec["sources"] else "unknown",
             "discovered_by": rec["discovered_by"],
@@ -736,7 +750,7 @@ def _verify_clusters(dsu, nodes, engine, client, log):
 
     if to_ask:
         cluster_names = sorted({m for (_ci, members) in to_ask for m in members})
-        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(cluster_names, engine.model.encode(cluster_names))}
+        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(cluster_names, engine.model.encode(cluster_names, show_progress_bar=False))}
         evidence = _EvidencePool(engine, log, name_vecs)
 
         payload = []
@@ -832,7 +846,7 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log):
     log(f"Fusion step 5: {len(resolved)} cache hits, {len(to_ask)} LLM calls")
 
     ask_names = sorted({n for (a, b, _c) in to_ask for n in (a, b)})
-    name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names))} if ask_names else {}
+    name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names, show_progress_bar=False))} if ask_names else {}
     evidence = _EvidencePool(engine, log, name_vecs)
 
     cache_dirty = False

@@ -1,40 +1,121 @@
 {
-  "timestamp": "2026-09-04T16:36:47.857631",
+  "timestamp": "2026-09-06T20:54:45.256342",
   "nodes": [
     {
-      "id": "tempo_maximization",
-      "name": "tempo maximization",
+      "id": "risk-budget_theory",
+      "name": "risk-budget theory",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
           "page": 1,
-          "pageLabel": "1-4"
+          "pageLabel": "1"
+        },
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
         }
       ],
-      "description": "enables \u00e2\u2020\u2019 controlled risk framework; momentum windows \u00e2\u2020\u2019 part_of; strike pressure index \u00e2\u2020\u2019 part_of; controlled collapse theory \u00e2\u2020\u2019 part_of; tempo ",
+      "description": "part_of \u00e2\u2020\u2019 risk budget (\u03c1); part_of \u00e2\u2020\u2019 momentum windows; part_of \u00e2\u2020\u2019 pressure index; part_of \u00e2\u2020\u2019 controlled-failure theory; part_of \u00e2\u2020\u2019 elasticity m",
       "is_canonical": false,
-      "color": "#ffadad",
-      "appears_in_weeks": 1,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 4,
       "weeks": [
-        "Week 1"
+        "Week 1",
+        "Week 2",
+        "Week 3",
+        "Week 4"
       ]
     },
     {
-      "id": "controlled_risk_framework",
-      "name": "controlled risk framework",
+      "id": "risk_budget_(\u03c1)",
+      "name": "risk budget (\u03c1)",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
           "page": 1,
-          "pageLabel": "1-4"
+          "pageLabel": "1"
+        },
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
         }
       ],
-      "description": "tempo maximization \u00e2\u2020\u2019 enables; risk budget allocation \u00e2\u2020\u2019 part_of; risk budget allocation \u00e2\u2020\u2019 causes; session dominance model \u00e2\u2020\u2019 related_to; momentu",
+      "description": "risk-budget theory \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
-      "color": "#ffadad",
-      "appears_in_weeks": 1,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
       "weeks": [
-        "Week 1"
+        "Week 1",
+        "Week 2",
+        "Week 3"
+      ]
+    },
+    {
+      "id": "uniform_caution_strategies",
+      "name": "uniform caution strategies",
+      "source": [
+        {
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "page": 1,
+          "pageLabel": "1"
+        },
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "related_to \u00e2\u2020\u2019 non-uniform risk allocation; orthodox doctrine of uniform caution \u00e2\u2020\u2019 explains",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 1",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "non-uniform_risk_allocation",
+      "name": "non-uniform risk allocation",
+      "source": [
+        {
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "page": 1,
+          "pageLabel": "1"
+        },
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "uniform caution strategies \u00e2\u2020\u2019 related_to; cross-domain risk-budget theory \u00e2\u2020\u2019 enables; risk budget \u00e2\u2020\u2019 part_of",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 4,
+      "weeks": [
+        "Week 1",
+        "Week 2",
+        "Week 3",
+        "Week 4"
       ]
     },
     {
@@ -42,12 +123,12 @@
       "name": "momentum windows",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
           "page": 1,
-          "pageLabel": "1-4"
+          "pageLabel": "1"
         }
       ],
-      "description": "part_of \u00e2\u2020\u2019 tempo maximization; related_to \u00e2\u2020\u2019 strike pressure index; enables \u00e2\u2020\u2019 risk budget allocation; session drift \u00e2\u2020\u2019 part_of; enables \u00e2\u2020\u2019 risk ",
+      "description": "risk-budget theory \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
       "color": "#ffadad",
       "appears_in_weeks": 1,
@@ -56,70 +137,77 @@
       ]
     },
     {
-      "id": "strike_pressure_index",
-      "name": "strike pressure index",
+      "id": "pressure_index",
+      "name": "pressure index",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
           "page": 1,
-          "pageLabel": "1-2"
-        }
-      ],
-      "description": "part_of \u00e2\u2020\u2019 tempo maximization; momentum windows \u00e2\u2020\u2019 related_to; dynamic run velocity \u00e2\u2020\u2019 part_of",
-      "is_canonical": false,
-      "color": "#ffadad",
-      "appears_in_weeks": 1,
-      "weeks": [
-        "Week 1"
-      ]
-    },
-    {
-      "id": "controlled_collapse_theory",
-      "name": "controlled collapse theory",
-      "source": [
+          "pageLabel": "1"
+        },
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
           "page": 1,
-          "pageLabel": "1-4"
-        }
-      ],
-      "description": "part_of \u00e2\u2020\u2019 tempo maximization; explains \u00e2\u2020\u2019 tempo maximization; explains \u00e2\u2020\u2019 risk budget allocation; explains \u00e2\u2020\u2019 risk budget allocation; related_to ",
-      "is_canonical": false,
-      "color": "#ffadad",
-      "appears_in_weeks": 1,
-      "weeks": [
-        "Week 1"
-      ]
-    },
-    {
-      "id": "tempo_elasticity",
-      "name": "tempo elasticity",
-      "source": [
+          "pageLabel": "1-8"
+        },
         {
-          "file": "blitzball (1).pdf",
-          "page": 1,
-          "pageLabel": "1-4"
-        }
-      ],
-      "description": "part_of \u00e2\u2020\u2019 tempo maximization; dynamic run velocity \u00e2\u2020\u2019 part_of; risk budget allocation \u00e2\u2020\u2019 part_of; explains \u00e2\u2020\u2019 risk budget allocation; explains \u00e2\u2020",
-      "is_canonical": false,
-      "color": "#ffadad",
-      "appears_in_weeks": 1,
-      "weeks": [
-        "Week 1"
-      ]
-    },
-    {
-      "id": "dynamic_run_velocity",
-      "name": "dynamic run velocity",
-      "source": [
-        {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_problem_set3.pdf",
           "page": 1,
           "pageLabel": "1-3"
         }
       ],
-      "description": "part_of \u00e2\u2020\u2019 tempo maximization; part_of \u00e2\u2020\u2019 strike pressure index; part_of \u00e2\u2020\u2019 tempo elasticity; tempo elasticity \u00e2\u2020\u2019 explains; related_to \u00e2\u2020\u2019 risk bu",
+      "description": "risk-budget theory \u00e2\u2020\u2019 part_of; causes \u00e2\u2020\u2019 empirical optimum",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 1",
+        "Week 2",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "controlled-failure_theory",
+      "name": "controlled-failure theory",
+      "source": [
+        {
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "page": 1,
+          "pageLabel": "1"
+        },
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "risk-budget theory \u00e2\u2020\u2019 part_of; explains \u00e2\u2020\u2019 inverted-u mechanism",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 4,
+      "weeks": [
+        "Week 1",
+        "Week 2",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "elasticity_measure",
+      "name": "elasticity measure",
+      "source": [
+        {
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "page": 1,
+          "pageLabel": "1"
+        }
+      ],
+      "description": "risk-budget theory \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
       "color": "#ffadad",
       "appears_in_weeks": 1,
@@ -128,16 +216,16 @@
       ]
     },
     {
-      "id": "session_dominance_model",
-      "name": "session dominance model",
+      "id": "inverted-u_relationship",
+      "name": "inverted-u relationship",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
           "page": 1,
-          "pageLabel": "1-4"
+          "pageLabel": "1"
         }
       ],
-      "description": "part_of \u00e2\u2020\u2019 tempo maximization; related_to \u00e2\u2020\u2019 risk budget allocation; related_to \u00e2\u2020\u2019 controlled risk framework; momentum windows \u00e2\u2020\u2019 explains; contro",
+      "description": "inverted-u relationship",
       "is_canonical": false,
       "color": "#ffadad",
       "appears_in_weeks": 1,
@@ -146,447 +234,813 @@
       ]
     },
     {
-      "id": "risk_budget_allocation",
-      "name": "risk budget allocation",
+      "id": "high-leverage_moments",
+      "name": "high-leverage moments",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_lecture6_risk_budget_allocation.docx",
           "page": 1,
-          "pageLabel": "1-4"
+          "pageLabel": "1"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
         }
       ],
-      "description": "session dominance model \u00e2\u2020\u2019 related_to; controlled collapse theory \u00e2\u2020\u2019 explains; momentum windows \u00e2\u2020\u2019 enables; momentum windows \u00e2\u2020\u2019 enables; part_of \u00e2",
+      "description": "high-leverage moments",
       "is_canonical": false,
-      "color": "#ffadad",
-      "appears_in_weeks": 1,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2,
       "weeks": [
-        "Week 1"
+        "Week 1",
+        "Week 4"
       ]
     },
     {
-      "id": "session_drift",
-      "name": "session drift",
+      "id": "cross-domain_risk-budget_theory",
+      "name": "cross-domain risk-budget theory",
       "source": [
         {
-          "file": "blitzball (1).pdf",
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
           "page": 1,
-          "pageLabel": "1-2"
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
         }
       ],
-      "description": "part_of \u00e2\u2020\u2019 momentum windows; explains \u00e2\u2020\u2019 momentum windows",
+      "description": "explains \u00e2\u2020\u2019 orthodox doctrine of uniform caution; enables \u00e2\u2020\u2019 non-uniform risk allocation",
       "is_canonical": false,
-      "color": "#ffadad",
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 2",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "orthodox_doctrine_of_uniform_caution",
+      "name": "orthodox doctrine of uniform caution",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "cross-domain risk-budget theory \u00e2\u2020\u2019 explains; causes \u00e2\u2020\u2019 pressure dissipation; enables \u00e2\u2020\u2019 session/corridor/clock/plating drift; causes \u00e2\u2020\u2019 declaratio",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 2",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "session/corridor/clock/plating_drift",
+      "name": "session/corridor/clock/plating drift",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 enables",
+      "is_canonical": false,
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 1"
+        "Week 2"
+      ]
+    },
+    {
+      "id": "pressure_dissipation",
+      "name": "pressure dissipation",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 causes; corridor drift \u00e2\u2020\u2019 causes",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 2",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "declaration/checkpoint/complication/plating_lag",
+      "name": "declaration/checkpoint/complication/plating lag",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 causes; causes \u00e2\u2020\u2019 late conversion of winnable positions",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "late_conversion_of_winnable_positions",
+      "name": "late conversion of winnable positions",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "declaration/checkpoint/complication/plating lag \u00e2\u2020\u2019 causes; decision lag \u00e2\u2020\u2019 causes",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 2",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "failure_misattribution",
+      "name": "failure misattribution",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "failure misattribution",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2,
+      "weeks": [
+        "Week 2",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "expected-variance_aggression",
+      "name": "expected-variance aggression",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "expected-variance aggression",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2,
+      "weeks": [
+        "Week 2",
+        "Week 3"
+      ]
+    },
+    {
+      "id": "inverted-u_risk-performance_curve",
+      "name": "inverted-u risk-performance curve",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "inverted-u risk-performance curve",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 3,
+      "weeks": [
+        "Week 2",
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "risk_concentration",
+      "name": "risk concentration",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "risk concentration",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2,
+      "weeks": [
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "performance_window_dynamics",
+      "name": "performance window dynamics",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "performance window dynamics",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2,
+      "weeks": [
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "corridor_drift",
+      "name": "corridor drift",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 causes; causes \u00e2\u2020\u2019 pressure dissipation",
+      "is_canonical": false,
+      "color": "#fdffb6",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 3"
+      ]
+    },
+    {
+      "id": "advantage_exploitation",
+      "name": "advantage exploitation",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "advantage exploitation",
+      "is_canonical": false,
+      "color": "#fdffb6",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 3"
+      ]
+    },
+    {
+      "id": "decision_lag",
+      "name": "decision lag",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "causes \u00e2\u2020\u2019 late conversion of winnable positions",
+      "is_canonical": false,
+      "color": "#fdffb6",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 3"
+      ]
+    },
+    {
+      "id": "checkpoint_management",
+      "name": "checkpoint management",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        }
+      ],
+      "description": "checkpoint management",
+      "is_canonical": false,
+      "color": "#fdffb6",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 3"
+      ]
+    },
+    {
+      "id": "win_conversion_efficiency",
+      "name": "win conversion efficiency",
+      "source": [
+        {
+          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "page": 1,
+          "pageLabel": "1-8"
+        },
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "win conversion efficiency",
+      "is_canonical": false,
+      "color": "#fcf6bd",
+      "appears_in_weeks": 2,
+      "weeks": [
+        "Week 3",
+        "Week 4"
+      ]
+    },
+    {
+      "id": "momentum_window",
+      "name": "momentum window",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "causes \u00e2\u2020\u2019 momentum-positive state",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "risk_budget",
+      "name": "risk budget",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "part_of \u00e2\u2020\u2019 non-uniform risk allocation",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "inverted-u_mechanism",
+      "name": "inverted-u mechanism",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "controlled-failure theory \u00e2\u2020\u2019 explains",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "momentum-positive_state",
+      "name": "momentum-positive state",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "momentum window \u00e2\u2020\u2019 causes; part_of \u00e2\u2020\u2019 escalation leverage point",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "escalation_leverage_point",
+      "name": "escalation leverage point",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "momentum-positive state \u00e2\u2020\u2019 part_of",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "corpus-specific_normalization",
+      "name": "corpus-specific normalization",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "enables \u00e2\u2020\u2019 within-domain z-score",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "within-domain_z-score",
+      "name": "within-domain z-score",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "corpus-specific normalization \u00e2\u2020\u2019 enables",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
+      ]
+    },
+    {
+      "id": "empirical_optimum",
+      "name": "empirical optimum",
+      "source": [
+        {
+          "file": "perf410_problem_set3.pdf",
+          "page": 1,
+          "pageLabel": "1-3"
+        }
+      ],
+      "description": "pressure index \u00e2\u2020\u2019 causes",
+      "is_canonical": false,
+      "color": "#caffbf",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 4"
       ]
     }
   ],
   "edges": [
     {
-      "id": "tempo maximization_to_controlled risk framework",
-      "source": "tempo_maximization",
-      "target": "controlled_risk_framework",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "BlitzBall reconceives run accumulation and wicket preservation as jointly optimizable objectives under a controlled-risk framework.",
-      "context": "BlitzBall, a tempo-maximization philosophy that reconceives the two objectives as jointly optimizable under a controlled-risk framework.",
-      "conflict_resolved": false
-    },
-    {
-      "id": "momentum windows_to_tempo maximization",
-      "source": "momentum_windows",
-      "target": "tempo_maximization",
+      "id": "risk-budget theory_to_risk budget (\u03c1)",
+      "source": "risk-budget_theory",
+      "target": "risk_budget_(\u03c1)",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Momentum Windows is one of the six formal constructs that build the BlitzBall tempo-maximization philosophy.",
-      "context": "BlitzBall is built on six formal constructs: Momentum Windows, the Strike Pressure Index (SPI), Controlled Collapse Theory, Tempo Elasticity, Dynamic Run Velocity (DRV), and the Session Dominance Model (SDM).",
+      "summary": "Risk-budget theory formalizes the concept of risk as a controlled variable represented by rho.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "strike pressure index_to_tempo maximization",
-      "source": "strike_pressure_index",
-      "target": "tempo_maximization",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "The Strike Pressure Index is a formal construct within the BlitzBall framework.",
-      "context": "BlitzBall is built on six formal constructs: Momentum Windows, the Strike Pressure Index (SPI), Controlled Collapse Theory, Tempo Elasticity, Dynamic Run Velocity (DRV), and the Session Dominance Model (SDM).",
-      "conflict_resolved": false
-    },
-    {
-      "id": "controlled collapse theory_to_tempo maximization",
-      "source": "controlled_collapse_theory",
-      "target": "tempo_maximization",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "Controlled Collapse Theory is a formal construct within the BlitzBall framework.",
-      "context": "BlitzBall is built on six formal constructs: Momentum Windows, the Strike Pressure Index (SPI), Controlled Collapse Theory, Tempo Elasticity, Dynamic Run Velocity (DRV), and the Session Dominance Model (SDM).",
-      "conflict_resolved": false
-    },
-    {
-      "id": "tempo elasticity_to_tempo maximization",
-      "source": "tempo_elasticity",
-      "target": "tempo_maximization",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "Tempo Elasticity is a formal construct within the BlitzBall framework.",
-      "context": "BlitzBall is built on six formal constructs: Momentum Windows, the Strike Pressure Index (SPI), Controlled Collapse Theory, Tempo Elasticity, Dynamic Run Velocity (DRV), and the Session Dominance Model (SDM).",
-      "conflict_resolved": false
-    },
-    {
-      "id": "dynamic run velocity_to_tempo maximization",
-      "source": "dynamic_run_velocity",
-      "target": "tempo_maximization",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "Dynamic Run Velocity is a formal construct within the BlitzBall framework.",
-      "context": "BlitzBall is built on six formal constructs: Momentum Windows, the Strike Pressure Index (SPI), Controlled Collapse Theory, Tempo Elasticity, Dynamic Run Velocity (DRV), and the Session Dominance Model (SDM).",
-      "conflict_resolved": false
-    },
-    {
-      "id": "session dominance model_to_tempo maximization",
-      "source": "session_dominance_model",
-      "target": "tempo_maximization",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "The Session Dominance Model is a formal construct within the BlitzBall framework.",
-      "context": "BlitzBall is built on six formal constructs: Momentum Windows, the Strike Pressure Index (SPI), Controlled Collapse Theory, Tempo Elasticity, Dynamic Run Velocity (DRV), and the Session Dominance Model (SDM).",
-      "conflict_resolved": false
-    },
-    {
-      "id": "controlled collapse theory_to_tempo maximization",
-      "source": "controlled_collapse_theory",
-      "target": "tempo_maximization",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "Controlled Collapse Theory explains that apparent batting collapses under BlitzBall are consistent with rational risk-taking.",
-      "context": "via Controlled Collapse Theory, that a subset of apparent batting collapses under BlitzBall are statistically consistent with rational risk-taking rather than technical failure.",
-      "conflict_resolved": false
-    },
-    {
-      "id": "momentum windows_to_strike pressure index",
-      "source": "momentum_windows",
-      "target": "strike_pressure_index",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "Strike Pressure Index is related to previous work on pressure differential bowling analysis that predates the current session-level focus.",
-      "context": "Nakamura\u2019s work on \u201cpressure differential\u201d bowling analysis [2] is the closest antecedent to our Strike Pres- sure Index",
-      "conflict_resolved": false
-    },
-    {
-      "id": "session dominance model_to_risk budget allocation",
-      "source": "session_dominance_model",
-      "target": "risk_budget_allocation",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "Early session dominance scoring lacked the formal risk-budget allocation mechanism central to the current contribution.",
-      "context": "Okonkwo-Reyes [3] proposed an early version of session-level dominance scoring but did not incorporate a formal risk-budget allocation mechanism across ses- sion windows",
-      "conflict_resolved": false
-    },
-    {
-      "id": "controlled collapse theory_to_risk budget allocation",
-      "source": "controlled_collapse_theory",
-      "target": "risk_budget_allocation",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "Controlled Collapse Theory explains wicket clusters as expected outcomes of elevated risk budgets.",
-      "context": "Controlled Collapse Theory (Section III-D) reframes a subset of these clusters as statistically expected outcomes of elevated risk budgets rather than departures from normal batting be- havior.",
-      "conflict_resolved": false
-    },
-    {
-      "id": "momentum windows_to_risk budget allocation",
-      "source": "momentum_windows",
-      "target": "risk_budget_allocation",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "Positive momentum in windows triggers the escalation of the risk budget.",
-      "context": "BlitzBall\u2019s core operational rule is to escalate the risk budget (Section III-C) whenever M(Wk) > \u00b5thresh",
-      "conflict_resolved": false
-    },
-    {
-      "id": "session drift_to_momentum windows",
-      "source": "session_drift",
+      "id": "risk-budget theory_to_momentum windows",
+      "source": "risk-budget_theory",
       "target": "momentum_windows",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "The Session Drift Index calculates failure to capitalize on momentum-positive windows.",
-      "context": "The Session Drift Index quantifies a team\u2019s failure to cap- italize on momentum-positive windows",
+      "summary": "Momentum windows are identified as one of the five core constructs within the framework.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "momentum windows_to_risk budget allocation",
-      "source": "momentum_windows",
-      "target": "risk_budget_allocation",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "A positive momentum window triggers an escalation in the risk budget.",
-      "context": "BlitzBall\u2019s core operational rule is to escalate the risk budget... whenever M(Wk) > \u00b5thresh",
-      "conflict_resolved": false
-    },
-    {
-      "id": "session drift_to_momentum windows",
-      "source": "session_drift",
-      "target": "momentum_windows",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "The Session Drift Index quantifies a team's failure to capitalize on momentum-positive windows.",
-      "context": "The Session Drift Index quantifies a team\u2019s failure to capitalize on momentum-positive windows",
-      "conflict_resolved": false
-    },
-    {
-      "id": "dynamic run velocity_to_strike pressure index",
-      "source": "dynamic_run_velocity",
-      "target": "strike_pressure_index",
+      "id": "risk-budget theory_to_pressure index",
+      "source": "risk-budget_theory",
+      "target": "pressure_index",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Dynamic Run Velocity is a component used to calculate the Strike Pressure Index.",
-      "context": "SPI(t) = \u03b1 \u00b7 DRV(t) + \u03b2 \u00b7 1/OBR(t) + \u03f5 \u2212\u03b3 \u00b7 WL(t) where DRV(t) is Dynamic Run Velocity",
+      "summary": "A domain-specific pressure index is a shared construct in risk-budget models.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "dynamic run velocity_to_tempo elasticity",
-      "source": "dynamic_run_velocity",
-      "target": "tempo_elasticity",
+      "id": "risk-budget theory_to_controlled-failure theory",
+      "source": "risk-budget_theory",
+      "target": "controlled-failure_theory",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Tempo Elasticity is defined as the responsiveness of Dynamic Run Velocity to changes in risk budget.",
-      "context": "We define Tempo Elasticity as the responsiveness of DRV to changes in the risk budget",
+      "summary": "Controlled-failure theory is a foundational component of the unified framework.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "risk budget allocation_to_tempo elasticity",
-      "source": "risk_budget_allocation",
-      "target": "tempo_elasticity",
+      "id": "risk-budget theory_to_elasticity measure",
+      "source": "risk-budget_theory",
+      "target": "elasticity_measure",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Tempo Elasticity measures the responsiveness of run velocity to changes in risk budget.",
-      "context": "We define Tempo Elasticity as the responsiveness of DRV to changes in the risk budget \u03c1(t)",
+      "summary": "The elasticity measure is one of the five key constructs defined in the theory.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "tempo elasticity_to_risk budget allocation",
-      "source": "tempo_elasticity",
-      "target": "risk_budget_allocation",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "High tempo elasticity indicates a capability to convert risk budget increases into disproportionate run-rate gains.",
-      "context": "Teams and individual batters with E\u03c1 > 1 are classified as tempo-elastic: capable of converting incremental risk-budget increases into disproportionate run-rate gains",
-      "conflict_resolved": false
-    },
-    {
-      "id": "tempo elasticity_to_dynamic run velocity",
-      "source": "tempo_elasticity",
-      "target": "dynamic_run_velocity",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "Tempo elasticity is defined as the responsiveness of DRV to changes in the risk budget.",
-      "context": "ne Tempo Elasticity as the responsiveness of DRV to changes in the risk budget",
-      "conflict_resolved": false
-    },
-    {
-      "id": "tempo elasticity_to_risk budget allocation",
-      "source": "tempo_elasticity",
-      "target": "risk_budget_allocation",
-      "label": "explanatory_relationship",
-      "relation": "explanatory_relationship",
-      "summary": "Tempo elasticity is the responsiveness of DRV to changes in the risk budget.",
-      "context": "Tempro Elasticity as the responsiveness of DRV to changes in the risk budget",
-      "conflict_resolved": false
-    },
-    {
-      "id": "dynamic run velocity_to_risk budget allocation",
-      "source": "dynamic_run_velocity",
-      "target": "risk_budget_allocation",
+      "id": "uniform caution strategies_to_non-uniform risk allocation",
+      "source": "uniform_caution_strategies",
+      "target": "non-uniform_risk_allocation",
       "label": "related_to",
       "relation": "related_to",
-      "summary": "Dynamic run velocity changes in response to risk budget allocation.",
-      "context": "responsiveness of DRV to changes in the risk budget",
+      "summary": "Uniform caution strategies are critiqued for underperforming compared to deliberate non-uniform allocation.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "controlled collapse theory_to_risk budget allocation",
-      "source": "controlled_collapse_theory",
-      "target": "risk_budget_allocation",
+      "id": "cross-domain risk-budget theory_to_orthodox doctrine of uniform caution",
+      "source": "cross-domain_risk-budget_theory",
+      "target": "orthodox_doctrine_of_uniform_caution",
       "label": "explains",
       "relation": "explains",
-      "summary": "Controlled Collapse Theory formalizes the expected wicket cost of an elevated risk budget.",
-      "context": "Controlled Collapse Theory formalizes the expected wicket cost of an elevated risk budget.",
+      "summary": "The theory critiques the orthodox doctrine for applying caution uniformly rather than concentrating risk where it yields the highest return.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "risk budget allocation_to_tempo maximization",
-      "source": "risk_budget_allocation",
-      "target": "tempo_maximization",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "Optimizing risk budget levels allows for greater tempo gains in match performance.",
-      "context": "Net win-probability gain relative to Orthodox-Attritional baseline peaked at \u03c1 = 0.62",
-      "conflict_resolved": false
-    },
-    {
-      "id": "risk budget allocation_to_controlled risk framework",
-      "source": "risk_budget_allocation",
-      "target": "controlled_risk_framework",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "Risk budget calibration is a component of the overall controlled risk strategy.",
-      "context": "Risk-Budget Calibration We swept the target risk budget \u03c1 \u2208 {0.30, 0.45, 0.55, 0.65, 0.75, 0.85} across a 150-match calibration subset.",
-      "conflict_resolved": false
-    },
-    {
-      "id": "risk budget allocation_to_controlled risk framework",
-      "source": "risk_budget_allocation",
-      "target": "controlled_risk_framework",
+      "id": "orthodox doctrine of uniform caution_to_pressure dissipation",
+      "source": "orthodox_doctrine_of_uniform_caution",
+      "target": "pressure_dissipation",
       "label": "causes",
       "relation": "causes",
-      "summary": "Exceeding optimal risk levels leads to performance degradation due to wicket loss.",
-      "context": "performance degrading beyond \u03c1 = 0.75 due to compounding wicket loss outweighing tempo gains on all but the flattest pitch conditions",
+      "summary": "Uniform caution prevents pressing advantages, which leads to the dissipation of pressure.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "session dominance model_to_controlled risk framework",
-      "source": "session_dominance_model",
-      "target": "controlled_risk_framework",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "Baseline philosophies define how risk is applied across sessions.",
-      "context": "Orthodox-Attritional: uniform low-risk shot selection (\u03c1 \u22480.22) with session-length wicket preservation as the primary objective",
+      "id": "orthodox doctrine of uniform caution_to_session/corridor/clock/plating drift",
+      "source": "orthodox_doctrine_of_uniform_caution",
+      "target": "session/corridor/clock/plating_drift",
+      "label": "enables",
+      "relation": "enables",
+      "summary": "The uniform application of caution manifests as session, corridor, clock, or plating drift depending on the domain.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "momentum windows_to_session dominance model",
-      "source": "momentum_windows",
-      "target": "session_dominance_model",
+      "id": "orthodox doctrine of uniform caution_to_declaration/checkpoint/complication/plating lag",
+      "source": "orthodox_doctrine_of_uniform_caution",
+      "target": "declaration/checkpoint/complication/plating_lag",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Uniform caution results in lagging declarations or checkpoints, preventing timely action.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "declaration/checkpoint/complication/plating lag_to_late conversion of winnable positions",
+      "source": "declaration/checkpoint/complication/plating_lag",
+      "target": "late_conversion_of_winnable_positions",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Lag in critical moments leads to winnable positions being converted late or not at all.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "orthodox doctrine of uniform caution_to_uniform caution strategies",
+      "source": "orthodox_doctrine_of_uniform_caution",
+      "target": "uniform_caution_strategies",
       "label": "explains",
       "relation": "explains",
-      "summary": "Balanced-Rotational philosophy applies risk without escalating during specific momentum periods.",
-      "context": "Balanced-Rotational: moderate risk budget (\u03c1 \u22480.40) applied uniformly across sessions without momentum-window escalation",
+      "summary": "The orthodox doctrine dictates the application of uniform caution strategies across the full performance window.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "tempo maximization_to_dynamic run velocity",
-      "source": "tempo_maximization",
-      "target": "dynamic_run_velocity",
+      "id": "cross-domain risk-budget theory_to_non-uniform risk allocation",
+      "source": "cross-domain_risk-budget_theory",
+      "target": "non-uniform_risk_allocation",
       "label": "enables",
       "relation": "enables",
-      "summary": "Adopting tempo instructions results in higher run rates.",
-      "context": "sides operating under BlitzBall recorded a mean run rate of 4.18 runs/over versus a pooled baseline mean of 3.02 runs/over",
+      "summary": "The theory advocates for concentrating risk via non-uniform allocation where it pays off most.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "risk budget allocation_to_tempo maximization",
-      "source": "risk_budget_allocation",
-      "target": "tempo_maximization",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "Explicit allocation of risk budgets across momentum windows leads to a substantially higher run rate.",
-      "context": "The results support Hypothesis H1: explicit risk-budget allocation across momentum windows generates a substantially higher run rate for a comparatively small increase in wickets lost",
+      "id": "orthodox doctrine of uniform caution_to_corridor drift",
+      "source": "orthodox_doctrine_of_uniform_caution",
+      "target": "corridor_drift",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Uniform caution leads to corridor drift because no one presses an advantage.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "momentum windows_to_controlled risk framework",
-      "source": "momentum_windows",
-      "target": "controlled_risk_framework",
+      "id": "corridor drift_to_pressure dissipation",
+      "source": "corridor_drift",
+      "target": "pressure_dissipation",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Pressure dissipates as a result of corridor drift due to lack of aggression.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "decision lag_to_late conversion of winnable positions",
+      "source": "decision_lag",
+      "target": "late_conversion_of_winnable_positions",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Declaration or checkpoint lag results in the late conversion or failure to convert winnable positions.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "momentum window_to_momentum-positive state",
+      "source": "momentum_window",
+      "target": "momentum-positive_state",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "A momentum window is classified as momentum-positive when its calculated index exceeds a specific threshold.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "momentum-positive state_to_escalation leverage point",
+      "source": "momentum-positive_state",
+      "target": "escalation_leverage_point",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Risk budgets are allocated across specific momentum windows within the framework.",
-      "context": "explicit risk-budget allocation across momentum windows generates a substantially higher run rate",
+      "summary": "Momentum-positive windows are identified as leverage points where escalating risk is expected to yield positive returns.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "tempo elasticity_to_controlled risk framework",
-      "source": "tempo_elasticity",
-      "target": "controlled_risk_framework",
+      "id": "corpus-specific normalization_to_within-domain z-score",
+      "source": "corpus-specific_normalization",
+      "target": "within-domain_z-score",
+      "label": "enables",
+      "relation": "enables",
+      "summary": "Corpus-specific normalization allows the momentum metric to function as a within-domain z-score rather than a portable absolute unit.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "controlled-failure theory_to_inverted-u mechanism",
+      "source": "controlled-failure_theory",
+      "target": "inverted-u_mechanism",
       "label": "explains",
       "relation": "explains",
-      "summary": "Tempo elasticity measures the effect of individually calibrated risk budgets within the system.",
-      "context": "Opening batter Callum Drayce, deployed with an individually calibrated risk budget of \u03c1 = 0.71, recorded a tempo elasticity of E\u03c1 = 2.04",
+      "summary": "The convex growth of expected failures in controlled-failure theory explains why performance follows an inverted-u curve past the optimum.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "controlled collapse theory_to_session dominance model",
-      "source": "controlled_collapse_theory",
-      "target": "session_dominance_model",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "The classification accuracy of Controlled Collapse Theory is analyzed in the context of surface conditions affecting session dynamics.",
-      "context": "A secondary analysis found that Controlled Collapse Theory\u2019s classification accuracy degraded on day-five turning surfaces",
+      "id": "pressure index_to_empirical optimum",
+      "source": "pressure_index",
+      "target": "empirical_optimum",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "The interaction between pressure index gains and failure costs determines the empirical optimum for risk budget allocation.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+      ],
       "conflict_resolved": false
     },
     {
-      "id": "session dominance model_to_tempo maximization",
-      "source": "session_dominance_model",
-      "target": "tempo_maximization",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "Session Dominance Model scores are used as a metric to evaluate performance outcomes like run rate.",
-      "context": "SDM score 0.41 0.68",
-      "conflict_resolved": false
-    },
-    {
-      "id": "controlled risk framework_to_tempo maximization",
-      "source": "controlled_risk_framework",
-      "target": "tempo_maximization",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "The framework allows for optimal risk budget calibration based on pitch conditions to maximize scoring.",
-      "context": "Our risk-budget sweep (Section IV-B) indicates that the optimal \u03c1 is not universal: on surfaces classified as \u201cturning, day-five deteriorating\u201d... optimal \u03c1 fell to approximately 0.48",
-      "conflict_resolved": false
-    },
-    {
-      "id": "controlled collapse theory_to_tempo maximization",
-      "source": "controlled_collapse_theory",
-      "target": "tempo_maximization",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "Controlled Collapse Theory is analyzed within the context of the tempo-maximization framework.",
-      "context": "A secondary analysis found that Controlled Collapse Theory\u2019s classification accuracy degraded on day-five turning surfaces",
-      "conflict_resolved": false
-    },
-    {
-      "id": "session dominance model_to_tempo maximization",
-      "source": "session_dominance_model",
-      "target": "tempo_maximization",
+      "id": "risk budget_to_non-uniform risk allocation",
+      "source": "risk_budget",
+      "target": "non-uniform_risk_allocation",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "The Session Dominance Model is a component extended for future work in the tempo-maximization philosophy.",
-      "context": "Future work will extend the Session Dominance Model to account for surface-adjusted dismissal probabilities",
-      "conflict_resolved": false
-    },
-    {
-      "id": "risk budget allocation_to_tempo maximization",
-      "source": "risk_budget_allocation",
-      "target": "tempo_maximization",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "Risk budget theory is related to the unified theory of batting tempo.",
-      "context": "Toward a unified risk-budget theory of batting tempo",
-      "conflict_resolved": false
-    },
-    {
-      "id": "tempo maximization_to_risk budget allocation",
-      "source": "tempo_maximization",
-      "target": "risk_budget_allocation",
-      "label": "related_to",
-      "relation": "related_to",
-      "summary": "Batting tempo is analyzed within the context of a unified risk-budget theory.",
-      "context": "Toward a unified risk-budget theory of batting tempo",
-      "conflict_resolved": false
-    },
-    {
-      "id": "risk budget allocation_to_controlled risk framework",
-      "source": "risk_budget_allocation",
-      "target": "controlled_risk_framework",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "Elevated risk-budget regimes influence captaincy decision-making.",
-      "context": "Captaincy decision-making under elevated risk-budget regimes",
+      "summary": "Risk budget theory advocates for non-uniform risk allocation based on momentum states rather than uniform caution.",
+      "context": "",
+      "chunk_ids": [
+        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+      ],
       "conflict_resolved": false
     }
   ],
   "stats": {
-    "total_nodes": 10,
-    "total_edges": 40,
+    "total_nodes": 34,
+    "total_edges": 22,
     "fusion_stats": {
       "canonical_nodes": 0,
       "fused_edges": 0,
