@@ -1,5 +1,6 @@
 ﻿import asyncio
 import json
+import logging
 import time
 from collections import Counter, defaultdict
 
@@ -18,6 +19,7 @@ SEED_ENTITY_PRIORITY_COUNT = 10
 CROSS_WEEK_CONCEPT_COUNT = 10
 LLM_MODEL = 'qwen/qwen3.6-27b'
 RAG_MODEL = 'openai/gpt-oss-20b'
+logger = logging.getLogger(__name__)
 
 class StudyGraphEngine:
     def __init__(self, collections, client, llm_model=LLM_MODEL, rag_model=RAG_MODEL):
@@ -87,7 +89,7 @@ class StudyGraphEngine:
             content = response.choices[0].message.content
 
             if not content or not content.strip():
-                print("Empty response from LLM")
+                logger.warning("seed_generation_empty_response")
                 self.seed_entities = []
                 return
 
@@ -100,9 +102,9 @@ class StudyGraphEngine:
 
             seed_json = json.loads(content)
             self.seed_entities = [s.lower().strip() for s in seed_json.get("seed_concepts", [])]
-            print(f"Generated {len(self.seed_entities)} seeds: {self.seed_entities}")
+            logger.info("seed_generation_result seeds=%d", len(self.seed_entities))
         except Exception as e:
-            print(f"Seed generation failed: {e}")
+            logger.exception("seed_generation_failed")
             self.seed_entities = []
 
     def _deduplicate_seeds_semantically(self, seeds, threshold=0.85):
@@ -124,7 +126,7 @@ class StudyGraphEngine:
             if max(sims) < threshold:
                 kept.append(seed)
                 kept_embeddings.append(embeddings[i])
-        print(f"Semantic deduplication: {len(seeds)} â†’ {len(kept)} seeds")
+        logger.info("seed_deduplication input=%d output=%d", len(seeds), len(kept))
         return kept
 
     def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
@@ -210,7 +212,7 @@ Respond with ONLY this exact JSON structure:
             content = response.choices[0].message.content
 
             if not content or not content.strip():
-                print("LLM returned empty response")
+                logger.warning("chunk_extraction_empty_response")
                 return {"concepts": [], "relationships": []}
 
             # Strip markdown fences if the model wraps output anyway
@@ -223,7 +225,6 @@ Respond with ONLY this exact JSON structure:
 
             raw_data = json.loads(content)
             validated = ExtractionResult(**raw_data)
-            print("Done")
             return {
                 "concepts": validated.concepts,
                 "relationships": [
@@ -238,18 +239,16 @@ Respond with ONLY this exact JSON structure:
                 ]
             }
         except ValueError as e:
-            print(f"Extraction validation error: {e}")
-            print(f"Raw data was: {raw_data}")
+            logger.warning("chunk_extraction_validation_failed error=%s raw_data_present=%s", e, raw_data is not None)
             return {"concepts": [], "relationships": []}
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
+            logger.warning("chunk_extraction_json_failed error=%s", e)
             return {"concepts": [], "relationships": []}
         except RateLimitError as e:
-            print(e)
+            logger.warning("chunk_extraction_rate_limited error=%s", e)
             return {"concepts": [], "relationships": []}
         except Exception as e:
-            print(f"Error calling LLM: {e}")
-            print(f"Raw data was: {raw_data}")
+            logger.exception("chunk_extraction_failed raw_data_present=%s", raw_data is not None)
             return {"concepts": [], "relationships": []}
 
     def add_to_graph(self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None):
@@ -320,15 +319,24 @@ Respond with ONLY this exact JSON structure:
         if doc_name in self._doc_concept_names:
             self._doc_concept_names[doc_name] -= dropped
 
-        print(f"Pruned {len(dropped)} low-value concept(s) from {doc_name} ({week_key}): {sorted(dropped)}")
+        logger.info(
+            "concepts_pruned document=%s week=%s dropped=%d",
+            doc_name,
+            week_key,
+            len(dropped),
+        )
 
     def fuse_graph(self):
         """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
-        print("Starting Global Knowledge Fusion...")
+        logger.info("graph_fusion_started concepts=%d edges=%d", len(self.concepts), len(self.edges))
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, self.client)
 
-        print(f"Fusion complete. Canonical nodes: {len(self.canonical_nodes)}, "
-              f"Fused edges: {len(self.fused_edges)}, Inferred edges: {len(self.inferred_edges)}")
+        logger.info(
+            "graph_fusion_complete canonical_nodes=%d fused_edges=%d inferred_edges=%d",
+            len(self.canonical_nodes),
+            len(self.fused_edges),
+            len(self.inferred_edges),
+        )
 
     def _merge_entities(self):
         """
@@ -361,7 +369,7 @@ Respond with ONLY this exact JSON structure:
                     self.canonical_nodes[node_names[j]] = node_names[i]
                     merged.add(node_names[j])
 
-        print(f"Entity merging: {len(self.canonical_nodes)} merges via cosine similarity (threshold={threshold})")
+        logger.info("entity_merging_complete merges=%d threshold=%.2f", len(self.canonical_nodes), threshold)
 
     def _normalize_relation(self, relation):
         """
@@ -446,8 +454,11 @@ Respond with ONLY this exact JSON structure:
                         "conflicting_relations": relations
                     })
 
-        print(f"Conflict resolution: Processed {len(edge_groups)} edge groups, "
-              f"created {len(self.fused_edges)} fused edges")
+        logger.info(
+            "conflict_resolution_complete edge_groups=%d fused_edges=%d",
+            len(edge_groups),
+            len(self.fused_edges),
+        )
 
     def find_best_node(self, query):
         if not self.concepts:
@@ -756,7 +767,7 @@ Respond with ONLY this exact JSON structure:
             )
             answer = response.choices[0].message.content
         except Exception as e:
-            print(f"Error in RAG query: {e}")
+            logger.exception("rag_query_failed")
             answer = "Error processing query"
 
         return {

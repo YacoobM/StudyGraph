@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import time
 from itertools import combinations
@@ -28,6 +29,7 @@ VERDICT_CACHE_FILE = OUTPUT_DIR / "verdict_cache.json"
 _BRIDGE_MIN_SHARED_NEIGHBOURS = 2
 _HUB_DEGREE_PERCENTILE = 90.0
 _HUB_MIN_ABSOLUTE_DEGREE = 8
+logger = logging.getLogger(__name__)
 
 
 _STRIP_CHARS = re.compile(r"[,;:\"'`''""]")
@@ -367,7 +369,7 @@ def _collect_nodes(engine):
     return nodes
 
 
-def merge_graph(engine, client, log=print):
+def merge_graph(engine, client, log=logger.info):
     nodes = _collect_nodes(engine)
     if not nodes:
         log("Fusion: no concepts")

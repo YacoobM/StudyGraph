@@ -1,4 +1,6 @@
 ﻿import sys
+import logging
+import time
 from pathlib import Path
 from collections import defaultdict, Counter
 
@@ -16,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 import json
+from app.logging_config import configure_logging
 from groq import Groq
 from chromadb import Client
 from schemas.graph import GraphResponse
@@ -30,6 +33,7 @@ from services.graph_runtime import save_graph_json
 from services import evolution_data, graph_fusion
 
 load_dotenv()
+configure_logging()
 
 chroma = Client()
 
@@ -63,6 +67,7 @@ set_graph_source(lambda: runtime_state.engine)
 
 LLM_MODEL = "qwen/qwen3.6-27b"
 RAG_MODEL = "openai/gpt-oss-20b"
+logger = logging.getLogger(__name__)
 
 
 @app.get("/health")
@@ -249,7 +254,9 @@ async def fuse_knowledge_graph():
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
 
+    fusion_started = time.perf_counter()
     try:
+        logger.info("fusion_request_started concepts=%d edges=%d", len(engine.concepts), len(engine.edges))
         engine.fuse_graph()
 
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
@@ -260,6 +267,12 @@ async def fuse_knowledge_graph():
             "inferred_edges": len(engine.inferred_edges)
         })
 
+        logger.info(
+            "fusion_request_complete canonical_nodes=%d fused_edges=%d duration_ms=%.1f",
+            len(engine.canonical_nodes),
+            len(engine.fused_edges),
+            (time.perf_counter() - fusion_started) * 1000,
+        )
         return {
             "status": "success",
             "message": "Knowledge graph fusion complete",
@@ -272,6 +285,10 @@ async def fuse_knowledge_graph():
             "graph_saved_to": graph_save_path
         }
     except Exception as e:
+        logger.exception(
+            "fusion_request_failed duration_ms=%.1f",
+            (time.perf_counter() - fusion_started) * 1000,
+        )
         raise HTTPException(status_code=400, detail=str(e))
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from collections import Counter, defaultdict
 
@@ -10,6 +11,7 @@ MULTI_WEEK_COLOR = "#fcf6bd"
 DEFAULT_COLOR = "#d1d5db"
 
 LLM_MODEL = "qwen/qwen3.6-27b"
+logger = logging.getLogger(__name__)
 
 
 def get_week_color_map(engine):
@@ -97,7 +99,7 @@ class _TokenPacer:
             if self._used + estimated_tokens > self.tpm_budget:
                 wait = 60 - elapsed
                 if wait > 0:
-                    print(f"Pacing for TPM budget — waiting {wait:.1f}s")
+                    logger.info("evolution_token_pacing wait_seconds=%.1f", wait)
                     await asyncio.sleep(wait)
                 self._window_start = time.monotonic()
                 self._used = 0
@@ -138,7 +140,7 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
             return response.choices[0].message.content
         except RateLimitError as e:
             if attempt == MAX_RETRIES:
-                print(f"Rate limit exceeded after {MAX_RETRIES} retries.")
+                logger.error("evolution_llm_rate_limit_exhausted retries=%d", MAX_RETRIES)
                 return None
             retry_after = None
             try:
@@ -146,16 +148,21 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
             except (AttributeError, TypeError, ValueError):
                 pass
             delay = retry_after if retry_after is not None else min(60, 5 * (3 ** attempt))
-            print(f"Rate limited (attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {delay:.1f}s")
+            logger.warning(
+                "evolution_llm_rate_limited attempt=%d/%d retry_seconds=%.1f",
+                attempt + 1,
+                MAX_RETRIES,
+                delay,
+            )
             await asyncio.sleep(delay)
         except BadRequestError as e:
             if attempt == MAX_RETRIES:
-                print(f"Groq rejected malformed JSON after {MAX_RETRIES} retries")
+                logger.error("evolution_llm_bad_request_exhausted retries=%d", MAX_RETRIES)
                 return None
-            print(f"Malformed JSON (attempt {attempt + 1}/{MAX_RETRIES}) — retrying")
+            logger.warning("evolution_llm_bad_request attempt=%d/%d", attempt + 1, MAX_RETRIES)
             await asyncio.sleep(1)
         except Exception as e:
-            print(f"Groq call failed: {e}")
+            logger.exception("evolution_llm_call_failed")
             return None
     return None
 
@@ -184,9 +191,9 @@ async def _call_and_parse_json(client, system_prompt, user_prompt, temperature, 
             return result
         except (json.JSONDecodeError, TypeError, AttributeError):
             if attempt == 4:
-                print(f"JSON parse failed after 5 attempts")
+                logger.error("evolution_json_parse_exhausted retries=5")
                 return {}
-            print(f"Malformed JSON (attempt {attempt + 1}/5) — retrying in 1s")
+            logger.warning("evolution_json_parse_failed attempt=%d/5", attempt + 1)
             await asyncio.sleep(1)
     return {}
 
@@ -258,7 +265,8 @@ async def summarize_weeks_batch(client, requests, engine):
     total = len(batches)
 
     for i, batch in enumerate(batches, start=1):
-        print(f"Evolution summaries: batch {i}/{total} ({len(batch)} concepts)")
+        batch_started = time.perf_counter()
+        logger.info("evolution_summary_batch_started batch=%d/%d concepts=%d", i, total, len(batch))
         sections = []
         for req in batch:
             if req.get("evidence"):
@@ -281,7 +289,14 @@ async def summarize_weeks_batch(client, requests, engine):
             text = data.get(req["key"])
             if isinstance(text, str) and text.strip():
                 results[req["key"]] = text.strip()
-        print(f"Batch {i}/{total} done")
+        logger.info(
+            "evolution_summary_batch_complete batch=%d/%d concepts=%d duration_ms=%.1f results=%d",
+            i,
+            total,
+            len(batch),
+            (time.perf_counter() - batch_started) * 1000,
+            len(data),
+        )
 
     return results
 
@@ -302,7 +317,8 @@ async def summarize_comparisons_batch(client, requests):
     total = len(batches)
 
     for i, batch in enumerate(batches, start=1):
-        print(f"Evolution comparisons: batch {i}/{total} ({len(batch)} concepts)")
+        batch_started = time.perf_counter()
+        logger.info("evolution_comparison_batch_started batch=%d/%d concepts=%d", i, total, len(batch))
         sections = []
         for req in batch:
             if not req["from_text"] or not req["to_text"]:
@@ -313,7 +329,7 @@ async def summarize_comparisons_batch(client, requests):
                 f'{req["to_week"]} EVIDENCE:\n{req["to_text"][:600]}'
             )
         if not sections:
-            print(f"Batch {i}/{total} skipped (nothing to compare)")
+            logger.info("evolution_comparison_batch_skipped batch=%d/%d", i, total)
             continue
         user_prompt = "\n\n---\n\n".join(sections)
 
@@ -323,7 +339,14 @@ async def summarize_comparisons_batch(client, requests):
             text = data.get(req["key"])
             if isinstance(text, str) and text.strip():
                 results[req["key"]] = text.strip()
-        print(f"Batch {i}/{total} done")
+        logger.info(
+            "evolution_comparison_batch_complete batch=%d/%d concepts=%d duration_ms=%.1f results=%d",
+            i,
+            total,
+            len(batch),
+            (time.perf_counter() - batch_started) * 1000,
+            len(data),
+        )
 
     return results
 

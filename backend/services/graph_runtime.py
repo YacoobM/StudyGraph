@@ -1,7 +1,10 @@
 import json
+import logging
 from datetime import datetime
 
 from app.config import OUTPUT_DIR
+
+logger = logging.getLogger(__name__)
 
 
 def save_seed_entities(seed_entities):
@@ -16,7 +19,7 @@ def save_seed_entities(seed_entities):
             json.dump(data, file, indent=2)
         return str(output_file)
     except Exception as error:
-        print(f"Error saving seed entities: {error}")
+        logger.exception("seed_entities_save_failed")
         return None
 
 
@@ -38,7 +41,7 @@ def save_extraction_result(timings, nodes, edges):
             json.dump(data, file, indent=2)
         return str(output_file)
     except Exception as error:
-        print(f"Error saving file: {error}")
+        logger.exception("extraction_result_save_failed")
         return None
 
 
@@ -59,7 +62,7 @@ def save_graph_json(nodes, edges, fusion_stats=None):
             json.dump(data, file, indent=2)
         return str(output_file)
     except Exception as error:
-        print(f"Error saving graph JSON: {error}")
+        logger.exception("graph_json_save_failed")
         return None
 
 
@@ -79,5 +82,5 @@ def call_llm(client, model, prompt, text_batch):
             response_format={"type": "json_object"},
         )
     except Exception as error:
-        print(f"LLM call failed: {error}")
+        logger.exception("llm_call_failed model=%s", model)
         raise
