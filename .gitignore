@@ -49,3 +49,7 @@ dist/
 backend/data/
 outputs/
 uploads/
+
+
+# Fusion run logs and verdict cache (regenerated every run)
+backend/data/outputs/fusion/

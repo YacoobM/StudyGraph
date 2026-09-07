@@ -124,7 +124,7 @@ class StudyGraphEngine:
             if max(sims) < threshold:
                 kept.append(seed)
                 kept_embeddings.append(embeddings[i])
-        print(f"Semantic deduplication: {len(seeds)} â†’ {len(kept)} seeds")
+        print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
     def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
@@ -175,7 +175,7 @@ class StudyGraphEngine:
         return [self._known_concepts_list[i] for i in top_idx]
 
     async def extract_knowledge(self, text_batch, known_concepts=None):
-        raw_data = None  # â† initialize here so except blocks can always reference it
+        raw_data = None  # ← initialize here so except blocks can always reference it
 
         if self.seed_entities:
             seed_list = ", ".join(self.seed_entities[:SEED_ENTITY_PRIORITY_COUNT])
@@ -191,7 +191,7 @@ class StudyGraphEngine:
                 f"extract them too using this exact name: {known_list}.\n"
             )
 
-        prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else â€” no explanation, no markdown, no code fences.
+        prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
 {priority_line}{known_line}
 Relationship types: prerequisite, causes, part_of, explains, enables, related_to
@@ -324,7 +324,7 @@ Respond with ONLY this exact JSON structure:
 
     def fuse_graph(self):
         """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
-        print("Starting Global Knowledge Fusion...")
+        print("Starting fusion...")
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, self.client)
 
         print(f"Fusion complete. Canonical nodes: {len(self.canonical_nodes)}, "
@@ -333,7 +333,7 @@ Respond with ONLY this exact JSON structure:
     def _merge_entities(self):
         """
         Entity Merging: Use cosine similarity to identify and merge semantically identical nodes.
-        No LLM call â€” deterministic, fast, reproducible.
+        No LLM call — deterministic, fast, reproducible.
         """
         if not self.concepts:
             return
@@ -389,7 +389,7 @@ Respond with ONLY this exact JSON structure:
         """
         Conflict Resolution: When multiple edges exist between the same two nodes,
         normalize relation labels and select the first edge (conflicts are rare after normalization).
-        No LLM call â€” all done via deterministic string normalization.
+        No LLM call — all done via deterministic string normalization.
         """
         if not self.edges:
             return
