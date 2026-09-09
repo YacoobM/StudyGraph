@@ -1,12 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import ConceptGraph from '../components/ConceptGraph.jsx'
 import QuizPane from '../components/QuizPane.jsx'
 import Inspector from '../components/Inspector.jsx'
+import NotesPane from '../components/NotesPane.jsx'
 import {
   listDocuments, uploadDocument, deleteDocument, fetchGraph, askQuestion,
-  getPipelineStatus, patchDocument,
+  getPipelineStatus, patchDocument, fetchDocumentStats,
 } from '../services/api.js'
 import '../styles/studygraph.css'
 import './Workspace.css'
@@ -55,6 +56,13 @@ export default function Workspace() {
   const setBusyToast = (msg) => { setBusy(msg); setTimeout(() => setBusy(''), 1800) }
   const maxWeek = Math.max(1, ...graph.nodes.map((n) => n.week || 1))
   const fileInput = useRef(null)
+
+  // Notes are written from documents the engine has finished reading, so the
+  // picker there only offers rows that have settled.
+  const readyDocs = useMemo(
+    () => docs.filter((d) => statusClass(d.status) === 'ready'),
+    [docs],
+  )
 
   // --- data ---------------------------------------------------------------
 
@@ -367,7 +375,7 @@ export default function Workspace() {
           )}
 
           {tab === 'chat' && <ChatTab hasDocs={docs.length > 0} />}
-          {tab === 'notes' && <NotesTab graph={graph} docs={docs} />}
+          {tab === 'notes' && <NotesPane readyDocs={readyDocs} />}
           {tab === 'quiz' && <QuizPane onToast={setBusyToast} />}
         </section>
       </main>
@@ -502,52 +510,6 @@ function ChatTab({ hasDocs }) {
           onKeyDown={(e) => e.key === 'Enter' && send()}
         />
         <button className="btn-accent" onClick={send} disabled={thinking}>Ask</button>
-      </div>
-    </div>
-  )
-}
-
-/* ====================== notes ====================== */
-
-function NotesTab({ graph, docs }) {
-  if (!graph.nodes.length) {
-    return (
-      <div className="pane pane-scroll">
-        <div className="empty tall">
-          <h3>No notes yet</h3>
-          <p>Notes are written from the concepts StudyGraph finds. Add a document to start.</p>
-        </div>
-      </div>
-    )
-  }
-
-  const core = graph.nodes.filter((n) => n.kind === 'core')
-  const linksFor = (n) => graph.edges.filter(
-    (e) => (e.source.id ?? e.source) === n.id || (e.target.id ?? e.target) === n.id)
-
-  return (
-    <div className="pane pane-scroll">
-      <div className="pane-head">
-        <div>
-          <h2>Study notes</h2>
-          <p>Built from {docs.length} source{docs.length === 1 ? '' : 's'} — {graph.nodes.length} concepts.</p>
-        </div>
-      </div>
-      <div className="notes">
-        {(core.length ? core : graph.nodes.slice(0, 8)).map((n) => (
-          <article className="note" key={n.id}>
-            <h3>{n.name}</h3>
-            <ul>
-              {linksFor(n).slice(0, 6).map((e, i) => {
-                const other = (e.source.id ?? e.source) === n.id
-                  ? (e.target.name ?? e.target.id ?? e.target)
-                  : (e.source.name ?? e.source.id ?? e.source)
-                return <li key={i}><span className="rel">{e.label}</span> {other}</li>
-              })}
-              {linksFor(n).length === 0 && <li className="muted">No connections recorded yet.</li>}
-            </ul>
-          </article>
-        ))}
       </div>
     </div>
   )

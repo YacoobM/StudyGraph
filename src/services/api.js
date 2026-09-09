@@ -400,3 +400,45 @@ export async function saveQuizResult(quizId, correct, total, points) {
 export async function fetchDocumentStats() {
   return apiFetch(`${API_BASE_URL}/api/documents/stats`, { headers: authHeaders() })
 }
+
+// ---------------------------------------------------------------------------
+// revision notes
+//
+// Two steps, deliberately split. Planning groups the concepts into sections
+// and leaves every body empty; writing fills one body in and is only called
+// when a reader opens that section. Both are slow — planning runs one or more
+// LLM calls, writing runs twenty to thirty seconds — so callers need a busy
+// state for each.
+// ---------------------------------------------------------------------------
+
+/** Plans a note over the given documents. `days` splits it; null does not. */
+export async function planNote(documentIds, days = null) {
+  return apiFetch(`${API_BASE_URL}/api/notes/plan`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ document_ids: documentIds, days }),
+  })
+}
+
+/** Notes planned in this backend process, newest first. */
+export async function fetchNotes() {
+  return apiFetch(`${API_BASE_URL}/api/notes`, { headers: authHeaders() })
+}
+
+export async function fetchNote(noteId) {
+  return apiFetch(`${API_BASE_URL}/api/notes/${noteId}`, { headers: authHeaders() })
+}
+
+/**
+ * Writes one section's prose, or returns what was written before.
+ *
+ * Slow on the first open and immediate afterwards — the response's
+ * `generated` flag says which happened, and the section comes back with its
+ * `body` filled in either way.
+ */
+export async function writeSection(sectionId) {
+  return apiFetch(`${API_BASE_URL}/api/notes/sections/${sectionId}/write`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+}
