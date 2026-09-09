@@ -16,7 +16,6 @@ from services.graph_runtime import call_llm
 
 
 ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
-SEED_ENTITY_PRIORITY_COUNT = 10
 CROSS_WEEK_CONCEPT_COUNT = 10
 LLM_MODEL = 'qwen/qwen3.6-27b'
 RAG_MODEL = 'openai/gpt-oss-20b'
@@ -34,11 +33,9 @@ class StudyGraphEngine:
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.chunk_store = []
         self.graph = None
-        self.seed_entities = []         # Top 20 global concepts identified before processing
         self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
         self.fused_edges = []           # Edges after conflict resolution (post-fusion)
         self.inferred_edges = []        # Transitive edges inferred during fusion
-        self.seed_generation_time = None        # float, seconds
         self.upload_latency = None              # float, total time for entire upload endpoint
         self.collections = collections
         self._doc_concept_names = {}    # doc_name -> set of admitted concept names (for max_nodes_per_doc)
@@ -69,54 +66,6 @@ class StudyGraphEngine:
 
         self.degraded_summary_keys = set()
         self.quiz_sessions = {}
-
-    def generate_seeds(self, all_pages):
-        """
-        Global Seed Generation dispatcher: Routes to BERTopic or LLM method.
-        Records timing and method used for benchmarking.
-        """
-        start = time.time()
-        self._generate_seeds_llm(all_pages)
-        self.seed_generation_time = round(time.time() - start, 3)
-
-    def _generate_seeds_llm(self, all_pages):
-        full_text = " ".join([p.get("text", "") for p in all_pages])
-        if not full_text.strip():
-            return
-
-        seed_prompt = (
-            "Extract the TOP 20 most fundamental academic concepts from this material. "
-            "Respond with ONLY a JSON object: {\"seed_concepts\": [\"concept1\", \"concept2\", ...]}"
-        )
-
-        try:
-            response = call_llm(
-                self.client,
-                self.llm_model,
-                seed_prompt,
-                f"Material:\n{full_text}",
-                max_tokens=300,
-            )
-            content = response.choices[0].message.content
-
-            if not content or not content.strip():
-                logger.warning("seed_generation_empty_response")
-                self.seed_entities = []
-                return
-
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-
-            seed_json = json.loads(content)
-            self.seed_entities = [s.lower().strip() for s in seed_json.get("seed_concepts", [])]
-            logger.info("seed_generation_result seeds=%d", len(self.seed_entities))
-        except Exception as e:
-            logger.exception("seed_generation_failed")
-            self.seed_entities = []
 
     def _deduplicate_seeds_semantically(self, seeds, threshold=0.85):
         """
@@ -234,14 +183,10 @@ class StudyGraphEngine:
         return result
 
     async def extract_knowledge_batch(self, chunks, known_concepts_by_chunk=None):
-        raw_data = None  # â† initialize here so except blocks can always reference it
+        raw_data = None  # so except blocks can always reference it
         known_concepts_by_chunk = known_concepts_by_chunk or {}
 
-        if self.seed_entities:
-            seed_list = ", ".join(self.seed_entities[:SEED_ENTITY_PRIORITY_COUNT])
-            priority_line = f"Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.\n"
-        else:
-            priority_line = "Extract academic concepts and relationships from the text.\n"
+        priority_line = "Extract academic concepts and relationships from the text.\n"
 
         known_lines = []
         for chunk in chunks:
@@ -253,7 +198,7 @@ class StudyGraphEngine:
                 )
         known_line = "\n".join(known_lines)
 
-        prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else â€” no explanation, no markdown, no code fences.
+        prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
 {priority_line}{known_line}
 Relationship types: prerequisite, causes, part_of, explains, enables, related_to
@@ -387,22 +332,20 @@ Respond with ONLY this exact JSON structure:
 
     def prune_low_value_concepts(self, doc_name, week_key, min_mentions=2):
         """
-        Drop concepts admitted from this doc/week that show no sign of being
-        a "key" concept: mentioned fewer than min_mentions times across this
-        doc's chunks, and not one of the curated seed_entities. Off by
-        default (call with min_mentions=1, or don't call it at all) so it
-        never changes behavior unless explicitly requested.
+        Drop concepts admitted from this doc/week that are mentioned fewer
+        than min_mentions times across this doc's chunks. Off by default
+        (call with min_mentions=1, or don't call it at all) so it never
+        changes behavior unless explicitly requested.
         """
         doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c.get("week") == week_key]
         if not doc_week_concepts:
             return
 
         counts = Counter(c["name"] for c in doc_week_concepts)
-        seeds = set(self.seed_entities)
 
         dropped = {
             name for name, count in counts.items()
-            if count < min_mentions and name not in seeds
+            if count < min_mentions
         }
         if not dropped:
             return
@@ -440,7 +383,7 @@ Respond with ONLY this exact JSON structure:
     def _merge_entities(self):
         """
         Entity Merging: Use cosine similarity to identify and merge semantically identical nodes.
-        No LLM call â€” deterministic, fast, reproducible.
+        No LLM call — deterministic, fast, reproducible.
         """
         if not self.concepts:
             return
@@ -496,7 +439,7 @@ Respond with ONLY this exact JSON structure:
         """
         Conflict Resolution: When multiple edges exist between the same two nodes,
         normalize relation labels and select the first edge (conflicts are rare after normalization).
-        No LLM call â€” all done via deterministic string normalization.
+        No LLM call — all done via deterministic string normalization.
         """
         if not self.edges:
             return
@@ -899,5 +842,3 @@ Respond with ONLY this exact JSON structure:
             "graph_search_depth": 2 if working_edges else 0,
             "fusion_status": "fused" if self.fused_edges else "raw"
         }
-
-

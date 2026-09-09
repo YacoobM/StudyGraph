@@ -1,121 +1,58 @@
 {
-  "timestamp": "2026-09-06T20:54:45.256342",
+  "timestamp": "2026-09-07T10:36:29.330100",
   "nodes": [
     {
-      "id": "risk-budget_theory",
-      "name": "risk-budget theory",
+      "id": "blitzball",
+      "name": "blitzball",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "part_of \u00e2\u2020\u2019 risk budget (\u03c1); part_of \u00e2\u2020\u2019 momentum windows; part_of \u00e2\u2020\u2019 pressure index; part_of \u00e2\u2020\u2019 controlled-failure theory; part_of \u00e2\u2020\u2019 elasticity m",
+      "description": "part_of \u00e2\u2020\u2019 tempo maximization; part_of \u00e2\u2020\u2019 risk budget allocation; momentum windows \u00e2\u2020\u2019 part_of; strike pressure index \u00e2\u2020\u2019 part_of; controlled collap",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 4,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
       "weeks": [
-        "Week 1",
-        "Week 2",
-        "Week 3",
-        "Week 4"
+        "Week 1"
       ]
     },
     {
-      "id": "risk_budget_(\u03c1)",
-      "name": "risk budget (\u03c1)",
+      "id": "tempo_maximization",
+      "name": "tempo maximization",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "risk-budget theory \u00e2\u2020\u2019 part_of",
+      "description": "blitzball \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
       "weeks": [
-        "Week 1",
-        "Week 2",
-        "Week 3"
+        "Week 1"
       ]
     },
     {
-      "id": "uniform_caution_strategies",
-      "name": "uniform caution strategies",
+      "id": "risk_budget_allocation",
+      "name": "risk budget allocation",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "related_to \u00e2\u2020\u2019 non-uniform risk allocation; orthodox doctrine of uniform caution \u00e2\u2020\u2019 explains",
+      "description": "blitzball \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
       "weeks": [
-        "Week 1",
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "non-uniform_risk_allocation",
-      "name": "non-uniform risk allocation",
-      "source": [
-        {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
-          "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "uniform caution strategies \u00e2\u2020\u2019 related_to; cross-domain risk-budget theory \u00e2\u2020\u2019 enables; risk budget \u00e2\u2020\u2019 part_of",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 4,
-      "weeks": [
-        "Week 1",
-        "Week 2",
-        "Week 3",
-        "Week 4"
+        "Week 1"
       ]
     },
     {
@@ -123,12 +60,12 @@
       "name": "momentum windows",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "risk-budget theory \u00e2\u2020\u2019 part_of",
+      "description": "part_of \u00e2\u2020\u2019 blitzball",
       "is_canonical": false,
       "color": "#ffadad",
       "appears_in_weeks": 1,
@@ -137,77 +74,16 @@
       ]
     },
     {
-      "id": "pressure_index",
-      "name": "pressure index",
+      "id": "session_drift_index",
+      "name": "session drift index",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "risk-budget theory \u00e2\u2020\u2019 part_of; causes \u00e2\u2020\u2019 empirical optimum",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
-      "weeks": [
-        "Week 1",
-        "Week 2",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "controlled-failure_theory",
-      "name": "controlled-failure theory",
-      "source": [
-        {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
-          "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "risk-budget theory \u00e2\u2020\u2019 part_of; explains \u00e2\u2020\u2019 inverted-u mechanism",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 4,
-      "weeks": [
-        "Week 1",
-        "Week 2",
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "elasticity_measure",
-      "name": "elasticity measure",
-      "source": [
-        {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
-          "page": 1,
-          "pageLabel": "1"
-        }
-      ],
-      "description": "risk-budget theory \u00e2\u2020\u2019 part_of",
+      "description": "session drift index",
       "is_canonical": false,
       "color": "#ffadad",
       "appears_in_weeks": 1,
@@ -216,16 +92,16 @@
       ]
     },
     {
-      "id": "inverted-u_relationship",
-      "name": "inverted-u relationship",
+      "id": "strike_pressure_index",
+      "name": "strike pressure index",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "inverted-u relationship",
+      "description": "part_of \u00e2\u2020\u2019 blitzball",
       "is_canonical": false,
       "color": "#ffadad",
       "appears_in_weeks": 1,
@@ -234,90 +110,340 @@
       ]
     },
     {
-      "id": "high-leverage_moments",
-      "name": "high-leverage moments",
+      "id": "dynamic_run_velocity",
+      "name": "dynamic run velocity",
       "source": [
         {
-          "file": "perf410_lecture6_risk_budget_allocation.docx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "high-leverage moments",
+      "description": "dynamic run velocity",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 2,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
       "weeks": [
-        "Week 1",
-        "Week 4"
+        "Week 1"
       ]
     },
     {
-      "id": "cross-domain_risk-budget_theory",
-      "name": "cross-domain risk-budget theory",
+      "id": "tempo_elasticity",
+      "name": "tempo elasticity",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "explains \u00e2\u2020\u2019 orthodox doctrine of uniform caution; enables \u00e2\u2020\u2019 non-uniform risk allocation",
+      "description": "part_of \u00e2\u2020\u2019 blitzball",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
       "weeks": [
-        "Week 2",
-        "Week 3",
-        "Week 4"
+        "Week 1"
       ]
     },
     {
-      "id": "orthodox_doctrine_of_uniform_caution",
-      "name": "orthodox doctrine of uniform caution",
+      "id": "controlled_collapse_theory",
+      "name": "controlled collapse theory",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "cross-domain risk-budget theory \u00e2\u2020\u2019 explains; causes \u00e2\u2020\u2019 pressure dissipation; enables \u00e2\u2020\u2019 session/corridor/clock/plating drift; causes \u00e2\u2020\u2019 declaratio",
+      "description": "part_of \u00e2\u2020\u2019 blitzball",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
       "weeks": [
-        "Week 2",
-        "Week 3",
-        "Week 4"
+        "Week 1"
       ]
     },
     {
-      "id": "session/corridor/clock/plating_drift",
-      "name": "session/corridor/clock/plating drift",
+      "id": "session_dominance_model",
+      "name": "session dominance model",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "blitzball (1).pdf",
           "page": 1,
-          "pageLabel": "1-8"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 enables",
+      "description": "session dominance model",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "orthodox_attritional_batting",
+      "name": "orthodox attritional batting",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "orthodox attritional batting",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "balanced_rotational_batting",
+      "name": "balanced rotational batting",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "balanced rotational batting",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "session_drift",
+      "name": "session drift",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "session drift",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "declaration_lag",
+      "name": "declaration lag",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "forcing declarations \u00e2\u2020\u2019 explains",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "collapse_misattribution",
+      "name": "collapse misattribution",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "collapse misattribution",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "win_probability",
+      "name": "win probability",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "win probability",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "explicit_risk-budget_allocation",
+      "name": "explicit risk-budget allocation",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "blitzball \u00e2\u2020\u2019 part_of; causes \u00e2\u2020\u2019 run rate; causes \u00e2\u2020\u2019 wickets lost",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "run_rate",
+      "name": "run rate",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "explicit risk-budget allocation \u00e2\u2020\u2019 causes",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "wickets_lost",
+      "name": "wickets lost",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "explicit risk-budget allocation \u00e2\u2020\u2019 causes",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "forcing_declarations",
+      "name": "forcing declarations",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "blitzball \u00e2\u2020\u2019 enables; explains \u00e2\u2020\u2019 declaration lag",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "optimal_risk_budget_(rho)",
+      "name": "optimal risk budget (rho)",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "turning, day-five deteriorating surfaces \u00e2\u2020\u2019 causes",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "turning,_day-five_deteriorating_surfaces",
+      "name": "turning, day-five deteriorating surfaces",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "causes \u00e2\u2020\u2019 optimal risk budget (rho)",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "surface-adjusted_dismissal_probabilities",
+      "name": "surface-adjusted dismissal probabilities",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "surface-adjusted dismissal probabilities",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "real-time_ball-tracking_telemetry",
+      "name": "real-time ball-tracking telemetry",
+      "source": [
+        {
+          "file": "blitzball (1).pdf",
+          "page": 3,
+          "pageLabel": "3-4"
+        }
+      ],
+      "description": "real-time ball-tracking telemetry",
+      "is_canonical": false,
+      "color": "#ffadad",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 1"
+      ]
+    },
+    {
+      "id": "warrier_system",
+      "name": "warrier system",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "is \u00e2\u2020\u2019 dynamic positional rotation framework; part_of \u00e2\u2020\u2019 predictive space occupation; part_of \u00e2\u2020\u2019 adaptive overload zones; part_of \u00e2\u2020\u2019 continuous mid",
       "is_canonical": false,
       "color": "#ffd6a5",
       "appears_in_weeks": 1,
@@ -326,41 +452,16 @@
       ]
     },
     {
-      "id": "pressure_dissipation",
-      "name": "pressure dissipation",
+      "id": "dynamic_positional_rotation_framework",
+      "name": "dynamic positional rotation framework",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 causes; corridor drift \u00e2\u2020\u2019 causes",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
-      "weeks": [
-        "Week 2",
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "declaration/checkpoint/complication/plating_lag",
-      "name": "declaration/checkpoint/complication/plating lag",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        }
-      ],
-      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 causes; causes \u00e2\u2020\u2019 late conversion of winnable positions",
+      "description": "warrier system \u00e2\u2020\u2019 is",
       "is_canonical": false,
       "color": "#ffd6a5",
       "appears_in_weeks": 1,
@@ -369,678 +470,1086 @@
       ]
     },
     {
-      "id": "late_conversion_of_winnable_positions",
-      "name": "late conversion of winnable positions",
+      "id": "continuous_occupancy_field",
+      "name": "continuous occupancy field",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "declaration/checkpoint/complication/plating lag \u00e2\u2020\u2019 causes; decision lag \u00e2\u2020\u2019 causes",
+      "description": "continuous occupancy field",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
-      "weeks": [
-        "Week 2",
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "failure_misattribution",
-      "name": "failure misattribution",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "failure misattribution",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 2,
-      "weeks": [
-        "Week 2",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "expected-variance_aggression",
-      "name": "expected-variance aggression",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        }
-      ],
-      "description": "expected-variance aggression",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 2,
-      "weeks": [
-        "Week 2",
-        "Week 3"
-      ]
-    },
-    {
-      "id": "inverted-u_risk-performance_curve",
-      "name": "inverted-u risk-performance curve",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "inverted-u risk-performance curve",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 3,
-      "weeks": [
-        "Week 2",
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "risk_concentration",
-      "name": "risk concentration",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "risk concentration",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 2,
-      "weeks": [
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "performance_window_dynamics",
-      "name": "performance window dynamics",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "performance window dynamics",
-      "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 2,
-      "weeks": [
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "corridor_drift",
-      "name": "corridor drift",
-      "source": [
-        {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
-          "page": 1,
-          "pageLabel": "1-8"
-        }
-      ],
-      "description": "orthodox doctrine of uniform caution \u00e2\u2020\u2019 causes; causes \u00e2\u2020\u2019 pressure dissipation",
-      "is_canonical": false,
-      "color": "#fdffb6",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 3"
+        "Week 2"
       ]
     },
     {
-      "id": "advantage_exploitation",
-      "name": "advantage exploitation",
+      "id": "static_positional_assignments",
+      "name": "static positional assignments",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-8"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "advantage exploitation",
+      "description": "static positional assignments",
       "is_canonical": false,
-      "color": "#fdffb6",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 3"
+        "Week 2"
       ]
     },
     {
-      "id": "decision_lag",
-      "name": "decision lag",
+      "id": "predictive_space_occupation",
+      "name": "predictive space occupation",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-8"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "causes \u00e2\u2020\u2019 late conversion of winnable positions",
+      "description": "warrier system \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
-      "color": "#fdffb6",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 3"
+        "Week 2"
       ]
     },
     {
-      "id": "checkpoint_management",
-      "name": "checkpoint management",
+      "id": "adaptive_overload_zones",
+      "name": "adaptive overload zones",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-8"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "checkpoint management",
+      "description": "warrier system \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
-      "color": "#fdffb6",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 3"
+        "Week 2"
       ]
     },
     {
-      "id": "win_conversion_efficiency",
-      "name": "win conversion efficiency",
+      "id": "continuous_midfield_restructuring",
+      "name": "continuous midfield restructuring",
       "source": [
         {
-          "file": "perf410_cross_domain_risk_budget_slides.pptx",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-8"
-        },
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "win conversion efficiency",
+      "description": "warrier system \u00e2\u2020\u2019 part_of",
       "is_canonical": false,
-      "color": "#fcf6bd",
-      "appears_in_weeks": 2,
-      "weeks": [
-        "Week 3",
-        "Week 4"
-      ]
-    },
-    {
-      "id": "momentum_window",
-      "name": "momentum window",
-      "source": [
-        {
-          "file": "perf410_problem_set3.pdf",
-          "page": 1,
-          "pageLabel": "1-3"
-        }
-      ],
-      "description": "causes \u00e2\u2020\u2019 momentum-positive state",
-      "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "risk_budget",
-      "name": "risk budget",
+      "id": "possession_elasticity",
+      "name": "possession elasticity",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "part_of \u00e2\u2020\u2019 non-uniform risk allocation",
+      "description": "possession elasticity",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "inverted-u_mechanism",
-      "name": "inverted-u mechanism",
+      "id": "rotational_triangles",
+      "name": "rotational triangles",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "controlled-failure theory \u00e2\u2020\u2019 explains",
+      "description": "rotational triangles",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "momentum-positive_state",
-      "name": "momentum-positive state",
+      "id": "rotation-transition_operator",
+      "name": "rotation-transition operator",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "momentum window \u00e2\u2020\u2019 causes; part_of \u00e2\u2020\u2019 escalation leverage point",
+      "description": "rotation-transition operator",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "escalation_leverage_point",
-      "name": "escalation leverage point",
+      "id": "rotational_triangle_efficiency_(rte)",
+      "name": "rotational triangle efficiency (rte)",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "momentum-positive state \u00e2\u2020\u2019 part_of",
+      "description": "rotational triangle efficiency (rte)",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "corpus-specific_normalization",
-      "name": "corpus-specific normalization",
+      "id": "possession_elasticity_coefficient_(pec)",
+      "name": "possession elasticity coefficient (pec)",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "enables \u00e2\u2020\u2019 within-domain z-score",
+      "description": "possession elasticity coefficient (pec)",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "within-domain_z-score",
-      "name": "within-domain z-score",
+      "id": "meridian_simulated_football_environment_(msfe-v3)",
+      "name": "meridian simulated football environment (msfe-v3)",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "corpus-specific normalization \u00e2\u2020\u2019 enables",
+      "description": "meridian simulated football environment (msfe-v3)",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
       ]
     },
     {
-      "id": "empirical_optimum",
-      "name": "empirical optimum",
+      "id": "warrier-2024_corpus",
+      "name": "warrier-2024 corpus",
       "source": [
         {
-          "file": "perf410_problem_set3.pdf",
+          "file": "warrier_system.pdf",
           "page": 1,
-          "pageLabel": "1-3"
+          "pageLabel": "1-4"
         }
       ],
-      "description": "pressure index \u00e2\u2020\u2019 causes",
+      "description": "warrier-2024 corpus",
       "is_canonical": false,
-      "color": "#caffbf",
+      "color": "#ffd6a5",
       "appears_in_weeks": 1,
       "weeks": [
-        "Week 4"
+        "Week 2"
+      ]
+    },
+    {
+      "id": "zone-14_entries",
+      "name": "zone-14 entries",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "zone-14 entries",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "defensive-transition_vulnerability",
+      "name": "defensive-transition vulnerability",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "defensive-transition vulnerability",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "positional_rigidity_failure_(prf)",
+      "name": "positional rigidity failure (prf)",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "positional rigidity failure (prf)",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "checkpoint_lag_(cl)",
+      "name": "checkpoint lag (cl)",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "checkpoint lag (cl)",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "overload_blindness_(ob)",
+      "name": "overload blindness (ob)",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "overload blindness (ob)",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "overload_blindness_index_(obi)",
+      "name": "overload blindness index (obi)",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "overload blindness index (obi)",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "static_block_4-3-3",
+      "name": "static block 4-3-3",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "static block 4-3-3",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "cascade_press",
+      "name": "cascade press",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "cascade press",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "iberian_diamond",
+      "name": "iberian diamond",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "iberian diamond",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "vertical_corridor_football",
+      "name": "vertical corridor football",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "vertical corridor football",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "expected-goal-differential",
+      "name": "expected-goal-differential",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "expected-goal-differential",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "high-fatigue_match_states",
+      "name": "high-fatigue match states",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "high-fatigue match states",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "spatial_imbalances",
+      "name": "spatial imbalances",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "spatial imbalances",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "occupancy_density",
+      "name": "occupancy density",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "occupancy density",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "zone-based_occupancy_studies",
+      "name": "zone-based occupancy studies",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "zone-based occupancy studies",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "markov-chain_model",
+      "name": "markov-chain model",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "markov-chain model",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "elastic_marking",
+      "name": "elastic marking",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "elastic marking",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "full-back_inversion",
+      "name": "full-back inversion",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "full-back inversion",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "false-nine_dropping_movements",
+      "name": "false-nine dropping movements",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "false-nine dropping movements",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "transition_algebra",
+      "name": "transition algebra",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "transition algebra",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "occupancy_manifold",
+      "name": "occupancy manifold",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 1,
+          "pageLabel": "1-4"
+        }
+      ],
+      "description": "occupancy manifold",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "predictive_occupancy_fields",
+      "name": "predictive occupancy fields",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "predictive occupancy fields",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "continuous_re-solution_of_positional_assignment",
+      "name": "continuous re-solution of positional assignment",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "causes \u00e2\u2020\u2019 tactical advantage",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "tactical_advantage",
+      "name": "tactical advantage",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "continuous re-solution of positional assignment \u00e2\u2020\u2019 causes; related_to \u00e2\u2020\u2019 player-quality differences",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "rte_(rotational_tactical_efficiency)",
+      "name": "rte (rotational tactical efficiency)",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "rte (rotational tactical efficiency)",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "efficiency_of_possession",
+      "name": "efficiency of possession",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "explains \u00e2\u2020\u2019 rte",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "msfe-v3",
+      "name": "msfe-v3",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "msfe-v3",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "predictive_space_occupation_module",
+      "name": "predictive space occupation module",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "tracking-derived occupancy computation \u00e2\u2020\u2019 part_of",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "tracking-derived_occupancy_computation",
+      "name": "tracking-derived occupancy computation",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "part_of \u00e2\u2020\u2019 predictive space occupation module",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "rotation-correction_error",
+      "name": "rotation-correction error",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "predictive horizon recomputation \u00e2\u2020\u2019 enables",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "fatigue",
+      "name": "fatigue",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "causes \u00e2\u2020\u2019 rte",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "real-time_optical_tracking_systems",
+      "name": "real-time optical tracking systems",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "real-time optical tracking systems",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "canvas_baseline_tactical_systems",
+      "name": "canvas baseline tactical systems",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "canvas baseline tactical systems",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
+      ]
+    },
+    {
+      "id": "player-quality_differences",
+      "name": "player-quality differences",
+      "source": [
+        {
+          "file": "warrier_system.pdf",
+          "page": 4,
+          "pageLabel": "4"
+        }
+      ],
+      "description": "tactical advantage \u00e2\u2020\u2019 related_to",
+      "is_canonical": false,
+      "color": "#ffd6a5",
+      "appears_in_weeks": 1,
+      "weeks": [
+        "Week 2"
       ]
     }
   ],
   "edges": [
     {
-      "id": "risk-budget theory_to_risk budget (\u03c1)",
-      "source": "risk-budget_theory",
-      "target": "risk_budget_(\u03c1)",
+      "id": "blitzball_to_tempo maximization",
+      "source": "blitzball",
+      "target": "tempo_maximization",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Risk-budget theory formalizes the concept of risk as a controlled variable represented by rho.",
+      "summary": "BlitzBall is defined as a philosophy centered on maximizing tempo in Test cricket.",
       "context": "",
       "chunk_ids": [
-        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+        "blitzball (1).pdf:chunk:0:5c091665964b"
       ],
       "conflict_resolved": false
     },
     {
-      "id": "risk-budget theory_to_momentum windows",
-      "source": "risk-budget_theory",
-      "target": "momentum_windows",
+      "id": "blitzball_to_risk budget allocation",
+      "source": "blitzball",
+      "target": "risk_budget_allocation",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Momentum windows are identified as one of the five core constructs within the framework.",
+      "summary": "The BlitzBall framework optimizes scoring by explicitly allocating risk across session windows.",
       "context": "",
       "chunk_ids": [
-        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+        "blitzball (1).pdf:chunk:0:5c091665964b"
       ],
       "conflict_resolved": false
     },
     {
-      "id": "risk-budget theory_to_pressure index",
-      "source": "risk-budget_theory",
-      "target": "pressure_index",
+      "id": "momentum windows_to_blitzball",
+      "source": "momentum_windows",
+      "target": "blitzball",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "A domain-specific pressure index is a shared construct in risk-budget models.",
+      "summary": "Momentum Windows is one of the six formal constructs comprising the BlitzBall theory.",
       "context": "",
       "chunk_ids": [
-        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+        "blitzball (1).pdf:chunk:0:5c091665964b"
       ],
       "conflict_resolved": false
     },
     {
-      "id": "risk-budget theory_to_controlled-failure theory",
-      "source": "risk-budget_theory",
-      "target": "controlled-failure_theory",
+      "id": "strike pressure index_to_blitzball",
+      "source": "strike_pressure_index",
+      "target": "blitzball",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Controlled-failure theory is a foundational component of the unified framework.",
+      "summary": "The Strike Pressure Index is a core construct used within the BlitzBall framework.",
       "context": "",
       "chunk_ids": [
-        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+        "blitzball (1).pdf:chunk:0:5c091665964b"
       ],
       "conflict_resolved": false
     },
     {
-      "id": "risk-budget theory_to_elasticity measure",
-      "source": "risk-budget_theory",
-      "target": "elasticity_measure",
+      "id": "controlled collapse theory_to_blitzball",
+      "source": "controlled_collapse_theory",
+      "target": "blitzball",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "The elasticity measure is one of the five key constructs defined in the theory.",
+      "summary": "Controlled Collapse Theory is a foundational component of the BlitzBall philosophy.",
       "context": "",
       "chunk_ids": [
-        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+        "blitzball (1).pdf:chunk:0:5c091665964b"
       ],
       "conflict_resolved": false
     },
     {
-      "id": "uniform caution strategies_to_non-uniform risk allocation",
-      "source": "uniform_caution_strategies",
-      "target": "non-uniform_risk_allocation",
+      "id": "tempo elasticity_to_blitzball",
+      "source": "tempo_elasticity",
+      "target": "blitzball",
+      "label": "part_of",
+      "relation": "part_of",
+      "summary": "Tempo Elasticity is a key construct defined within the BlitzBall model.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:0:5c091665964b"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "blitzball_to_explicit risk-budget allocation",
+      "source": "blitzball",
+      "target": "explicit_risk-budget_allocation",
+      "label": "part_of",
+      "relation": "part_of",
+      "summary": "BlitzBall is a philosophy that utilizes explicit risk-budget allocation across momentum windows.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:3:16e259f22ea4"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "explicit risk-budget allocation_to_run rate",
+      "source": "explicit_risk-budget_allocation",
+      "target": "run_rate",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Explicit risk-budget allocation generates a substantially higher run rate.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:3:16e259f22ea4"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "explicit risk-budget allocation_to_wickets lost",
+      "source": "explicit_risk-budget_allocation",
+      "target": "wickets_lost",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Explicit risk-budget allocation leads to a comparatively small increase in wickets lost.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:3:16e259f22ea4"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "blitzball_to_forcing declarations",
+      "source": "blitzball",
+      "target": "forcing_declarations",
+      "label": "enables",
+      "relation": "enables",
+      "summary": "The primary mechanism of BlitzBall is the earlier creation of forcing declarations.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:3:16e259f22ea4"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "forcing declarations_to_declaration lag",
+      "source": "forcing_declarations",
+      "target": "declaration_lag",
+      "label": "explains",
+      "relation": "explains",
+      "summary": "The strategy of forcing declarations is consistent with the Declaration Lag construct.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:3:16e259f22ea4"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "turning, day-five deteriorating surfaces_to_optimal risk budget (rho)",
+      "source": "turning,_day-five_deteriorating_surfaces",
+      "target": "optimal_risk_budget_(rho)",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "On turning, day-five deteriorating surfaces, the optimal risk budget falls to approximately 0.48.",
+      "context": "",
+      "chunk_ids": [
+        "blitzball (1).pdf:chunk:3:16e259f22ea4"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "warrier system_to_dynamic positional rotation framework",
+      "source": "warrier_system",
+      "target": "dynamic_positional_rotation_framework",
+      "label": "is",
+      "relation": "is",
+      "summary": "The Warrier System is defined as a dynamic positional rotation framework.",
+      "context": "",
+      "chunk_ids": [
+        "warrier_system.pdf:chunk:0:d4cb581beadf"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "warrier system_to_predictive space occupation",
+      "source": "warrier_system",
+      "target": "predictive_space_occupation",
+      "label": "part_of",
+      "relation": "part_of",
+      "summary": "Predictive space occupation is one of the six interlocking constructs of the Warrier System.",
+      "context": "",
+      "chunk_ids": [
+        "warrier_system.pdf:chunk:0:d4cb581beadf"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "warrier system_to_adaptive overload zones",
+      "source": "warrier_system",
+      "target": "adaptive_overload_zones",
+      "label": "part_of",
+      "relation": "part_of",
+      "summary": "Adaptive overload zones are a core construct of the Warrier System.",
+      "context": "",
+      "chunk_ids": [
+        "warrier_system.pdf:chunk:0:d4cb581beadf"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "warrier system_to_continuous midfield restructuring",
+      "source": "warrier_system",
+      "target": "continuous_midfield_restructuring",
+      "label": "part_of",
+      "relation": "part_of",
+      "summary": "Continuous midfield restructuring is a construct within the Warrier System.",
+      "context": "",
+      "chunk_ids": [
+        "warrier_system.pdf:chunk:0:d4cb581beadf"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "continuous re-solution of positional assignment_to_tactical advantage",
+      "source": "continuous_re-solution_of_positional_assignment",
+      "target": "tactical_advantage",
+      "label": "causes",
+      "relation": "causes",
+      "summary": "Continuous re-resolution of positional assignments via predictive occupancy fields generates measurable tactical advantage.",
+      "context": "",
+      "chunk_ids": [
+        "warrier_system.pdf:chunk:3:8f7e7a9d09db"
+      ],
+      "conflict_resolved": false
+    },
+    {
+      "id": "tactical advantage_to_player-quality differences",
+      "source": "tactical_advantage",
+      "target": "player-quality_differences",
       "label": "related_to",
       "relation": "related_to",
-      "summary": "Uniform caution strategies are critiqued for underperforming compared to deliberate non-uniform allocation.",
+      "summary": "The observed tactical advantage is independent of player-quality differences due to statistically matched player pools.",
       "context": "",
       "chunk_ids": [
-        "perf410_lecture6_risk_budget_allocation.docx:chunk:0:9edbb090f04b"
+        "warrier_system.pdf:chunk:3:8f7e7a9d09db"
       ],
       "conflict_resolved": false
     },
     {
-      "id": "cross-domain risk-budget theory_to_orthodox doctrine of uniform caution",
-      "source": "cross-domain_risk-budget_theory",
-      "target": "orthodox_doctrine_of_uniform_caution",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "The theory critiques the orthodox doctrine for applying caution uniformly rather than concentrating risk where it yields the highest return.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "orthodox doctrine of uniform caution_to_pressure dissipation",
-      "source": "orthodox_doctrine_of_uniform_caution",
-      "target": "pressure_dissipation",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "Uniform caution prevents pressing advantages, which leads to the dissipation of pressure.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "orthodox doctrine of uniform caution_to_session/corridor/clock/plating drift",
-      "source": "orthodox_doctrine_of_uniform_caution",
-      "target": "session/corridor/clock/plating_drift",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "The uniform application of caution manifests as session, corridor, clock, or plating drift depending on the domain.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "orthodox doctrine of uniform caution_to_declaration/checkpoint/complication/plating lag",
-      "source": "orthodox_doctrine_of_uniform_caution",
-      "target": "declaration/checkpoint/complication/plating_lag",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "Uniform caution results in lagging declarations or checkpoints, preventing timely action.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "declaration/checkpoint/complication/plating lag_to_late conversion of winnable positions",
-      "source": "declaration/checkpoint/complication/plating_lag",
-      "target": "late_conversion_of_winnable_positions",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "Lag in critical moments leads to winnable positions being converted late or not at all.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "orthodox doctrine of uniform caution_to_uniform caution strategies",
-      "source": "orthodox_doctrine_of_uniform_caution",
-      "target": "uniform_caution_strategies",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "The orthodox doctrine dictates the application of uniform caution strategies across the full performance window.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "cross-domain risk-budget theory_to_non-uniform risk allocation",
-      "source": "cross-domain_risk-budget_theory",
-      "target": "non-uniform_risk_allocation",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "The theory advocates for concentrating risk via non-uniform allocation where it pays off most.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "orthodox doctrine of uniform caution_to_corridor drift",
-      "source": "orthodox_doctrine_of_uniform_caution",
-      "target": "corridor_drift",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "Uniform caution leads to corridor drift because no one presses an advantage.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "corridor drift_to_pressure dissipation",
-      "source": "corridor_drift",
-      "target": "pressure_dissipation",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "Pressure dissipates as a result of corridor drift due to lack of aggression.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "decision lag_to_late conversion of winnable positions",
-      "source": "decision_lag",
-      "target": "late_conversion_of_winnable_positions",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "Declaration or checkpoint lag results in the late conversion or failure to convert winnable positions.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_cross_domain_risk_budget_slides.pptx:chunk:0:c9963d95667d"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "momentum window_to_momentum-positive state",
-      "source": "momentum_window",
-      "target": "momentum-positive_state",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "A momentum window is classified as momentum-positive when its calculated index exceeds a specific threshold.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "momentum-positive state_to_escalation leverage point",
-      "source": "momentum-positive_state",
-      "target": "escalation_leverage_point",
+      "id": "tracking-derived occupancy computation_to_predictive space occupation module",
+      "source": "tracking-derived_occupancy_computation",
+      "target": "predictive_space_occupation_module",
       "label": "part_of",
       "relation": "part_of",
-      "summary": "Momentum-positive windows are identified as leverage points where escalating risk is expected to yield positive returns.",
+      "summary": "Live deployment of the predictive space occupation module requires high-frequency tracking-derived occupancy computation.",
       "context": "",
       "chunk_ids": [
-        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "corpus-specific normalization_to_within-domain z-score",
-      "source": "corpus-specific_normalization",
-      "target": "within-domain_z-score",
-      "label": "enables",
-      "relation": "enables",
-      "summary": "Corpus-specific normalization allows the momentum metric to function as a within-domain z-score rather than a portable absolute unit.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "controlled-failure theory_to_inverted-u mechanism",
-      "source": "controlled-failure_theory",
-      "target": "inverted-u_mechanism",
-      "label": "explains",
-      "relation": "explains",
-      "summary": "The convex growth of expected failures in controlled-failure theory explains why performance follows an inverted-u curve past the optimum.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "pressure index_to_empirical optimum",
-      "source": "pressure_index",
-      "target": "empirical_optimum",
-      "label": "causes",
-      "relation": "causes",
-      "summary": "The interaction between pressure index gains and failure costs determines the empirical optimum for risk budget allocation.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
-      ],
-      "conflict_resolved": false
-    },
-    {
-      "id": "risk budget_to_non-uniform risk allocation",
-      "source": "risk_budget",
-      "target": "non-uniform_risk_allocation",
-      "label": "part_of",
-      "relation": "part_of",
-      "summary": "Risk budget theory advocates for non-uniform risk allocation based on momentum states rather than uniform caution.",
-      "context": "",
-      "chunk_ids": [
-        "perf410_problem_set3.pdf:chunk:0:a08e5e0c18fe"
+        "warrier_system.pdf:chunk:3:8f7e7a9d09db"
       ],
       "conflict_resolved": false
     }
   ],
   "stats": {
-    "total_nodes": 34,
-    "total_edges": 22,
+    "total_nodes": 72,
+    "total_edges": 19,
     "fusion_stats": {
       "canonical_nodes": 0,
       "fused_edges": 0,

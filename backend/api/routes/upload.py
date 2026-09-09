@@ -17,7 +17,6 @@ from services.document_service import extract_text
 from services.graph_runtime import (
     save_extraction_result,
     save_graph_json,
-    save_seed_entities,
 )
 from services.graph_engine import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
 from services.llm_gateway import estimate_tokens
@@ -141,18 +140,17 @@ async def _run_upload_pipeline(
     try:
         safe_name = Path(filename).name
         _update_document_status(document_id, "running", week=week_key, error=None)
-        set_status("seeding", error=None)
-        engine.generate_seeds(pages)
-        save_seed_entities(engine.seed_entities)
-        seed_duration = time.perf_counter() - phase_started
-        logger.info(
-            "document_seeding_complete filename=%s week=%s pages=%d seeds=%d duration_ms=%.1f",
-            safe_name,
-            week_key,
-            len(pages),
-            len(engine.seed_entities),
-            seed_duration * 1000,
-        )
+        # set_status("seeding", error=None)
+        # save_seed_entities(engine.seed_entities)
+        # seed_duration = time.perf_counter() - phase_started
+        # logger.info(
+        #     "document_seeding_complete filename=%s week=%s pages=%d duration_ms=%.1f",
+        #     safe_name,
+        #     week_key,
+        #     len(pages),
+        #     len(engine.seed_entities),
+        #     seed_duration * 1000,
+        # )
 
         phase_started = time.perf_counter()
         set_status("chunking")
@@ -315,15 +313,15 @@ async def _run_upload_pipeline(
             "week": week_key,
             "filename": filename,
             "chunks": len(chunks),
-            "seeds_generated": len(engine.seed_entities),
-            "seed_entities": engine.seed_entities,
+            # "seeds_generated": len(engine.seed_entities),
+            # "seed_entities": engine.seed_entities,
             "raw_concepts": len(document_concepts),
             "total_edges": len(document_edges),
             "graph_saved_to": graph_save_path,
             "error": None,
             "latency_seconds": upload_latency,
             "phase_timings": {
-                "seed_generation_seconds": round(seed_duration, 3),
+                # "seed_generation_seconds": round(seed_duration, 3),
                 "chunk_extraction_seconds": round(extraction_duration, 3),
                 "average_chunk_seconds": round(extraction_duration / len(chunks), 3) if chunks else 0,
                 "evolution_deferred": True,
