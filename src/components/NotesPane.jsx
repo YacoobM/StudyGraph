@@ -6,9 +6,13 @@ import { listNotes, createNote, getSection, setSectionDone } from '../data/notes
  *
  * Both note types are the same structure: a note is a list of sections. A day
  * plan gives each section a `day` and the rail groups by that; full notes
- * leave it null and the rail groups by the document the section came from.
- * There is one rendering path, and `groupsFor` is the only place the two
- * differ.
+ * leave it null and the rail lists them in order, ungrouped. There is one
+ * rendering path, and `groupsFor` is the only place the two differ.
+ *
+ * The rail used to group full notes by document. It cannot: fusion merges
+ * the two graphs, so a section's concepts routinely come from both files and
+ * there is no one document to file it under. Provenance is per section now,
+ * shown as badges on the item itself.
  *
  * Where the data comes from is entirely the business of ../data/notes.js.
  * Nothing here knows which endpoint a note came from.
@@ -74,17 +78,24 @@ const pctOf = (done, total) => (total ? Math.round((done / total) * 100) : 0)
 
 const kindLabel = (n) => (n.kind === 'plan' ? `${n.days}-day plan` : 'Full notes')
 
+// Badge text. The rail is 252px wide and these names run to forty characters,
+// so the extension goes and CSS truncates the rest; the full name is on the
+// title attribute.
+const docLabel = (file) => String(file || '').replace(/\.[^.]+$/, '')
+
 /**
- * The rail's contents, grouped. This is the only thing the two note types do
- * differently: a plan groups by day number, full notes by source document.
- * Sections already arrive in order, so runs stay contiguous.
+ * The rail's contents. A plan groups by day number; a full note is one run
+ * with no heading. Sections already arrive in order, so runs stay contiguous.
  */
 function groupsFor(note) {
+  const numbered = note.sections.map((s, index) => ({ ...s, index }))
+  if (note.kind !== 'plan') return [{ label: null, items: numbered }]
+
   const out = []
-  note.sections.forEach((s, index) => {
-    const label = note.kind === 'plan' ? `Day ${s.day}` : s.origin
+  numbered.forEach((s) => {
+    const label = `Day ${s.day}`
     if (!out.length || out[out.length - 1].label !== label) out.push({ label, items: [] })
-    out[out.length - 1].items.push({ ...s, index })
+    out[out.length - 1].items.push(s)
   })
   return out
 }
@@ -411,7 +422,7 @@ function ContextPanel({ section: loaded, open, onClose }) {
   )
 }
 
-function DetailView({ note, index, section, writing, writeError,
+function DetailView({ note, index, section, writing, writeError, coolLeft, onRetry,
                       onBack, onOpenSection, onToggleDone }) {
   const [railOn, setRailOn] = useState(true)
   const [ctxOn, setCtxOn] = useState(true)
@@ -424,6 +435,9 @@ function DetailView({ note, index, section, writing, writeError,
   }, [note.id, index])
 
   const groups = useMemo(() => groupsFor(note), [note])
+  // With one document every badge would read the same, so they earn their
+  // place only once a note spans more than one.
+  const showBadges = note.docCount > 1
   const pct = pctOf(note.done, note.total)
   // The rail knows every section from the note, so it stays usable while the
   // body of the open one is still being written.
@@ -464,8 +478,8 @@ function DetailView({ note, index, section, writing, writeError,
             </div>
 
             {groups.map((g) => (
-              <div key={g.label}>
-                <div className="nt-rail-group">{g.label}</div>
+              <div key={g.label ?? 'all'}>
+                {g.label && <div className="nt-rail-group">{g.label}</div>}
                 {g.items.map((s) => (
                   <div
                     className={`nt-rail-item${s.index === index ? ' active' : ''}${s.done ? ' done' : ''}`}
@@ -477,7 +491,18 @@ function DetailView({ note, index, section, writing, writeError,
                       onClick={(e) => { e.stopPropagation(); onToggleDone(s.index, !s.done) }}
                       title={s.done ? 'Mark not done' : 'Mark done'}
                     >✓</button>
-                    <div className="nt-rail-title">{s.title}</div>
+                    <div className="nt-rail-text">
+                      <div className="nt-rail-title">{s.title}</div>
+                      {showBadges && s.sources?.length > 0 && (
+                        <div className="nt-rail-badges">
+                          {s.sources.map((file) => (
+                            <span className="nt-rail-badge" key={file} title={file}>
+                              {docLabel(file)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -520,8 +545,13 @@ function DetailView({ note, index, section, writing, writeError,
             {writeError && !writing && (
               <div className="nt-error">
                 {writeError}
-                <button className="btn-start" onClick={() => onOpenSection(index)}>
-                  Try again
+                {coolLeft > 0 && (
+                  <span className="nt-cool">
+                    Asking again now would only be refused — {coolLeft}s left.
+                  </span>
+                )}
+                <button className="btn-start" onClick={onRetry} disabled={coolLeft > 0}>
+                  {coolLeft > 0 ? `Try again in ${coolLeft}s` : 'Try again'}
                 </button>
               </div>
             )}
@@ -566,6 +596,15 @@ export default function NotesPane({ readyDocs = [] }) {
   const [writeError, setWriteError] = useState('')
   const [planning, setPlanning] = useState(false)
 
+  // `Try again` re-requests the section already on screen, so it cannot work
+  // by setting the index it is already on — React skips the render and the
+  // effect never re-runs. Bumping a counter the effect depends on is what
+  // makes it fire.
+  const [retryTick, setRetryTick] = useState(0)
+  // Epoch ms until which this section refuses to be asked again.
+  const [coolUntil, setCoolUntil] = useState(0)
+  const [, tick] = useState(0)
+
   const note = notes.find((n) => n.id === openId)
 
   useEffect(() => {
@@ -582,16 +621,27 @@ export default function NotesPane({ readyDocs = [] }) {
   // not overwrite the one they are looking at now.
   useEffect(() => {
     if (view !== 'detail' || !note) return undefined
+    const ac = new AbortController()
     let live = true
     setSection(null)
     setWriteError('')
+    setCoolUntil(0)
     setWriting(true)
-    getSection(note.id, index)
+    getSection(note.id, index, { signal: ac.signal })
       .then((s) => live && setSection(s))
-      .catch((e) => live && setWriteError(e.message))
+      .catch((e) => {
+        if (!live || e?.name === 'AbortError') return
+        setWriteError(e.message)
+        if (e.cooldownSeconds) setCoolUntil(Date.now() + e.cooldownSeconds * 1000)
+      })
       .finally(() => live && setWriting(false))
-    return () => { live = false }
-  }, [view, openId, index])   // eslint-disable-line react-hooks/exhaustive-deps
+    // `live` stops a late answer landing on the section the reader moved to.
+    // The abort is separate and does less than it looks: this backend does not
+    // cancel a handler when the browser goes (measured), so the generation runs
+    // on regardless — it frees the connection, and the server's own in-flight
+    // guard is what stops a second one starting.
+    return () => { live = false; ac.abort() }
+  }, [view, openId, index, retryTick])   // eslint-disable-line react-hooks/exhaustive-deps
 
   function openDetail(id) {
     setOpenId(id)
@@ -610,6 +660,14 @@ export default function NotesPane({ readyDocs = [] }) {
     }))
     if (i === index) setSection((s) => (s ? { ...s, done } : s))
   }
+
+  useEffect(() => {
+    if (!coolUntil) return undefined
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [coolUntil])
+
+  const coolLeft = coolUntil ? Math.max(0, Math.ceil((coolUntil - Date.now()) / 1000)) : 0
 
   async function generate(opts) {
     setPlanning(true)
@@ -645,6 +703,8 @@ export default function NotesPane({ readyDocs = [] }) {
         section={section}
         writing={writing}
         writeError={writeError}
+        coolLeft={coolLeft}
+        onRetry={() => setRetryTick((n) => n + 1)}
         onBack={() => setView('list')}
         onOpenSection={setIndex}
         onToggleDone={toggleDone}

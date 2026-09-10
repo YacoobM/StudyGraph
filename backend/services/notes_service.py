@@ -108,6 +108,15 @@ _WRITE_TIMEOUT_SECONDS = 120   # a longer prompt than planning, and a longer ans
 _WRITE_MAX_ATTEMPTS = 4
 _WRITE_RETRY_BASE_SECONDS = 2
 
+# Total time this call will spend waiting between attempts, across all of
+# them. A reader is sitting on the HTTP response, so the wait has to stay
+# near what the fixed backoff already cost (2 + 6 + 18 = 26s) even when the
+# server asks for longer. Reached, or exceeded by the next wait, the call
+# gives up instead of holding the request open — and on a per-minute request
+# quota that is also the cheaper answer, since every further attempt spends
+# the quota it is waiting for.
+_WRITE_RETRY_BUDGET_SECONDS = 30
+
 # Ceiling on the whole grouping call, retries included.
 #
 # evolution_data._call_with_retry is budgeted for the background upload
@@ -1557,6 +1566,37 @@ def _rewrite_instruction(violations: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _retry_delay_seconds(exc: Exception) -> Optional[float]:
+    """
+    The wait the server itself asked for, in seconds, or None.
+
+    A quota error carries a google.rpc.RetryInfo detail saying when the
+    window reopens ("retryDelay": "23s"). Honouring it beats guessing: the
+    free tier limits requests per minute, so a blind backoff shorter than the
+    window spends another request on a refusal, and one longer than it waits
+    for nothing.
+
+    Read off exc.details, which the SDK sets to the parsed error body, so
+    this needs no import from google.genai.
+    """
+    details = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return None
+    inner = details.get("error")
+    items = (inner if isinstance(inner, dict) else details).get("details")
+    for item in items or []:
+        if not isinstance(item, dict) or not str(item.get("@type", "")).endswith("RetryInfo"):
+            continue
+        raw = item.get("retryDelay")
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        # protobuf Duration in JSON: a number of seconds with an "s" suffix.
+        match = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(raw or "").strip())
+        if match:
+            return float(match.group(1))
+    return None
+
+
 def _is_transient(exc: Exception) -> bool:
     """
     True for a failure worth retrying: the model is busy or the quota window
@@ -1576,31 +1616,34 @@ def _is_transient(exc: Exception) -> bool:
                 "INTERNAL", "429", "503"))
 
 
-async def write_body(section: dict) -> Optional[dict]:
+async def write_body(section: dict) -> tuple[Optional[dict], Optional[float]]:
     """
-    Writes one section's prose. Returns the block structure, or None when the
-    call failed. Consults the write cache first and writes back on success.
+    Writes one section's prose. Consults the write cache first and writes back
+    on success.
+
+    Returns (body, retry_after) — the block structure, or None with the wait
+    the model server asked for when it refused on quota.
     """
     cache_key = _write_key(section)
     cache = _load_write_cache()
     cached = cache.get(cache_key)
     if isinstance(cached, dict) and cached.get("lead"):
-        return cached
+        return cached, None
 
     client = _gemini_client()
     if client is None:
-        return None
+        return None, None
 
     chunks = await gather_chunks(section["concepts"])
     if not chunks:
         print(f"Notes write: no source text retrieved for section {section['id']} "
               f"({len(section['concepts'])} concepts) — nothing to write from.")
-        return None
+        return None, None
 
     prompt = build_write_prompt(section, chunks)
-    body = await _generate_body(client, prompt)
+    body, retry_after = await _generate_body(client, prompt)
     if body is None:
-        return None
+        return None, retry_after
 
     # The label ban is a prompt rule the model only half-keeps, so it is
     # enforced here: one rewrite, with the offending sentences quoted back.
@@ -1609,7 +1652,7 @@ async def write_body(section: dict) -> Optional[dict]:
         print(f"Notes write: section {section['id']} used "
               f"{len(violations)} relation label(s) as words "
               f"({', '.join(l for l, _ in violations)}) — asking for a rewrite.")
-        second = await _generate_body(client, prompt + _rewrite_instruction(violations))
+        second, _ = await _generate_body(client, prompt + _rewrite_instruction(violations))
         if second is not None:
             # Taken either way. A second pass that still slips is better than
             # a loop, and the count below records what got through.
@@ -1619,6 +1662,13 @@ async def write_body(section: dict) -> Optional[dict]:
         else:
             print("Notes write: rewrite call failed — keeping the first answer.")
 
+    # Whether a second Gemini call was issued for this section, not whether
+    # its answer was kept — a rewrite that then failed still spent the call.
+    # Recorded because label_violations alone cannot say: it is measured
+    # after the rewrite, so an empty list means either a clean first draft
+    # or a rewrite that worked. Sections per minute against a request quota
+    # depends on which, so it goes on disk rather than only into the log.
+    body["rewritten"] = bool(violations)
     body["label_violations"] = [
         label for label, _ in find_label_violations(body, section["relations"])
     ]
@@ -1627,13 +1677,18 @@ async def write_body(section: dict) -> Optional[dict]:
 
     cache[cache_key] = body
     _save_write_cache(cache)
-    return body
+    return body, None
 
 
-async def _generate_body(client, prompt: str) -> Optional[dict]:
+async def _generate_body(client, prompt: str) -> tuple[Optional[dict], Optional[float]]:
     """
     One Gemini call for a section body, retried on transient failures and
-    parsed against the schema. Returns the block dict, or None.
+    parsed against the schema.
+
+    Returns (body, retry_after). `body` is the block dict, or None if the call
+    could not be made. `retry_after` is the wait the server itself asked for
+    when it refused on quota, so the route can hand a real number to the
+    client rather than have it guess one.
     """
     from google.genai import types
 
@@ -1655,6 +1710,7 @@ async def _generate_body(client, prompt: str) -> Optional[dict]:
         )
 
     response = None
+    waited = 0.0
     for attempt in range(_WRITE_MAX_ATTEMPTS):
         last = attempt == _WRITE_MAX_ATTEMPTS - 1
         try:
@@ -1664,17 +1720,28 @@ async def _generate_body(client, prompt: str) -> Optional[dict]:
             break
         except asyncio.TimeoutError:
             print(f"Notes write: call exceeded {_WRITE_TIMEOUT_SECONDS}s — giving up.")
-            return None
+            return None, None
         except Exception as exc:
             if last or not _is_transient(exc):
                 print(f"Notes write: Gemini call failed — {type(exc).__name__}: {exc}")
-                return None
-            delay = _WRITE_RETRY_BASE_SECONDS * (3 ** attempt)
+                return None, _retry_delay_seconds(exc)
+            asked = _retry_delay_seconds(exc)
+            delay = asked if asked is not None else _WRITE_RETRY_BASE_SECONDS * (3 ** attempt)
+            if waited + delay > _WRITE_RETRY_BUDGET_SECONDS:
+                # The exception is printed whole here: its details carry the
+                # QuotaFailure, whose quotaId is the only thing that says
+                # which quota was hit — per-minute or per-day.
+                print(f"Notes write: {type(exc).__name__} on attempt "
+                      f"{attempt + 1}/{_WRITE_MAX_ATTEMPTS}, next wait {delay}s would pass the "
+                      f"{_WRITE_RETRY_BUDGET_SECONDS}s retry budget — giving up. {exc}")
+                return None, asked
+            source = "server asked for" if asked is not None else "backing off"
             print(f"Notes write: {type(exc).__name__} on attempt "
-                  f"{attempt + 1}/{_WRITE_MAX_ATTEMPTS} — retrying in {delay}s.")
+                  f"{attempt + 1}/{_WRITE_MAX_ATTEMPTS} — {source} {delay}s.")
             await asyncio.sleep(delay)
+            waited += delay
     if response is None:
-        return None
+        return None, None
 
     parsed = getattr(response, "parsed", None)
     if parsed is None:
@@ -1684,10 +1751,10 @@ async def _generate_body(client, prompt: str) -> Optional[dict]:
             parsed = _WriteBody.model_validate_json(response.text or "")
         except (ValidationError, AttributeError) as exc:
             print(f"Notes write: unusable response — {exc}")
-            return None
+            return None, None
 
     body = parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
-    return normalise_unicode(body)
+    return normalise_unicode(body), None
 
 
 # ---------------------------------------------------------------------------
@@ -1781,6 +1848,22 @@ async def plan_note(body: PlanRequest, user=Depends(current_user)):
     }
 
 
+# Generations running right now, keyed by section id.
+#
+# Starlette does not cancel a route handler when the browser goes away —
+# measured on this stack (starlette 1.5.0, uvicorn 0.52.1): a client that
+# disconnects two seconds in leaves the handler running to completion. So a
+# reader who opens a section, navigates off and comes back would otherwise
+# have two generations of the same section in the air, both billed. Holding
+# the task here means the second request joins the first instead of starting
+# its own, whatever the client does.
+#
+# The task is created rather than awaited inline for the same reason: it must
+# outlive the request that started it, so a reader who leaves does not take
+# the work away from one who stayed.
+_WRITES_IN_FLIGHT: dict[int, asyncio.Task] = {}
+
+
 @router.post("/api/notes/sections/{section_id}/write", status_code=201)
 async def write_section(section_id: int, user=Depends(current_user)):
     """
@@ -1805,12 +1888,27 @@ async def write_section(section_id: int, user=Depends(current_user)):
             detail="Note writing is not configured. Set GEMINI_API_KEY in backend/.env.",
         )
 
-    body = await write_body(section)
+    task = _WRITES_IN_FLIGHT.get(section_id)
+    if task is None:
+        task = asyncio.create_task(write_body(section))
+        _WRITES_IN_FLIGHT[section_id] = task
+        task.add_done_callback(lambda _t: _WRITES_IN_FLIGHT.pop(section_id, None))
+
+    # Awaiting a Task does not tie its life to this request: if this caller is
+    # cancelled the generation carries on for whoever else is waiting.
+    body, retry_after = await task
+
     if body is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Could not write this section just now. Please try again.",
-        )
+        detail = "Could not write this section just now. Please try again."
+        headers = None
+        if retry_after:
+            wait = int(retry_after) + 1
+            detail = (f"The note writer is out of quota just now. "
+                      f"Try again in {wait} seconds.")
+            # Standard header, so the client waits the length the model server
+            # actually named instead of guessing a cooldown.
+            headers = {"Retry-After": str(wait)}
+        raise HTTPException(status_code=503, detail=detail, headers=headers)
 
     section["body"] = body
     return {"section": _section_public(section), "note_id": note["id"],

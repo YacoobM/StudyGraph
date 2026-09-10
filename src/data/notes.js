@@ -40,6 +40,23 @@ const doneKey = (noteId, index) => `${noteId}:${index}`
  */
 const seen = new Map()
 
+/**
+ * Writes running right now, and sections that just refused.
+ *
+ * The backend holds its own in-flight guard and that is what protects the
+ * quota — a request the browser abandons keeps generating there, so nothing
+ * here can be relied on to stop a call. These two exist so the UI does not
+ * ask for work it already knows is running or refused, and so a reader who
+ * clicks again is told why rather than watching another spinner.
+ *
+ * The cooldown length comes from the 503's Retry-After when the model server
+ * named one; WRITE_COOLDOWN_MS is only the fallback for a refusal that did
+ * not say.
+ */
+const inFlight = new Map()    // sectionId -> promise
+const coolUntil = new Map()   // sectionId -> epoch ms
+const WRITE_COOLDOWN_MS = 60000
+
 /* ---------------------------------------------------------------- adapters */
 
 function createdLabel(seconds) {
@@ -56,8 +73,9 @@ function createdLabel(seconds) {
 /**
  * A note as the list cards and the contents rail want it.
  *
- * `origin` is what the rail groups full notes by, and a section can carry more
- * than one source file, so the first is used as its heading.
+ * `sources` is every document a section's concepts came from, kept as a list.
+ * Once fusion has merged the graph a section routinely spans more than one,
+ * so there is no single document to reduce it to — the rail badges them all.
  */
 function toNote(raw) {
   return {
@@ -73,7 +91,7 @@ function toNote(raw) {
       id: s.id,
       title: s.title,
       day: s.day,
-      origin: (s.sources || [])[0] || '',
+      sources: s.sources || [],
       done: isDone(raw.id, i, s),
     })),
   }
@@ -189,7 +207,7 @@ export async function listNotes() {
  * serves what it stored on every open after, so this is safe to call again
  * whenever the reader moves between sections.
  */
-export async function getSection(noteId, index) {
+export async function getSection(noteId, index, { signal } = {}) {
   let note = seen.get(noteId)
   if (!note) {
     const fetched = await fetchNote(noteId)
@@ -200,7 +218,36 @@ export async function getSection(noteId, index) {
   const stub = note.sections[index]
   if (!stub) return null
 
-  const { section } = await writeSection(stub.id)
+  const left = (coolUntil.get(stub.id) || 0) - Date.now()
+  if (left > 0) {
+    const err = new Error('That section could not be written a moment ago.')
+    err.cooldownSeconds = Math.ceil(left / 1000)
+    throw err
+  }
+
+  let pending = inFlight.get(stub.id)
+  if (!pending) {
+    pending = writeSection(stub.id, { signal })
+      .then((res) => {
+        coolUntil.delete(stub.id)
+        return res
+      })
+      .catch((e) => {
+        // Abandoning a write is not a failure of it, so it starts no cooldown.
+        if (e?.name !== 'AbortError') {
+          const secs = e?.retryAfter || WRITE_COOLDOWN_MS / 1000
+          coolUntil.set(stub.id, Date.now() + secs * 1000)
+          e.cooldownSeconds = secs
+        }
+        throw e
+      })
+      .finally(() => {
+        if (inFlight.get(stub.id) === pending) inFlight.delete(stub.id)
+      })
+    inFlight.set(stub.id, pending)
+  }
+
+  const { section } = await pending
   return toSection(section, noteId, index)
 }
 

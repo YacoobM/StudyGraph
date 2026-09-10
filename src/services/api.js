@@ -6,6 +6,8 @@ async function handleResponse(response) {
   if (!response.ok) {
     const err = new Error(data?.detail || data?.error || response?.statusText || 'API request failed')
     err.response = { data, status: response.status }
+    const retryAfter = Number(response.headers.get('Retry-After'))
+    if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter
     throw err
   }
   return data
@@ -190,7 +192,11 @@ async function apiFetch(url, options = {}) {
   let response
   try {
     response = await fetch(url, options)
-  } catch {
+  } catch (e) {
+    // A caller that aborted on purpose gets its own error back. Reported as
+    // offline it would tell the reader to go and start a backend that is
+    // already running.
+    if (e?.name === 'AbortError') throw e
     const err = new Error(
       `Cannot reach the backend at ${API_BASE_URL}. Start it with: python dev_server.py`
     )
@@ -436,9 +442,10 @@ export async function fetchNote(noteId) {
  * `generated` flag says which happened, and the section comes back with its
  * `body` filled in either way.
  */
-export async function writeSection(sectionId) {
+export async function writeSection(sectionId, { signal } = {}) {
   return apiFetch(`${API_BASE_URL}/api/notes/sections/${sectionId}/write`, {
     method: 'POST',
     headers: authHeaders(),
+    signal,
   })
 }
