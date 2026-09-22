@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
-import { login as apiLogin, register as apiRegister } from '../services/api.js'
 import './Login.css'
 
 /**
@@ -42,7 +41,7 @@ export default function Login() {
   const [formError, setFormError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const { login } = useAuth()
+  const { signIn, signUp } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = location.state?.from?.pathname || '/workspace'
@@ -75,14 +74,18 @@ export default function Login() {
 
     setBusy(true)
     try {
-      const data = isSignup
-        ? await apiRegister(email.trim(), password, name.trim())
-        : await apiLogin(email.trim(), password)
+      const { data, error } = isSignup
+        ? await signUp(email.trim(), password, name.trim())
+        : await signIn(email.trim(), password)
 
-      login(data.token, data.user)
+      if (error) throw error
+      if (isSignup && !data.session) {
+        setFormError('Check your email to confirm your account before signing in.')
+        return
+      }
       navigate(from, { replace: true })
     } catch (err) {
-      if (err.response?.status === 409) {
+      if (err.message?.toLowerCase().includes('already registered')) {
         // Their account exists — move them to the mode that works, keeping
         // the email so they do not retype it.
         setErrors({ email: 'That email already has an account. Sign in instead.' })
@@ -194,7 +197,7 @@ export default function Login() {
         {formError && <div className="auth-formerr show">{formError}</div>}
 
         <p className="auth-note">
-          Passwords are hashed with PBKDF2-SHA256 before they are stored.
+          Your account is securely managed by Supabase.
         </p>
       </form>
     </div>
