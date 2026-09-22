@@ -46,11 +46,12 @@ def save_extraction_result(timings, nodes, edges):
         return None
 
 
-def save_graph_json(nodes, edges, fusion_stats=None):
+def save_graph_json(nodes, edges, fusion_stats=None, graph_name=""):
     try:
         output_file = OUTPUT_DIR / "graph_json.json"
         data = {
             "timestamp": datetime.now().isoformat(),
+            "name": graph_name,
             "nodes": nodes,
             "edges": edges,
             "stats": {

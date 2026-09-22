@@ -191,7 +191,7 @@ async def get_graph():
     """
     global engine
     if engine is None or not engine.concepts:
-        return {"nodes": [], "edges": [], "stub": True}
+        return {"name": "", "nodes": [], "edges": [], "stub": True}
 
     by_name: dict[str, set] = {}
     for c in engine.concepts:
@@ -223,7 +223,7 @@ async def get_graph():
         for e in engine.edges
         if e["from"] in by_name and e["to"] in by_name
     ]
-    return {"nodes": nodes, "edges": edges, "stub": True}
+    return {"name": getattr(engine, "graph_name", ""), "nodes": nodes, "edges": edges, "stub": True}
 
 
 class QueryRequest(BaseModel):

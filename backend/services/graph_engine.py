@@ -37,6 +37,7 @@ class StudyGraphEngine:
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.chunk_store = []
         self.graph = None
+        self.graph_name = ""
         self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
         self.fused_edges = []           # Edges after conflict resolution (post-fusion)
         self.inferred_edges = []        # Transitive edges inferred during fusion
@@ -211,7 +212,7 @@ For each relationship, include:
 - summary: a short explanation (one sentence max)
 
 Respond with ONLY this exact JSON structure:
-{{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
+{{"graph_name" : "A short-descriptive title of the graph","concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
 
         user_text = "\n\n---\n\n".join(
             f"CHUNK_ID: {chunk['chunk_id']}\nTEXT:\n{chunk['text']}"
@@ -252,6 +253,7 @@ Respond with ONLY this exact JSON structure:
             if invalid_relationships:
                 raise ValueError("LLM returned relationship provenance for an unknown chunk_id")
             return {
+                "graph_name":validated.graph_name,
                 "concepts": validated.concepts,
                 "relationships": [
                     {
@@ -284,6 +286,9 @@ Respond with ONLY this exact JSON structure:
     def add_to_graph(self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None):
         if not raw_data:
             return
+        extracted_name = raw_data.get("graph_name", "")
+        if not self.graph_name and isinstance(extracted_name, str) and extracted_name.strip():
+            self.graph_name = extracted_name.strip()
         for c in raw_data.get("concepts", []):
             if not isinstance(c, str):
                 continue

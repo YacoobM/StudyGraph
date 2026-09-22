@@ -46,7 +46,7 @@ export default function Workspace() {
   const [tab, setTab] = useState('graph')
   const [docs, setDocs] = useState([])
   const [totals, setTotals] = useState(null)
-  const [graph, setGraph] = useState({ nodes: [], edges: [] })
+  const [graph, setGraph] = useState({ name: '', nodes: [], edges: [] })
   const [selected, setSelected] = useState(null)
   const [week, setWeek] = useState(1)
   const [busy, setBusy] = useState('')
@@ -118,7 +118,7 @@ export default function Workspace() {
       const g = await fetchGraph()
       const rawNodes = g.nodes || []
       const rawEdges = g.edges || []
-      if (!rawNodes.length) { setGraph({ nodes: [], edges: [] }); return }
+      if (!rawNodes.length) { setGraph({ name: g.name || '', nodes: [], edges: [] }); return }
 
       const weekNo = (w) => {
         const n = parseInt(String(w).replace(/\D+/g, ''), 10)
@@ -161,7 +161,7 @@ export default function Workspace() {
           strength: e.is_inferred ? 'low' : 'medium',
         }))
 
-      setGraph({ nodes, edges })
+      setGraph({ name: g.name || '', nodes, edges })
       setWeek(Math.max(1, ...nodes.map((n) => n.week)))
       return { nodes, edges }
     } catch {
@@ -327,7 +327,7 @@ export default function Workspace() {
         <header className="ws-top">
           <div>
             <div className="ws-title">
-              {docs.length ? docs[0].name || docs[0].filename : 'Untitled graph'}
+              {graph.name || (docs.length ? docs[0].name || docs[0].filename : 'Untitled graph')}
             </div>
             <div className="ws-sub">
               {graph.nodes.length

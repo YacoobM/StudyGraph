@@ -371,6 +371,7 @@ async def _run_upload_pipeline(
         graph_save_path = save_graph_json(
             [{"name": concept["name"], "source": concept["source"]} for concept in engine.concepts],
             working_edges,
+            graph_name=engine.graph_name or filename,
         )
         upload_latency = round(time.time() - upload_start, 3)
         save_extraction_result(
@@ -528,7 +529,7 @@ async def retry_failed_upload_batches():
             page
             for chunk in item["batch"]
             for page in (chunk.get("pages") or [])
-        })
+        }, engine.graph_name)
         engine.add_to_graph(
             outcome,
             item["filename"],

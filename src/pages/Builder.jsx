@@ -15,7 +15,7 @@ import "./Builder.css";
 import QuizPanel from "../components/QuizPanel.jsx";
 
 /* ==========================================================================
- *  Builder — the "graph processing" workspace  (THIS IS YOUR PART)
+ *  Builder — the "graph processing" workspace
  * ==========================================================================
  *  Handles: file upload UI, model selection, the documents table, and the
  *  Generate / Delete / Preview controls.

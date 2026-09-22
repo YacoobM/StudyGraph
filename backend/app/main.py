@@ -97,7 +97,11 @@ async def get_graph():
     week-based color coding for the evolution feature."""
     engine = runtime_state.engine
     if engine is None:
-        return GraphResponse(nodes=[], edges=[])
+        return GraphResponse(name="", nodes=[], edges=[])
+    graph_name = engine.graph_name or next(
+        (concept.get("source", "") for concept in engine.concepts if concept.get("source")),
+        "",
+    )
 
     week_color_map = evolution_data.get_week_color_map(engine)
 
@@ -196,7 +200,7 @@ async def get_graph():
         "canonical_nodes": len(engine.canonical_nodes),
         "fused_edges": len(engine.fused_edges),
         "inferred_edges": len(engine.inferred_edges)
-    })
+    }, graph_name)
 
     legend = {
         "weeks": [{"week": week, "color": color} for week, color in week_color_map.items()],
@@ -205,6 +209,7 @@ async def get_graph():
     }
 
     return {
+        "name": graph_name,
         "nodes": nodes,
         "edges": edges,
         "is_fused": bool(engine.fused_edges),
@@ -275,7 +280,7 @@ async def fuse_knowledge_graph():
             "canonical_nodes": len(engine.canonical_nodes),
             "fused_edges": len(engine.fused_edges),
             "inferred_edges": len(engine.inferred_edges)
-        })
+        }, engine.graph_name or (engine.concepts[0].get("source", "") if engine.concepts else ""))
 
         logger.info(
             "fusion_request_complete canonical_nodes=%d fused_edges=%d duration_ms=%.1f",
