@@ -22,6 +22,9 @@ DEFAULT_CHUNK_SIZE = 5600
 DEFAULT_CHUNK_OVERLAP = 800
 logger = logging.getLogger(__name__)
 
+PRUNED_REACTIVATION_SIMILARITY = 0.85
+
+
 class StudyGraphEngine:
     def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL):
         self.client = client
@@ -39,6 +42,8 @@ class StudyGraphEngine:
         self.collections = collections
         self._doc_concept_names = {}    # doc_name -> set of admitted concept names (for max_nodes_per_doc)
         self._chroma_chunk_counter = 0  # monotonic counter so chunk ids never collide across uploads
+        self.pruned_concept_cache = {}          # key -> dormant pruned concept metadata
+        self._reactivated_pruned_keys = set()   # keys already restored to avoid duplicate reactivation
 
         # --- Concept-evolution state ---
         self.week_counter = 1                    # Tracks upload batches as "weeks"
@@ -339,6 +344,10 @@ Respond with ONLY this exact JSON structure:
         than min_mentions times across this doc's chunks. Off by default
         (call with min_mentions=1, or don't call it at all) so it never
         changes behavior unless explicitly requested.
+
+        Before deleting them from the active graph, we stash the exact concept
+        metadata and removed edges in a dormant cache so a later document can
+        re-activate the concept if the embedding similarity is strong enough.
         """
         doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c.get("week") == week_key]
         if not doc_week_concepts:
@@ -352,6 +361,29 @@ Respond with ONLY this exact JSON structure:
         }
         if not dropped:
             return
+
+        dropped_edges = [
+            e for e in self.edges
+            if e.get("source") == doc_name and (e.get("from") in dropped or e.get("to") in dropped)
+        ]
+
+        for concept in doc_week_concepts:
+            if concept["name"] not in dropped:
+                continue
+            cache_key = (concept["name"], doc_name, week_key)
+            embedding = self.model.encode([concept["name"]], show_progress_bar=False)[0]
+            self.pruned_concept_cache[cache_key] = {
+                "key": cache_key,
+                "name": concept["name"],
+                "source": doc_name,
+                "week": week_key,
+                "pages": list(concept.get("pages") or []),
+                "embedding": np.asarray(embedding, dtype=float).tolist(),
+                "edges": [
+                    {**edge} for edge in dropped_edges
+                    if edge.get("from") == concept["name"] or edge.get("to") == concept["name"]
+                ],
+            }
 
         self.concepts = [
             c for c in self.concepts
@@ -371,9 +403,94 @@ Respond with ONLY this exact JSON structure:
             len(dropped),
         )
 
+    def reactivate_similar_pruned_concepts(self, threshold=PRUNED_REACTIVATION_SIMILARITY):
+        """Restore dormant pruned concepts when a new active concept is
+        semantically similar enough, without needing an LLM call.
+
+        This is intentionally conservative: it only checks cached pruned
+        concepts against the current active graph and exits immediately when
+        there are no candidates or no sufficiently similar match.
+        """
+        if not self.pruned_concept_cache:
+            return {"matched": 0, "restored": []}
+
+        active_concepts = [concept for concept in self.concepts if concept.get("name")]
+        if not active_concepts:
+            return {"matched": 0, "restored": []}
+
+        active_names = [concept["name"] for concept in active_concepts]
+        active_name_set = set(active_names)
+        active_embeddings = self.model.encode(active_names, show_progress_bar=False)
+
+        restored = []
+        for cache_key, entry in list(self.pruned_concept_cache.items()):
+            if cache_key in self._reactivated_pruned_keys:
+                continue
+
+            pruned_name = entry["name"]
+            if pruned_name in active_name_set:
+                self._reactivated_pruned_keys.add(cache_key)
+                continue
+
+            cached_embedding = np.asarray(entry["embedding"], dtype=float).reshape(1, -1)
+            sims = cosine_similarity(cached_embedding, active_embeddings)[0]
+            best_index = int(np.argmax(sims))
+            best_similarity = float(sims[best_index])
+
+            if best_similarity < threshold:
+                continue
+
+            matched_name = active_names[best_index]
+            if matched_name == pruned_name:
+                self._reactivated_pruned_keys.add(cache_key)
+                continue
+
+            concept_record = {
+                "name": matched_name,
+                "source": entry["source"],
+                "week": entry["week"],
+                "pages": list(entry.get("pages") or []),
+                "reactivated": True,
+            }
+            self.concepts.append(concept_record)
+            restored.append(concept_record)
+            self._reactivated_pruned_keys.add(cache_key)
+
+            for edge in entry.get("edges") or []:
+                candidate = {**edge}
+                if candidate.get("from") == pruned_name:
+                    candidate["from"] = matched_name
+                if candidate.get("to") == pruned_name:
+                    candidate["to"] = matched_name
+                if not candidate.get("from") or not candidate.get("to"):
+                    continue
+                if candidate["from"] == candidate["to"]:
+                    continue
+                candidate["reactivated"] = True
+                duplicate = any(
+                    existing.get("from") == candidate.get("from")
+                    and existing.get("to") == candidate.get("to")
+                    and existing.get("relation") == candidate.get("relation")
+                    and existing.get("source") == candidate.get("source")
+                    for existing in self.edges
+                )
+                if not duplicate:
+                    self.edges.append(candidate)
+
+        if restored:
+            logger.info(
+                "pruned_concepts_reactivated count=%d threshold=%.2f",
+                len(restored),
+                threshold,
+            )
+
+        return {"matched": len(restored), "restored": restored}
+
     def fuse_graph(self):
         """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
         logger.info("graph_fusion_started concepts=%d edges=%d", len(self.concepts), len(self.edges))
+        self.reactivate_similar_pruned_concepts()
+        logger.info("graph_fusion_using_active_graph concepts=%d edges=%d", len(self.concepts), len(self.edges))
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, self.client)
 
         logger.info(
