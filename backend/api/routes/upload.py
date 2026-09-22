@@ -4,12 +4,14 @@ import asyncio
 import logging
 import os
 import time
+import traceback
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.config import UPLOADS_DIR
+from app import state as runtime_state
 from app.state import get_engine
 from app import state as runtime_state
 from repositories.database import connect
@@ -99,6 +101,85 @@ async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None,
             await asyncio.sleep(delay)
             delay *= 2
     raise Exception("Maximum retries exceeded!")
+
+
+async def _fuse_when_idle(engine):
+    """Fuse the graph once this upload was the last one running.
+
+    Triggered here rather than from the browser, which cannot see the whole
+    picture: a second tab may be mid-upload, and two tabs finishing together
+    would each fire /api/fuse at a graph the other is still changing.
+    """
+    async with runtime_state.fusion_lock:
+        if runtime_state.uploads_in_flight():
+            return                      # a later upload will fuse when it lands
+        done_status = engine.pipeline_status
+        if done_status.get("stage") != "done":
+            return                      # still building, or the upload failed
+
+        # Hold the poll on "running" until the graph is really fused, so a
+        # client that stops at "done" cannot pick up the unfused graph.
+        engine.pipeline_status = {**done_status, "stage": "running", "operation": "fusing"}
+        try:
+            # Synchronous, and it makes blocking Groq calls: on the event loop
+            # it would freeze every request for the length of the fusion.
+            await asyncio.to_thread(engine.fuse_graph)
+        except Exception as error:
+            print(f"Fusion after upload failed: {error}")
+            traceback.print_exc()
+            done_status = {**done_status, "fusion_error": str(error)}
+
+        # An upload that arrived while we were fusing has already put its own
+        # "running" status in the slot; leave it there.
+        if not runtime_state.uploads_in_flight():
+            engine.pipeline_status = done_status
+
+
+async def _pipeline_then_fuse(engine, *args, **kwargs):
+    """Run the upload pipeline, then fuse if nothing else is still processing.
+
+    A wrapper rather than an edit to _run_upload_pipeline, so the pipeline
+    stays exactly as it was.
+    """
+    # A fusion from an earlier upload is reading engine.concepts and
+    # engine.edges on a worker thread. Wait it out before appending to them.
+    async with runtime_state.fusion_lock:
+        pass
+    try:
+        await _run_upload_pipeline(engine, *args, **kwargs)
+    finally:
+        runtime_state.upload_finished()
+    await _fuse_when_idle(engine)
+
+
+def _schedule_upload_pipeline(
+    engine,
+    client,
+    pages,
+    filename,
+    week_key,
+    upload_start,
+    max_nodes,
+    min_mentions,
+    document_id=None,
+):
+    """Schedule every upload through the shared completion-and-fusion flow."""
+    # Count before creating the task so fusion cannot start in the gap before
+    # the new pipeline begins running.
+    runtime_state.upload_started()
+    asyncio.create_task(
+        _pipeline_then_fuse(
+            engine,
+            client,
+            pages,
+            filename,
+            week_key,
+            upload_start,
+            max_nodes,
+            min_mentions,
+            document_id=document_id,
+        )
+    )
 
 
 async def _run_upload_pipeline(
@@ -393,18 +474,16 @@ async def start_upload_pipeline(
         "error": None,
     }
 
-    asyncio.create_task(
-        _run_upload_pipeline(
-            engine,
-            runtime_state.client,
-            pages,
-            safe_filename,
-            current_week_key,
-            time.time(),
-            max_nodes,
-            min_mentions,
-            document_id=document_id,
-        )
+    _schedule_upload_pipeline(
+        engine,
+        runtime_state.client,
+        pages,
+        safe_filename,
+        current_week_key,
+        time.time(),
+        max_nodes,
+        min_mentions,
+        document_id=document_id,
     )
     logger.info(
         "upload_pipeline_scheduled filename=%s week=%s document_id=%s pages=%d",
@@ -532,17 +611,15 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
         "error": None,
     }
     set_engine(engine)
-    asyncio.create_task(
-        _run_upload_pipeline(
-            engine,
-            client,
-            pages,
-            safe_filename,
-            current_week_key,
-            upload_start,
-            max_nodes,
-            min_mentions,
-        )
+    _schedule_upload_pipeline(
+        engine,
+        client,
+        pages,
+        safe_filename,
+        current_week_key,
+        upload_start,
+        max_nodes,
+        min_mentions,
     )
     logger.info(
         "upload_pipeline_scheduled filename=%s week=%s request_duration_ms=%.1f",

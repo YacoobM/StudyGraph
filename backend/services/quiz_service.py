@@ -33,6 +33,7 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.config import EXTRACTION_MODEL
 from api.routes.auth import current_user
 from models.quiz_models import TopicResult
 
@@ -48,7 +49,7 @@ class QuizConfig:
     HUB_DEGREE_EASY = 4
     HUB_DEGREE_MEDIUM = 2
     LLM_TIMEOUT_SECONDS = 45
-    LLM_MODEL = "qwen/qwen3.6-27b"
+    LLM_MODEL = EXTRACTION_MODEL
     LLM_MAX_CONCEPTS = 40
     LLM_MAX_RELATIONS = 40
     POLL_HINT_SECONDS = 4

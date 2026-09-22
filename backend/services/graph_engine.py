@@ -6,25 +6,24 @@ import time
 from collections import Counter, defaultdict
 
 import numpy as np
-from groq import RateLimitError
+from groq import APIStatusError, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from schemas.extraction import ExtractionResult
+from app.config import EXTRACTION_MODEL, RAG_MODEL
 from services import graph_fusion
 from services.graph_runtime import call_llm
 
 
 ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
 CROSS_WEEK_CONCEPT_COUNT = 10
-LLM_MODEL = 'qwen/qwen3.6-27b'
-RAG_MODEL = 'openai/gpt-oss-20b'
 DEFAULT_CHUNK_SIZE = 5600
 DEFAULT_CHUNK_OVERLAP = 800
 logger = logging.getLogger(__name__)
 
 class StudyGraphEngine:
-    def __init__(self, collections, client, llm_model=LLM_MODEL, rag_model=RAG_MODEL):
+    def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL):
         self.client = client
         self.llm_model = llm_model
         self.rag_model = rag_model
@@ -86,7 +85,7 @@ class StudyGraphEngine:
             if max(sims) < threshold:
                 kept.append(seed)
                 kept_embeddings.append(embeddings[i])
-        logger.info("seed_deduplication input=%d output=%d", len(seeds), len(kept))
+        print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
     def get_chunks(
@@ -264,6 +263,10 @@ Respond with ONLY this exact JSON structure:
         except RateLimitError as e:
             logger.warning("chunk_extraction_rate_limited error=%s", e)
             raise
+        except APIStatusError:
+            # Do not turn invalid model IDs, credentials, or other API errors
+            # into a misleading empty-but-successful extraction.
+            raise
         except Exception as e:
             logger.exception("chunk_extraction_failed raw_data_present=%s", raw_data is not None)
             return {"concepts": [], "relationships": []}
@@ -383,6 +386,7 @@ Respond with ONLY this exact JSON structure:
     def _merge_entities(self):
         """
         Entity Merging: Use cosine similarity to identify and merge semantically identical nodes.
+        No LLM call — deterministic, fast, reproducible.
         No LLM call — deterministic, fast, reproducible.
         """
         if not self.concepts:

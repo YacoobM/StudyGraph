@@ -7,7 +7,10 @@ from pathlib import Path
 import numpy as np
 from groq import BadRequestError, RateLimitError
 from sklearn.metrics.pairwise import cosine_similarity
-from app.config import OUTPUT_DIR
+from app.config import EXTRACTION_MODEL, FUSION_DIR
+from services.fusion_log import FusionLog
+
+_MODEL = EXTRACTION_MODEL
 
 AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55
@@ -15,6 +18,10 @@ NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "m
 
 _VERDICT_PAIR_BATCH = 4
 _VERDICT_MAX_RETRIES = 4
+# Cap on how many pairs a failed batch may be re-asked one at a time. Without
+# it, splitting a batch costs 5 + 5 per pair — being rate limited would make
+# fusion call more, not less. See _verdict_call.
+_VERDICT_MAX_SINGLES = 4
 _NEIGHBOURS_PER_NODE = 5
 _EVIDENCE_CHUNKS_PER_NODE = 1
 _EVIDENCE_SNIPPET_CHARS = 200
@@ -23,7 +30,8 @@ _STEP3_PROMPT_VERSION = "step3-evidence-v3"
 _STEP5_PROMPT_VERSION = "step5-evidence-v3"
 _CLUSTER_PROMPT_VERSION = "cluster-verify-v1"
 
-VERDICT_CACHE_FILE = OUTPUT_DIR / "verdict_cache.json"
+VERDICT_CACHE_FILE = FUSION_DIR / "verdict_cache.json"
+FUSION_LOG_DIR = FUSION_DIR
 
 _BRIDGE_MIN_SHARED_NEIGHBOURS = 2
 _HUB_DEGREE_PERCENTILE = 90.0
@@ -168,7 +176,7 @@ def _save_verdict_cache(cache):
 
 def _pair_key(version, a, b):
     x, y = sorted((a, b))
-    return f"{version}|qwen/qwen3.6-27b|{x}||{y}"
+    return f"{version}|{_MODEL}|{x}||{y}"
 
 
 def _to_cache_record(a, b, r):
@@ -196,6 +204,39 @@ def _from_cache_record(a, b, rec):
     return {**rec, "direction": direction, "canonical": canonical, "broader": broader}
 
 
+# The schema line asks for "same" | "related" | "unrelated", but the prompt's
+# own prose says "SAME, DIFFERENT BUT RELATED, or UNRELATED" and the model
+# sometimes answers in that wording. An unrecognised verdict used to fall
+# through to the unrelated branch and drop the edge without a word, so the
+# variants the prompt itself uses are accepted here and anything still
+# unmatched is logged rather than lost.
+_VERDICT_SYNONYMS = {
+    "same": "same",
+    "related": "related",
+    "unrelated": "unrelated",
+    "different but related": "related",
+    "different-but-related": "related",
+    "different, but related": "related",
+}
+
+
+def _normalise_verdict(raw):
+    """Canonical verdict, or None when the answer is not one we recognise."""
+    return _VERDICT_SYNONYMS.get(_WS.sub(" ", str(raw or "").strip().lower()))
+
+
+def _verdict_or_unrelated(raw, log, tag, a, b):
+    """Canonical verdict, defaulting to unrelated but never silently: an
+    answer we cannot map is reported with the pair it came from."""
+    verdict = _normalise_verdict(raw)
+    if verdict is None:
+        if str(raw or "").strip():
+            log(f"{tag} unrecognised verdict {str(raw)!r} for {a!r} / {b!r} "
+                f"— treated as unrelated, edge dropped")
+        return "unrelated"
+    return verdict
+
+
 class _MalformedVerdict(Exception):
     pass
 
@@ -213,7 +254,7 @@ def _verdict_attempt(client, system, payload, log, tag):
                     {"role": "system", "content": system},
                     {"role": "user", "content": "PAIRS:\n" + json.dumps(payload, ensure_ascii=False)},
                 ],
-                model="qwen/qwen3.6-27b",
+                model=_MODEL,
                 reasoning_effort="none",
                 response_format={"type": "json_object"},
             )
@@ -223,7 +264,7 @@ def _verdict_attempt(client, system, payload, log, tag):
             results = data["results"]
             if payload and not results:
                 raise _MalformedVerdict("empty 'results' for non-empty batch")
-            return results
+            return results, None
         except RateLimitError as e:
             reason = "rate limited"
             try:
@@ -235,32 +276,45 @@ def _verdict_attempt(client, system, payload, log, tag):
         except BadRequestError as e:
             if not _is_json_validate_failed(e):
                 log(f"{tag} rejected — defaults to unrelated")
-                return None
+                return None, "rejected"
             reason = "json_validate_failed"
         except Exception as e:
             reason = f"{type(e).__name__}"
 
         if attempt == _VERDICT_MAX_RETRIES:
             log(f"{tag} failed after {_VERDICT_MAX_RETRIES} retries ({reason})")
-            return None
+            return None, reason
         delay = retry_after if retry_after is not None else min(60, 5 * (3 ** attempt))
         log(f"{tag} {reason} (attempt {attempt + 1}/{_VERDICT_MAX_RETRIES}) — waiting {delay:.1f}s")
         time.sleep(delay)
-    return None
+    return None, reason
 
 
 def _verdict_call(client, system, payload, log, tag):
-    results = _verdict_attempt(client, system, payload, log, tag)
+    results, reason = _verdict_attempt(client, system, payload, log, tag)
     if results is not None:
         return results
     if len(payload) <= 1:
         log(f"{tag} defaults to unrelated (not cached)")
         return []
 
-    log(f"{tag} splitting batch of {len(payload)} into singles")
+    # Splitting isolates one malformed pair out of a batch. It cannot help a
+    # rate limit or a rejection — those fail again per single, so the response
+    # to being throttled would be to make several times as many calls. Split
+    # only for malformed output, and only for the first _VERDICT_MAX_SINGLES.
+    if reason is None or not str(reason).startswith(("malformed", "json_validate_failed")):
+        log(f"{tag} not splitting after {reason} — {len(payload)} pair(s) default to unrelated")
+        return []
+
+    head = payload[:_VERDICT_MAX_SINGLES]
+    if len(payload) > len(head):
+        log(f"{tag} splitting {len(head)} of {len(payload)}; "
+            f"{len(payload) - len(head)} default to unrelated")
+    else:
+        log(f"{tag} splitting batch of {len(payload)} into singles")
     salvaged = []
-    for item in payload:
-        one = _verdict_attempt(client, system, [item], log, f"{tag} [id={item.get('id')}]")
+    for item in head:
+        one, _ = _verdict_attempt(client, system, [item], log, f"{tag} [id={item.get('id')}]")
         if one:
             salvaged.extend(one)
     log(f"{tag} recovered {len(salvaged)}/{len(payload)} from singles")
@@ -368,13 +422,30 @@ def _collect_nodes(engine):
 
 
 def merge_graph(engine, client, log=print):
+    run = FusionLog(
+        model=_MODEL,
+        prompt_versions={"step3": _STEP3_PROMPT_VERSION, "step5": _STEP5_PROMPT_VERSION,
+                         "cluster": _CLUSTER_PROMPT_VERSION},
+        settings={"auto_merge": AUTO_MERGE_SIM, "llm_low": LLM_LOW_SIM,
+                  "batch": _VERDICT_PAIR_BATCH, "neighbours": _NEIGHBOURS_PER_NODE},
+        documents=sorted(getattr(engine, "uploads_by_week", {}).items()),
+    )
+
     nodes = _collect_nodes(engine)
     if not nodes:
         log("Fusion: no concepts")
+        run.result["outcome"] = "no concepts to fuse"
+        run.write(FUSION_LOG_DIR)
         return {}, []
 
     unique_names = sorted(nodes.keys())
     log(f"Fusion step 1: {len(engine.concepts)} mentions -> {len(unique_names)} unique")
+    run.mentions, run.unique = len(engine.concepts), len(unique_names)
+    run.variants = [
+        (norm, sorted(rec["variants"]))
+        for norm, rec in sorted(nodes.items())
+        if rec["variants"] != {norm}
+    ]
 
     dsu = _DSU(unique_names)
     llm_candidates = []
@@ -390,13 +461,18 @@ def merge_graph(engine, client, log=print):
                 a, b = unique_names[i], unique_names[j]
                 if _is_negation_variant(a, b):
                     blocked += 1
+                    run.blocked.append((a, b, sim))
                     continue
                 if sim >= AUTO_MERGE_SIM:
                     dsu.union(a, b)
                     auto_merged += 1
+                    run.auto_merged.append((a, b, sim))
                 else:
                     llm_candidates.append((a, b, sim))
-    llm_candidates = [(a, b, s) for (a, b, s) in llm_candidates if dsu.find(a) != dsu.find(b)]
+    kept = [(a, b, s) for (a, b, s) in llm_candidates if dsu.find(a) != dsu.find(b)]
+    run.already_linked = [c for c in llm_candidates if c not in kept]
+    llm_candidates = kept
+    run.candidates = list(llm_candidates)
     log(f"Fusion step 2: {auto_merged} auto-merged, {blocked} blocked, {len(llm_candidates)} for LLM")
 
     interim_cmap = _build_canonical_map(dsu, nodes)
@@ -417,11 +493,11 @@ def merge_graph(engine, client, log=print):
         name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names))}
         
         merges, step3_new_edges, canonical_votes = _llm_evaluate_pairs(
-            llm_candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log)
+            llm_candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log, run)
         for (a, b) in merges:
             dsu.union(a, b)
 
-    split_out = _verify_clusters(dsu, nodes, engine, client, log)
+    split_out = _verify_clusters(dsu, nodes, engine, client, log, run)
 
     final_cmap = _build_canonical_map(dsu, nodes, canonical_votes, split_out)
 
@@ -448,12 +524,22 @@ def merge_graph(engine, client, log=print):
         f, t = _final_canon(frm), _final_canon(to)
         if not f or not t or f == t:
             skipped += 1
+            # Both ends can be distinct raw names that a merge put on the same
+            # node, so name the node rather than just calling it a self-loop.
+            detail = f"{frm} -[{relation}]-> {to}"
+            if f and f == t:
+                detail += f"   (both ends are now {f})"
+            run.removals.append(("merged onto itself" if f == t else "empty node", detail))
             return
         if f not in final_nodes or t not in final_nodes:
             skipped += 1
+            run.removals.append(("unknown node", f"{f} -[{relation}]-> {t}"))
             return
         key = (f, t, relation)
         rec = edge_groups.get(key)
+        if rec is not None:
+            run.removals.append(("exact duplicate",
+                                 f"{f} -[{relation}]-> {t}   (now {rec['evidence'] + 1} pieces of evidence)"))
         if rec is None:
             rec = {"from": f, "to": t, "relation": relation, "sources": set(),
                    "evidence": 0, "discovered_by": discovered_by,
@@ -485,22 +571,34 @@ def merge_graph(engine, client, log=print):
     for rec in edge_groups.values():
         pkey = (rec["from"], rec["to"])
         cur = pair_best.get(pkey)
-        if cur is None or _edge_rank(rec) > _edge_rank(cur):
+        if cur is None:
             pair_best[pkey] = rec
+        elif _edge_rank(rec) > _edge_rank(cur):
+            pair_best[pkey] = rec
+            run.removals.append(("same pair",
+                                 f"{cur['from']} -[{cur['relation']}]-> {cur['to']}"
+                                 f"   lost to  -[{rec['relation']}]->"))
+        else:
+            run.removals.append(("same pair",
+                                 f"{rec['from']} -[{rec['relation']}]-> {rec['to']}"
+                                 f"   lost to  -[{cur['relation']}]->"))
     pair_count = len(pair_best)
 
-    edge_list = _reciprocal_dedup(list(pair_best.values()))
+    edge_list = _reciprocal_dedup(list(pair_best.values()), run)
 
     for rec in edge_list:
         if not rec["sources"]:
             rec["sources"] = set(final_nodes[rec["from"]]["sources"]) | \
                              set(final_nodes[rec["to"]]["sources"])
 
+    run.edges_in = input_edges
+    run.edges_in_detail = (f"  ({len(engine.edges)} from extraction"
+                           f" + {len(step3_new_edges)} from step 3)")
     log(f"Fusion step 4: {input_edges} -> {len(edge_list)} edges "
         f"(exact -{(input_edges - skipped) - exact_count}, "
         f"pair -{exact_count - pair_count}, reciprocal -{pair_count - len(edge_list)})")
 
-    for fe in _bridge_fusion(final_nodes, edge_list, engine, client, log):
+    for fe in _bridge_fusion(final_nodes, edge_list, engine, client, log, run):
         key = (fe["from"], fe["to"], fe["relation"])
         if key in edge_groups:
             continue
@@ -539,6 +637,17 @@ def merge_graph(engine, client, log=print):
     for rec in fused_edges:
         by_discovery[rec["discovered_by"]] = by_discovery.get(rec["discovered_by"], 0) + 1
     log(f"Fusion done: {len(final_nodes)} nodes, {len(fused_edges)} edges {by_discovery}")
+
+    run.edges_out = len(fused_edges)
+    run.result = {
+        "canonical nodes": len(final_nodes),
+        "fused edges": len(fused_edges),
+        "by discovery": ", ".join(f"{k} {v}" for k, v in sorted(by_discovery.items())),
+        "name variants mapped": len(canonical_nodes),
+    }
+    written = run.write(FUSION_LOG_DIR)
+    if written:
+        log(f"Fusion log: {written}")
     return canonical_nodes, fused_edges
 
 
@@ -564,7 +673,7 @@ def _edge_rank(rec):
             rec["relation"])
 
 
-def _reciprocal_dedup(records):
+def _reciprocal_dedup(records, run=None):
     by_ordered = {(r["from"], r["to"]): r for r in records}
     kept, seen = [], set()
     for rec in records:
@@ -578,6 +687,11 @@ def _reciprocal_dedup(records):
             winner = min((rec, other), key=lambda r: (
                 -r["evidence"], 0 if r["discovered_by"] == "extraction" else 1,
                 r["from"], r["to"]))
+            loser = other if winner is rec else rec
+            if run is not None:
+                run.removals.append(("reciprocal",
+                                     f"{loser['from']} -[{loser['relation']}]-> {loser['to']}"
+                                     f"   collapsed into  {winner['from']} -> {winner['to']}"))
             kept.append(winner)
             seen.add(key)
             seen.add(rev)
@@ -618,7 +732,7 @@ _STEP3_SYSTEM = (
 )
 
 
-def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log):
+def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log, run):
     cache = _load_verdict_cache()
     resolved, to_ask = {}, []
     for (a, b, sim) in candidates:
@@ -627,27 +741,19 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
             resolved[(a, b)] = _from_cache_record(a, b, rec)
         else:
             to_ask.append((a, b, sim))
-    log(f"Fusion step 3: {len(resolved)} cache hits, {len(to_ask)} LLM calls")
+    from_cache = {(a, b) for (a, b) in resolved}
+    calls = -(-len(to_ask) // _VERDICT_PAIR_BATCH)
+    run.step3_calls = calls
+    log(f"Fusion step 3: {len(resolved)} cache hits, {len(to_ask)} pair(s) "
+        f"to ask in {calls} call(s)")
+
+    # Built once: it stacks every document's chunk-embedding matrix, and that
+    # does not change between batches.
+    evidence = _EvidencePool(engine, log, name_vecs)
 
     cache_dirty = False
     for start in range(0, len(to_ask), _VERDICT_PAIR_BATCH):
         sub = to_ask[start:start + _VERDICT_PAIR_BATCH]
-        payload = []
-        for idx, (a, b, sim) in enumerate(sub):
-            item = {"id": idx, "a": a, "b": b, "similarity": round(sim, 3),
-                    "a_sources": sorted(nodes[a]["sources"]),
-                    "b_sources": sorted(nodes[b]["sources"]),
-                    "a_neighbours": _neighbours(a, interim_cmap, adjacency, _NEIGHBOURS_PER_NODE),
-                    "b_neighbours": _neighbours(b, interim_cmap, adjacency, _NEIGHBOURS_PER_NODE)}
-            a_ev = evidence.snippets(nodes[a]["sources"], b) if 'evidence' in locals() else []
-            b_ev = evidence.snippets(nodes[b]["sources"], a) if 'evidence' in locals() else []
-            if a_ev:
-                item["a_evidence"] = a_ev
-            if b_ev:
-                item["b_evidence"] = b_ev
-            payload.append(item)
-
-        evidence = _EvidencePool(engine, log, name_vecs)
         payload = []
         for idx, (a, b, sim) in enumerate(sub):
             item = {"id": idx, "a": a, "b": b, "similarity": round(sim, 3),
@@ -680,7 +786,14 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
     n_same = n_related = n_unrelated = 0
     for (a, b, sim) in candidates:
         r = resolved.get((a, b), {})
-        verdict = r.get("verdict", "unrelated")
+        verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b)
+        source = "cache" if (a, b) in from_cache else "call"
+        detail = ""
+        if verdict == "same":
+            detail = f"canonical {r.get('canonical') or '?'}"
+        elif verdict == "related":
+            detail = f'"{_clean_relation(r.get("relation") or "")}" ({r.get("direction") or "A_to_B"})'
+        run.verdicts.append((source, a, b, sim, verdict, detail))
         if verdict == "same":
             merges.append((a, b))
             canonical = str(r.get("canonical", "")).strip().upper()
@@ -701,6 +814,7 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
         else:
             n_unrelated += 1
 
+    run.verdict_totals = {"same": n_same, "related": n_related, "unrelated": n_unrelated}
     log(f"Fusion step 3: {len(candidates)} -> same {n_same} / related {n_related} / unrelated {n_unrelated}")
     return merges, new_edges, canonical_votes
 
@@ -714,7 +828,7 @@ _STEP3B_SYSTEM = (
 )
 
 
-def _verify_clusters(dsu, nodes, engine, client, log):
+def _verify_clusters(dsu, nodes, engine, client, log, run):
     clusters = [sorted(m) for m in dsu.groups().values() if len(m) >= 3]
     log(f"Fusion step 3b: {len(clusters)} cluster(s) to re-verify")
     if not clusters:
@@ -748,6 +862,7 @@ def _verify_clusters(dsu, nodes, engine, client, log):
                 entry["names"].append(name_item)
             payload.append(entry)
 
+        run.cluster_calls = 1
         by_id = _results_by_id(_verdict_call(client, _STEP3B_SYSTEM, payload, log, "Fusion step 3b:"))
         for (ci, members) in to_ask:
             r = by_id.get(ci) or {}
@@ -756,9 +871,11 @@ def _verify_clusters(dsu, nodes, engine, client, log):
             resolved[ci] = rec
         _save_verdict_cache(cache)
 
+    asked = {ci for (ci, _m) in to_ask}
     split_out = set()
     for ci, members in enumerate(clusters):
         so = [m for m in ((resolved.get(ci) or {}).get("split_out") or []) if m in members]
+        run.clusters.append((list(members), list(so), "call" if ci in asked else "cache"))
         if len(so) >= len(members):
             so = so[:len(members) - 1]
         split_out.update(so)
@@ -781,7 +898,7 @@ _STEP5_SYSTEM = (
 )
 
 
-def _bridge_fusion(final_nodes, edge_list, engine, client, log):
+def _bridge_fusion(final_nodes, edge_list, engine, client, log, run):
     neigh = {n: set() for n in final_nodes}
     for rec in edge_list:
         neigh.setdefault(rec["from"], set()).add(rec["to"])
@@ -815,6 +932,8 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log):
             continue
         candidates.append((a, b, sorted(common)))
 
+    run.hubs = sorted(hubs)
+    run.bridge_candidates = [(a, b, list(common)) for (a, b, common) in candidates]
     log(f"Fusion step 5: {len(hubs)} hub(s), {len(candidates)} candidate(s)")
     if not candidates:
         return []
@@ -827,6 +946,8 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log):
             resolved[(a, b)] = _from_cache_record(a, b, rec)
         else:
             to_ask.append((a, b, common))
+    from_cache = {(a, b) for (a, b) in resolved}
+    run.bridge_calls = -(-len(to_ask) // _VERDICT_PAIR_BATCH)
     log(f"Fusion step 5: {len(resolved)} cache hits, {len(to_ask)} LLM calls")
 
     ask_names = sorted({n for (a, b, _c) in to_ask for n in (a, b)})
@@ -866,7 +987,10 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log):
     fusion_edges = []
     for (a, b, common) in candidates:
         r = resolved.get((a, b), {})
-        if r.get("verdict") != "related":
+        verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 5:", a, b)
+        source = "cache" if (a, b) in from_cache else "call"
+        if verdict != "related":
+            run.bridge_verdicts.append((source, a, b, verdict, ""))
             continue
         frm, to, relation = _orient_relation(
             a, b, r.get("relation") or "", r.get("direction") or "A_to_B",
@@ -874,5 +998,10 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log):
         rl = relation.lower()
         if relation and not _is_vague_relation(relation) and a not in rl and b not in rl:
             fusion_edges.append({"from": frm, "to": to, "relation": relation})
+            run.bridge_verdicts.append((source, a, b, verdict, f'"{relation}"'))
+            run.bridge_edges.append((frm, to, relation))
+        else:
+            run.bridge_verdicts.append(
+                (source, a, b, "rejected", f'label {relation!r} failed the label rules'))
     log(f"Fusion step 5: {len(candidates)} -> {len(fusion_edges)} fusion edge(s)")
     return fusion_edges

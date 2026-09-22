@@ -16,6 +16,7 @@ if sys.stderr.encoding != "utf-8":
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import asyncio
 import os
 import json
 from app.logging_config import configure_logging
@@ -65,8 +66,6 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 runtime_state.configure_runtime(client, chroma)
 set_graph_source(lambda: runtime_state.engine)
 
-LLM_MODEL = "qwen/qwen3.6-27b"
-RAG_MODEL = "openai/gpt-oss-20b"
 logger = logging.getLogger(__name__)
 
 
@@ -111,8 +110,8 @@ async def get_graph():
             concept_relations[from_node] = []
         if to_node not in concept_relations:
             concept_relations[to_node] = []
-        concept_relations[from_node].append(f"{e['relation']} â†’ {to_node}")
-        concept_relations[to_node].append(f"{from_node} â†’ {e['relation']}")
+        concept_relations[from_node].append(f"{e['relation']} → {to_node}")
+        concept_relations[to_node].append(f"{from_node} → {e['relation']}")
 
     aggregated_concepts = {}
     for c in engine.concepts:
@@ -255,10 +254,19 @@ async def fuse_knowledge_graph():
     if engine is None:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
 
+    if engine.pipeline_status.get("stage") == "running" or runtime_state.uploads_in_flight():
+        raise HTTPException(
+            status_code=409,
+            detail="A document is still being processed. Fusion runs on its own once it finishes.",
+        )
+
     fusion_started = time.perf_counter()
     try:
-        logger.info("fusion_request_started concepts=%d edges=%d", len(engine.concepts), len(engine.edges))
-        engine.fuse_graph()
+        # fuse_graph is synchronous and makes blocking Groq calls. Left on the
+        # event loop it would freeze every request — the upload status poll
+        # included — for the length of the fusion.
+        async with runtime_state.fusion_lock:
+            await asyncio.to_thread(engine.fuse_graph)
 
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
         fused_nodes = [{"name": c["name"], "source": c["source"]} for c in engine.concepts]
@@ -320,7 +328,7 @@ async def get_evolution_concept_description(concept_name: str):
 @app.get("/api/evolution/concept/{concept_name}")
 async def get_evolution_concept_detail(concept_name: str):
     """Full tier: every week's summary plus every week-to-week comparison.
-    Generates and caches lazily on first request â€” meant to back the
+    Generates and caches lazily on first request — meant to back the
     explicit "show concept evolution" action."""
     engine = runtime_state.engine
     if engine is None:

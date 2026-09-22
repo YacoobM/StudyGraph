@@ -5,13 +5,14 @@ import time
 from collections import Counter, defaultdict
 
 from groq import RateLimitError, BadRequestError
+from app.config import EXTRACTION_MODEL
 from services.llm_gateway import estimate_tokens, limiter
 
 WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#bdb2ff", "#ffc6ff"]
 MULTI_WEEK_COLOR = "#fcf6bd"
 DEFAULT_COLOR = "#d1d5db"
 
-LLM_MODEL = "qwen/qwen3.6-27b"
+LLM_MODEL = EXTRACTION_MODEL
 logger = logging.getLogger(__name__)
 
 
