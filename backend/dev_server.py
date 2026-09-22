@@ -1,7 +1,7 @@
 """
 StudyGraph dev server.
 
-Why this exists: backend/main.py raises at import time if GROQ_API_KEY is
+Why this exists: backend/main.py raises at import time if OPENAI_API_KEY is
 missing, and needs spacy / chromadb / sentence-transformers / easyocr / torch.
 That makes frontend work impossible without the full stack and a paid key.
 
@@ -12,7 +12,7 @@ This server gives the frontend the same HTTP contract as main.py, with:
     the real backend
 
 Run:  python dev_server.py          (defaults to port 8000, same as main.py)
-Real: uvicorn app.main:app --port 8000  (needs GROQ_API_KEY + requirements.txt)
+Real: uvicorn app.main:app --port 8000  (needs OPENAI_API_KEY + requirements.txt)
 
 Every stubbed route is marked STUB in its docstring and returns
 "stub": true in its payload so nothing silently passes for real extraction.

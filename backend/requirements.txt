@@ -1,6 +1,7 @@
 spacy
 sentence_transformers
 google.generativeai
+openai
 groq
 PyMuPDF 
 sentence-transformers

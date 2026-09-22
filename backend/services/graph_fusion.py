@@ -5,10 +5,10 @@ from itertools import combinations
 from pathlib import Path
 
 import numpy as np
-from groq import BadRequestError, RateLimitError
 from sklearn.metrics.pairwise import cosine_similarity
-from app.config import EXTRACTION_MODEL, FUSION_DIR
+from app.config import EXTRACTION_MODEL, FUSION_DIR, NON_RAG_REASONING_EFFORT
 from services.fusion_log import FusionLog
+from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 _MODEL = EXTRACTION_MODEL
 
@@ -255,7 +255,7 @@ def _verdict_attempt(client, system, payload, log, tag):
                     {"role": "user", "content": "PAIRS:\n" + json.dumps(payload, ensure_ascii=False)},
                 ],
                 model=_MODEL,
-                reasoning_effort="none",
+                reasoning_effort=NON_RAG_REASONING_EFFORT,
                 response_format={"type": "json_object"},
             )
             data = json.loads(completion.choices[0].message.content)
@@ -265,7 +265,7 @@ def _verdict_attempt(client, system, payload, log, tag):
             if payload and not results:
                 raise _MalformedVerdict("empty 'results' for non-empty batch")
             return results, None
-        except RateLimitError as e:
+        except RATE_LIMIT_ERRORS as e:
             reason = "rate limited"
             try:
                 retry_after = float(e.response.headers.get("retry-after"))
@@ -273,7 +273,7 @@ def _verdict_attempt(client, system, payload, log, tag):
                 pass
         except (_MalformedVerdict, json.JSONDecodeError) as e:
             reason = f"malformed ({type(e).__name__})"
-        except BadRequestError as e:
+        except BAD_REQUEST_ERRORS as e:
             if not _is_json_validate_failed(e):
                 log(f"{tag} rejected — defaults to unrelated")
                 return None, "rejected"

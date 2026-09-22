@@ -40,7 +40,7 @@ def configure_logging() -> None:
     for logger_name, level in {
         "httpx": logging.WARNING,
         "httpcore": logging.WARNING,
-        "groq": logging.WARNING,
+        "openai": logging.WARNING,
         "sentence_transformers": logging.WARNING,
         "huggingface_hub": logging.ERROR,
         "transformers": logging.ERROR,

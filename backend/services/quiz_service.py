@@ -4,7 +4,7 @@ Quiz generation from the extracted concept graph.
     GET  /api/quiz            topics + question pools built from what was uploaded
     POST /api/quiz/results    record a topic attempt (best score wins)
 
-With GROQ_API_KEY set, an LLM writes the questions. Without one, questions
+With OPENAI_API_KEY set, an LLM writes the questions. Without one, questions
 are built from the graph's relations by template.
 
 Each topic is cached and generated independently, keyed by a fingerprint of
@@ -33,7 +33,7 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.config import EXTRACTION_MODEL
+from app.config import LLM_API_KEY_ENV, EXTRACTION_MODEL, NON_RAG_REASONING_EFFORT
 from api.routes.auth import current_user
 from models.quiz_models import TopicResult
 
@@ -180,14 +180,9 @@ Return ONLY a JSON array, no prose and no markdown fences:
 
 
 def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[dict]:
-    key = os.getenv("GROQ_API_KEY")
+    key = os.getenv(LLM_API_KEY_ENV)
     if not key:
         return []
-    try:
-        from groq import Groq
-    except ImportError:
-        return []
-
     relations = "\n".join(
         f"- {e['from']} {e.get('relation', 'relates to')} {e['to']}"
         for e in edges[:QuizConfig.LLM_MAX_RELATIONS]
@@ -197,12 +192,16 @@ def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[
     )
 
     try:
-        client = Groq(api_key=key, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=1)
+        from services.llm_provider import create_llm_client
+        client = create_llm_client(
+            key,
+            timeout=QuizConfig.LLM_TIMEOUT_SECONDS,
+            max_retries=1,
+        )
         resp = client.chat.completions.create(
             model=QuizConfig.LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            reasoning_effort="low",
+            reasoning_effort=NON_RAG_REASONING_EFFORT,
         )
         text = resp.choices[0].message.content.strip()
         text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()

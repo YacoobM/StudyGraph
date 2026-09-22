@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from app.config import UPLOADS_DIR
+from app.config import LLM_API_KEY_ENV, UPLOADS_DIR
 from app import state as runtime_state
 from app.state import get_engine
 from app import state as runtime_state
@@ -22,7 +22,7 @@ from services.graph_runtime import (
 )
 from services.graph_engine import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
 from services.llm_gateway import estimate_tokens
-from groq import RateLimitError
+from services.llm_provider import RATE_LIMIT_ERRORS
 
 
 router = APIRouter(tags=["upload"])
@@ -88,7 +88,7 @@ async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None,
                 (time.perf_counter() - started) * 1000,
             )
             return data
-        except RateLimitError:
+        except RATE_LIMIT_ERRORS:
             logger.warning(
                 "extraction_batch_rate_limited batch=%s/%s attempt=%d/%d",
                 batch_index,
@@ -121,7 +121,7 @@ async def _fuse_when_idle(engine):
         # client that stops at "done" cannot pick up the unfused graph.
         engine.pipeline_status = {**done_status, "stage": "running", "operation": "fusing"}
         try:
-            # Synchronous, and it makes blocking Groq calls: on the event loop
+            # Synchronous, and it makes blocking OpenAI calls: on the event loop
             # it would freeze every request for the length of the fusion.
             await asyncio.to_thread(engine.fuse_graph)
         except Exception as error:
@@ -571,7 +571,7 @@ async def retry_failed_upload_batches():
 
 @router.post("/api/upload")
 async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_mentions: int = 1):
-    if not os.getenv("GROQ_API_KEY"):
+    if not os.getenv(LLM_API_KEY_ENV):
         raise HTTPException(status_code=503, detail="The AI Service is temporarily down. Please try again later.")
 
     from app.state import client, set_engine

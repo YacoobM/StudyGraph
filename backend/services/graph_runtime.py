@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 
-from app.config import OUTPUT_DIR
+from app.config import COMPLETION_TOKEN_PARAMETER, NON_RAG_REASONING_EFFORT, OUTPUT_DIR
 from services.llm_gateway import estimate_tokens, limiter
 
 logger = logging.getLogger(__name__)
@@ -77,16 +77,17 @@ def call_llm(client, model, prompt, text_batch, max_tokens=1000):
             estimate_tokens(prompt) + estimate_tokens(text_batch),
             max_tokens,
         )
-        return client.chat.completions.create(
-            messages=[
+        request = {
+            "messages": [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": text_batch},
             ],
-            model=model,
-            reasoning_effort="none",
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
+            "model": model,
+            "reasoning_effort": NON_RAG_REASONING_EFFORT,
+            COMPLETION_TOKEN_PARAMETER: max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        return client.chat.completions.create(**request)
     except Exception as error:
         logger.exception("llm_call_failed model=%s", model)
         raise

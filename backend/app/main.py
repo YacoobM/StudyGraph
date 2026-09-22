@@ -20,7 +20,6 @@ import asyncio
 import os
 import json
 from app.logging_config import configure_logging
-from groq import Groq
 from chromadb import Client
 from schemas.graph import GraphResponse
 from schemas.query import QueryRequest
@@ -29,7 +28,9 @@ from api.routes.documents import router as documents_router
 from api.routes.quiz import router as quiz_router, set_graph_source
 from api.routes.upload import router as upload_router
 from app import state as runtime_state
+from app.config import LLM_API_KEY_ENV
 from services.graph_runtime import save_graph_json
+from services.llm_provider import create_llm_client
 
 from services import evolution_data, graph_fusion
 
@@ -38,8 +39,8 @@ configure_logging()
 
 chroma = Client()
 
-if not os.getenv("GROQ_API_KEY"):
-    raise RuntimeError("GROQ_API_KEY is not configured!")
+if not os.getenv(LLM_API_KEY_ENV):
+    raise RuntimeError(f"{LLM_API_KEY_ENV} is not configured!")
 
 app = FastAPI(
     title="StudyGraph API",
@@ -62,7 +63,7 @@ app.include_router(upload_router)
 
 app.include_router(quiz_router)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
+client = create_llm_client(os.environ[LLM_API_KEY_ENV])
 runtime_state.configure_runtime(client, chroma)
 set_graph_source(lambda: runtime_state.engine)
 
@@ -220,7 +221,7 @@ async def get_graph():
 @app.post("/api/query")
 async def query_rag(request: QueryRequest):
     """Query the knowledge graph with RAG"""
-    if not os.getenv("GROQ_API_KEY"):
+    if not os.getenv(LLM_API_KEY_ENV):
         raise HTTPException(
             status_code=503,
             detail="The AI Service is temporarily down. Please try again later."
@@ -262,7 +263,7 @@ async def fuse_knowledge_graph():
 
     fusion_started = time.perf_counter()
     try:
-        # fuse_graph is synchronous and makes blocking Groq calls. Left on the
+        # fuse_graph is synchronous and makes blocking OpenAI calls. Left on the
         # event loop it would freeze every request — the upload status poll
         # included — for the length of the fusion.
         async with runtime_state.fusion_lock:
@@ -355,7 +356,7 @@ async def get_evolution_concept_subgraph(concept_name: str):
 async def regenerate_evolution_concept(concept_name: str):
     """
     Clears cached summaries/comparisons for a concept so the next request
-    for its description or full detail regenerates them from Groq instead
+    for its description or full detail regenerates them from OpenAI instead
     of reusing whatever's cached.
     """
     engine = runtime_state.engine

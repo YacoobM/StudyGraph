@@ -21,9 +21,28 @@ def _model_setting(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
 
 
-# Single source of truth for every Groq chat-completion feature.
-EXTRACTION_MODEL = _model_setting("GROQ_EXTRACTION_MODEL", "qwen/qwen3.8-27b")
-RAG_MODEL = _model_setting("GROQ_RAG_MODEL", "openai/gpt-oss-20b")
+LLM_PROVIDER = _model_setting("LLM_PROVIDER", "openai").lower()
+if LLM_PROVIDER not in {"openai", "groq"}:
+    raise RuntimeError("LLM_PROVIDER must be either 'openai' or 'groq'")
+
+LLM_API_KEY_ENV = "OPENAI_API_KEY" if LLM_PROVIDER == "openai" else "GROQ_API_KEY"
+_PROVIDER_DEFAULTS = {
+    "openai": {"extraction": "gpt-5.6-luna", "rag": "gpt-5.6-luna", "budget": "2000"},
+    "groq": {"extraction": "qwen/qwen3.8-27b", "rag": "openai/gpt-oss-20b", "budget": "700"},
+}
+_defaults = _PROVIDER_DEFAULTS[LLM_PROVIDER]
+
+# Provider-specific overrides keep model selection in one place.
+EXTRACTION_MODEL = _model_setting(
+    f"{LLM_PROVIDER.upper()}_EXTRACTION_MODEL", _defaults["extraction"]
+)
+RAG_MODEL = _model_setting(f"{LLM_PROVIDER.upper()}_RAG_MODEL", _defaults["rag"])
+NON_RAG_REASONING_EFFORT = "none"
+RAG_REASONING_EFFORT = "medium" if LLM_PROVIDER == "openai" else "none"
+EXTRACTION_MAX_COMPLETION_TOKENS = int(
+    os.getenv(f"{LLM_PROVIDER.upper()}_EXTRACTION_MAX_COMPLETION_TOKENS", _defaults["budget"])
+)
+COMPLETION_TOKEN_PARAMETER = "max_completion_tokens" if LLM_PROVIDER == "openai" else "max_tokens"
 
 for directory in (DATA_DIR, OUTPUT_DIR, FUSION_DIR, UPLOADS_DIR):
     directory.mkdir(exist_ok=True)

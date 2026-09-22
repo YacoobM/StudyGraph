@@ -6,13 +6,18 @@ import time
 from collections import Counter, defaultdict
 
 import numpy as np
-from groq import APIStatusError, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from schemas.extraction import ExtractionResult
-from app.config import EXTRACTION_MODEL, RAG_MODEL
+from app.config import (
+    EXTRACTION_MAX_COMPLETION_TOKENS,
+    EXTRACTION_MODEL,
+    RAG_MODEL,
+    RAG_REASONING_EFFORT,
+)
 from services import graph_fusion
+from services.llm_provider import API_STATUS_ERRORS, RATE_LIMIT_ERRORS
 from services.graph_runtime import call_llm
 
 
@@ -216,7 +221,12 @@ Respond with ONLY this exact JSON structure:
         try:
             async with ENGINE_EXTRACTION_SEMAPHORE:
                 response = await asyncio.to_thread(
-                    call_llm, self.client, self.llm_model, prompt, user_text, 700
+                    call_llm,
+                    self.client,
+                    self.llm_model,
+                    prompt,
+                    user_text,
+                    EXTRACTION_MAX_COMPLETION_TOKENS,
                 )
             content = response.choices[0].message.content
 
@@ -260,10 +270,10 @@ Respond with ONLY this exact JSON structure:
         except json.JSONDecodeError as e:
             logger.warning("chunk_extraction_json_failed error=%s", e)
             return {"concepts": [], "relationships": []}
-        except RateLimitError as e:
+        except RATE_LIMIT_ERRORS as e:
             logger.warning("chunk_extraction_rate_limited error=%s", e)
             raise
-        except APIStatusError:
+        except API_STATUS_ERRORS:
             # Do not turn invalid model IDs, credentials, or other API errors
             # into a misleading empty-but-successful extraction.
             raise
@@ -821,6 +831,7 @@ Respond with ONLY this exact JSON structure:
                     {"role": "user", "content": user_prompt}
                 ],
                 model=self.rag_model,
+                reasoning_effort=RAG_REASONING_EFFORT,
             )
             answer = response.choices[0].message.content
         except Exception as e:

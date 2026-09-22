@@ -4,9 +4,9 @@ import logging
 import time
 from collections import Counter, defaultdict
 
-from groq import RateLimitError, BadRequestError
-from app.config import EXTRACTION_MODEL
+from app.config import EXTRACTION_MODEL, NON_RAG_REASONING_EFFORT
 from services.llm_gateway import estimate_tokens, limiter
+from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#bdb2ff", "#ffc6ff"]
 MULTI_WEEK_COLOR = "#fcf6bd"
@@ -79,10 +79,10 @@ def get_graph_data(engine, week=None):
 MAX_RETRIES = 5
 BATCH_SIZE = 3
 
-GROQ_CONCURRENCY = asyncio.Semaphore(2)
+LLM_CONCURRENCY = asyncio.Semaphore(2)
 
 
-async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, temperature=0.2, max_tokens=None):
+async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, max_tokens=None):
     def call():
         kwargs = dict(
             messages=[
@@ -90,11 +90,10 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
                 {"role": "user", "content": user_prompt},
             ],
             model=LLM_MODEL,
-            reasoning_effort="none",
-            temperature=temperature,
+            reasoning_effort=NON_RAG_REASONING_EFFORT,
         )
         if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            kwargs["max_completion_tokens"] = max_tokens
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         return client.chat.completions.create(**kwargs)
@@ -105,10 +104,10 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
     for attempt in range(MAX_RETRIES + 1):
         try:
             await limiter.acquire(estimated_input_tokens, estimated_output_tokens)
-            async with GROQ_CONCURRENCY:
+            async with LLM_CONCURRENCY:
                 response = await asyncio.to_thread(call)
             return response.choices[0].message.content
-        except RateLimitError as e:
+        except RATE_LIMIT_ERRORS as e:
             if attempt == MAX_RETRIES:
                 logger.error("evolution_llm_rate_limit_exhausted retries=%d", MAX_RETRIES)
                 return None
@@ -125,7 +124,7 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
                 delay,
             )
             await asyncio.sleep(delay)
-        except BadRequestError as e:
+        except BAD_REQUEST_ERRORS as e:
             if attempt == MAX_RETRIES:
                 logger.error("evolution_llm_bad_request_exhausted retries=%d", MAX_RETRIES)
                 return None
@@ -142,9 +141,9 @@ def _batches(items, size):
         yield items[i:i + size]
 
 
-async def _call_and_parse_json(client, system_prompt, user_prompt, temperature, max_tokens):
+async def _call_and_parse_json(client, system_prompt, user_prompt, max_tokens):
     for attempt in range(5):
-        raw = await _call_with_retry(client, system_prompt, user_prompt, json_mode=False, temperature=temperature, max_tokens=max_tokens)
+        raw = await _call_with_retry(client, system_prompt, user_prompt, json_mode=False, max_tokens=max_tokens)
         if not raw:
             return {}
         try:
@@ -270,7 +269,7 @@ async def summarize_weeks_batch(client, requests, engine):
         user_prompt = "\n\n---\n\n".join(sections)
 
         max_tokens = BATCH_TOKEN_OVERHEAD + SUMMARY_TOKENS_PER_ITEM * len(batch)
-        data = await _call_and_parse_json(client, system_prompt, user_prompt, temperature=0.2, max_tokens=max_tokens)
+        data = await _call_and_parse_json(client, system_prompt, user_prompt, max_tokens=max_tokens)
         for req in batch:
             text = data.get(req["key"])
             if isinstance(text, str) and text.strip():
@@ -320,7 +319,7 @@ async def summarize_comparisons_batch(client, requests):
         user_prompt = "\n\n---\n\n".join(sections)
 
         max_tokens = BATCH_TOKEN_OVERHEAD + COMPARISON_TOKENS_PER_ITEM * len(sections)
-        data = await _call_and_parse_json(client, system_prompt, user_prompt, temperature=0.25, max_tokens=max_tokens)
+        data = await _call_and_parse_json(client, system_prompt, user_prompt, max_tokens=max_tokens)
         for req in batch:
             text = data.get(req["key"])
             if isinstance(text, str) and text.strip():
@@ -422,7 +421,7 @@ async def synthesize_overall_evolution(client, concept_name, consecutive_compari
     steps = "\n".join(f"{c['from_week']} -> {c['to_week']}: {c['comparison']}" for c in usable)
     user_prompt = f"CONCEPT: {concept_name}\n\n{steps}"
     max_tokens = BATCH_TOKEN_OVERHEAD + COMPARISON_TOKENS_PER_ITEM
-    text = await _call_with_retry(client, system_prompt, user_prompt, temperature=0.25, max_tokens=max_tokens)
+    text = await _call_with_retry(client, system_prompt, user_prompt, max_tokens=max_tokens)
     return text.strip() if text else None
 
 
