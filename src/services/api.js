@@ -16,14 +16,15 @@ async function safeFetchJson(url, options = {}) {
   return handleResponse(response)
 }
 
-// Backend runs extraction as a background task (see backend/main.py's
-// _run_upload_pipeline) so /api/upload itself returns almost immediately
-// with just an acknowledgment — this polls the single status slot until
-// that background work reports done/error. Evolution summaries are not
-// part of this background work — they're generated on demand per concept
-// (see fetchConceptDescription/fetchConcept below).
+// Backend starts extraction as a background task when /api/documents creates
+// the document row. This polls the single status slot until that work reports
+// done/error.
 export async function getPipelineStatus() {
   return safeFetchJson(`${API_BASE_URL}/api/upload/status`)
+}
+
+export async function retryFailedUploadBatches() {
+  return safeFetchJson(`${API_BASE_URL}/api/upload/retry-failed`, { method: 'POST' })
 }
 
 async function pollUntilDone(pollFn, { intervalMs = 1500, timeoutMs = 10 * 60 * 1000 } = {}) {
@@ -31,7 +32,7 @@ async function pollUntilDone(pollFn, { intervalMs = 1500, timeoutMs = 10 * 60 * 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const status = await pollFn()
-    if (status.stage === 'done' || status.stage === 'error') return status
+    if (['done', 'error', 'partially_processed'].includes(status.stage)) return status
     if (Date.now() - start > timeoutMs) {
       throw new Error('Timed out waiting for the backend to finish processing.')
     }
@@ -249,7 +250,7 @@ export async function me() {
 function toRow(doc) {
   const ext = (doc.filename?.split('.').pop() || '').toUpperCase()
   const label = {
-    done: 'Processed', ready: 'Processed', error: 'Failed',
+    done: 'Processed', ready: 'Processed', partially_processed: 'Partially processed', error: 'Failed',
     queued: 'Queued', running: 'Processing',
   }[(doc.status || '').toLowerCase()] || 'Uploaded'
 
@@ -292,13 +293,9 @@ export async function deleteDocument(id) {
 }
 
 /**
- * Upload is deliberately two calls:
- *   1. POST /api/documents  — our row, so the table shows the file at once
- *   2. POST /api/upload     — main.py's extraction pipeline
- * Extraction runs in a background task, so the status comes from polling
+ * POST /api/documents stores the file and starts extraction in the backend.
+ * Extraction runs in a background task, so status comes from polling
  * /api/upload/status rather than from the upload response.
- *
- * onStatus receives each pipeline status object, for a progress line.
  */
 export async function uploadDocument(
   file,
@@ -307,13 +304,12 @@ export async function uploadDocument(
   onStatus = null,
   minMentions = null,
 ) {
-  // Signature kept as Builder already calls it. seedMethod / maxNodes /
-  // minMentions are accepted and ignored: main.py's /api/upload takes
-  // max_nodes and min_mentions as query params, which the current pipeline
-  // does not act on, and inventing behaviour here would be worse than saying
-  // so plainly.
+  // Keep the existing UI signature while sending the supported pipeline
+  // controls to the document endpoint.
   const form = new FormData()
   form.append('file', file)
+  if (maxNodes != null) form.append('max_nodes', String(maxNodes))
+  if (minMentions != null) form.append('min_mentions', String(minMentions))
 
   const created = await apiFetch(`${API_BASE_URL}/api/documents`, {
     method: 'POST',
@@ -323,19 +319,7 @@ export async function uploadDocument(
   const doc = created.document
 
   try {
-    await patchDocument(doc.id, { status: 'running' })
-
-    const form2 = new FormData()
-    form2.append('file', file)
-    const ack = await apiFetch(`${API_BASE_URL}/api/upload`, {
-      method: 'POST',
-      body: form2,
-    })
-    if (ack?.week) await patchDocument(doc.id, { week: ack.week })
-
-    // Reuses the repo's existing pollUntilDone(pollFn, opts) helper rather
-    // than defining a second polling loop.
-    // main.py keeps a single global pipeline_status, so a status naming a
+    // The backend keeps a single global pipeline status, so a status naming a
     // different file belongs to another upload. Treat a long run of those as
     // a stall instead of polling until the ten-minute timeout.
     let foreign = 0
@@ -356,10 +340,10 @@ export async function uploadDocument(
       { intervalMs: 1500 },
     )
 
-    if (final?.stage === 'error') {
+    if (final?.stage === 'error' || final?.stage === 'partially_processed') {
       const updated = await patchDocument(doc.id, {
-        status: 'error',
-        error: final.error || 'Extraction failed.',
+        status: final.stage,
+        error: final.error || (final.stage === 'partially_processed' ? 'Some extraction batches failed.' : 'Extraction failed.'),
       })
       return { document: toRow(updated.document), raw: final }
     }

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import asyncio
+import logging
 import time
 from pathlib import Path
 
@@ -11,12 +13,14 @@ from repositories.database import connect
 from repositories.documents import document_public
 from repositories.users import current_user
 from schemas.documents import DocumentPatch
+from api.routes.upload import start_upload_pipeline
 
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_SUFFIXES = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
 router = APIRouter(tags=["documents"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/documents")
@@ -43,9 +47,12 @@ async def list_documents(user: sqlite3.Row = Depends(current_user)):
 async def create_document(
 	file: UploadFile = File(...),
 	week: str = Form(default=""),
+	max_nodes: int | None = Form(default=None),
+	min_mentions: int = Form(default=1),
 	user: sqlite3.Row = Depends(current_user),
 ):
 	filename = Path(file.filename or "").name
+	logger.info("document_create_received filename=%s user_id=%s", filename, user["id"])
 	if not filename:
 		raise HTTPException(status_code=422, detail="Choose a file to upload.")
 
@@ -86,6 +93,25 @@ async def create_document(
 		)
 		row = conn.execute("SELECT * FROM documents WHERE id = ?", (cur.lastrowid,)).fetchone()
 
+		logger.info(
+			"document_record_created document_id=%s filename=%s bytes=%d status=queued",
+			row["id"],
+			filename,
+			len(data),
+		)
+
+	asyncio.create_task(
+		start_upload_pipeline(
+			data,
+			filename,
+			max_nodes=max_nodes,
+			min_mentions=min_mentions,
+			document_id=row["id"],
+			stored_name=stored_name,
+		)
+	)
+	logger.info("document_pipeline_started document_id=%s filename=%s", row["id"], filename)
+
 	return {"document": document_public(row)}
 
 
@@ -94,6 +120,7 @@ async def update_document(
 	doc_id: int, body: DocumentPatch, user: sqlite3.Row = Depends(current_user)
 ):
 	fields = {key: value for key, value in body.model_dump().items() if value is not None}
+	logger.info("document_update_received document_id=%s fields=%s", doc_id, sorted(fields))
 	if not fields:
 		raise HTTPException(status_code=422, detail="Nothing to update.")
 
@@ -111,11 +138,18 @@ async def update_document(
 		)
 		row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
 
+		logger.info(
+			"document_update_complete document_id=%s status=%s",
+			doc_id,
+			row["status"],
+		)
+
 	return {"document": document_public(row)}
 
 
 @router.delete("/api/documents/{doc_id}")
 async def delete_document(doc_id: int, user: sqlite3.Row = Depends(current_user)):
+	logger.info("document_delete_received document_id=%s user_id=%s", doc_id, user["id"])
 	with connect() as conn:
 		row = conn.execute(
 			"SELECT * FROM documents WHERE id = ? AND user_id = ?", (doc_id, user["id"])
@@ -131,6 +165,8 @@ async def delete_document(doc_id: int, user: sqlite3.Row = Depends(current_user)
 			stored.unlink()
 		except OSError:
 			pass
+
+	logger.info("document_delete_complete document_id=%s", doc_id)
 
 	return {"ok": True, "deleted": doc_id}
 

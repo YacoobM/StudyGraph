@@ -1,26 +1,29 @@
 ﻿import asyncio
+import hashlib
 import json
+import logging
 import time
 from collections import Counter, defaultdict
 
 import numpy as np
-from groq import RateLimitError
+from groq import APIStatusError, RateLimitError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from schemas.extraction import ExtractionResult
+from app.config import EXTRACTION_MODEL, RAG_MODEL
 from services import graph_fusion
 from services.graph_runtime import call_llm
 
 
 ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
-SEED_ENTITY_PRIORITY_COUNT = 10
 CROSS_WEEK_CONCEPT_COUNT = 10
-LLM_MODEL = 'qwen/qwen3.6-27b'
-RAG_MODEL = 'openai/gpt-oss-20b'
+DEFAULT_CHUNK_SIZE = 5600
+DEFAULT_CHUNK_OVERLAP = 800
+logger = logging.getLogger(__name__)
 
 class StudyGraphEngine:
-    def __init__(self, collections, client, llm_model=LLM_MODEL, rag_model=RAG_MODEL):
+    def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL):
         self.client = client
         self.llm_model = llm_model
         self.rag_model = rag_model
@@ -29,11 +32,9 @@ class StudyGraphEngine:
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.chunk_store = []
         self.graph = None
-        self.seed_entities = []         # Top 20 global concepts identified before processing
         self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
         self.fused_edges = []           # Edges after conflict resolution (post-fusion)
         self.inferred_edges = []        # Transitive edges inferred during fusion
-        self.seed_generation_time = None        # float, seconds
         self.upload_latency = None              # float, total time for entire upload endpoint
         self.collections = collections
         self._doc_concept_names = {}    # doc_name -> set of admitted concept names (for max_nodes_per_doc)
@@ -42,7 +43,8 @@ class StudyGraphEngine:
         # --- Concept-evolution state ---
         self.week_counter = 1                    # Tracks upload batches as "weeks"
         self.uploads_by_week = {}                 # week_key -> filename
-        self.chunks_by_week = defaultdict(list)   # week_key -> [{text, pages, doc_name, embedding}] (in-memory, separate from ChromaDB)
+        self.chunks_by_week = defaultdict(list)   # week_key -> [{chunk_id, text, pages, doc_name, embedding}]
+        self.chunks_by_id = {}                    # chunk_id -> chunk provenance record
 
         # Concept names admitted from completed uploads, across all weeks.
         # Populated after each upload (see _run_upload_pipeline) and consulted
@@ -59,51 +61,10 @@ class StudyGraphEngine:
         self.concept_overall_comparison = {}                  # canonical concept_name -> comparison text (first week vs. latest week)
 
         self.pipeline_status = {"stage": "idle"}
+        self.failed_upload_batches = {}
 
         self.degraded_summary_keys = set()
         self.quiz_sessions = {}
-
-    def generate_seeds(self, all_pages):
-        """
-        Global Seed Generation dispatcher: Routes to BERTopic or LLM method.
-        Records timing and method used for benchmarking.
-        """
-        start = time.time()
-        self._generate_seeds_llm(all_pages)
-        self.seed_generation_time = round(time.time() - start, 3)
-
-    def _generate_seeds_llm(self, all_pages):
-        full_text = " ".join([p.get("text", "") for p in all_pages])
-        if not full_text.strip():
-            return
-
-        seed_prompt = (
-            "Extract the TOP 20 most fundamental academic concepts from this material. "
-            "Respond with ONLY a JSON object: {\"seed_concepts\": [\"concept1\", \"concept2\", ...]}"
-        )
-
-        try:
-            response = call_llm(self.client, self.llm_model, seed_prompt, f"Material:\n{full_text[:5000]}")
-            content = response.choices[0].message.content
-
-            if not content or not content.strip():
-                print("Empty response from LLM")
-                self.seed_entities = []
-                return
-
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-
-            seed_json = json.loads(content)
-            self.seed_entities = [s.lower().strip() for s in seed_json.get("seed_concepts", [])]
-            print(f"Generated {len(self.seed_entities)} seeds: {self.seed_entities}")
-        except Exception as e:
-            print(f"Seed generation failed: {e}")
-            self.seed_entities = []
 
     def _deduplicate_seeds_semantically(self, seeds, threshold=0.85):
         """
@@ -112,7 +73,7 @@ class StudyGraphEngine:
         """
         if not seeds:
             return seeds
-        embeddings = self.model.encode(seeds)
+        embeddings = self.model.encode(seeds, show_progress_bar=False)
         kept = []
         kept_embeddings = []
         for i, seed in enumerate(seeds):
@@ -127,7 +88,14 @@ class StudyGraphEngine:
         print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
-    def get_chunks(self, pages, source="unknown", size=2000, overlap=400, week_key=None):
+    def get_chunks(
+        self,
+        pages,
+        source="unknown",
+        size=DEFAULT_CHUNK_SIZE,
+        overlap=DEFAULT_CHUNK_OVERLAP,
+        week_key=None,
+    ):
         chunks = []
         full_text = ""
         position_to_page = []
@@ -145,7 +113,16 @@ class StudyGraphEngine:
             end = min(start + size, len(full_text))
             chunk_text = full_text[start:end]
             spanned_pages = sorted(set(position_to_page[start:end]))
-            chunks.append({"text": chunk_text, "pages": spanned_pages, "source": source})
+            chunk_index = len(chunks)
+            digest = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()[:12]
+            chunk_id = f"{source}:chunk:{chunk_index}:{digest}"
+            chunks.append({
+                "chunk_id": chunk_id,
+                "text": chunk_text,
+                "pages": spanned_pages,
+                "source": source,
+                "index": chunk_index,
+            })
             start += step
 
         self.index_chunks(chunks, week_key=week_key)
@@ -153,14 +130,36 @@ class StudyGraphEngine:
         if week_key is not None:
             self.index_chunks_for_week(chunks, week_key, source)
 
+        for chunk in chunks:
+            self.chunks_by_id[chunk["chunk_id"]] = {
+                "chunk_id": chunk["chunk_id"],
+                "text": chunk["text"],
+                "pages": chunk["pages"],
+                "source": source,
+                "week": week_key,
+            }
+
         return chunks
+
+    def resolve_chunk(self, chunk_id):
+        """Return stored source material for an extracted provenance ID."""
+        chunk = self.chunks_by_id.get(chunk_id)
+        if not chunk:
+            return None
+        return {
+            "chunk_id": chunk["chunk_id"],
+            "text": chunk["text"],
+            "pages": list(chunk.get("pages") or []),
+            "source": chunk.get("source", "unknown"),
+            "week": chunk.get("week"),
+        }
 
     def rebuild_known_concept_embeddings(self):
         """Recompute the embedding index for known_concepts. Call after
         known_concepts changes, before relevant_known_concepts is used."""
         self._known_concepts_list = sorted(self.known_concepts)
         if self._known_concepts_list:
-            self.known_concept_embeddings = self.model.encode(self._known_concepts_list)
+            self.known_concept_embeddings = self.model.encode(self._known_concepts_list, show_progress_bar=False)
         else:
             self.known_concept_embeddings = None
 
@@ -169,48 +168,60 @@ class StudyGraphEngine:
         by embedding similarity rather than a flat alphabetical slice."""
         if not self._known_concepts_list or self.known_concept_embeddings is None:
             return []
-        query_embedding = self.model.encode([text[:2000].lower()])
+        query_embedding = self.model.encode([text[:2000].lower()], show_progress_bar=False)
         sims = cosine_similarity(query_embedding, self.known_concept_embeddings)[0]
         top_idx = np.argsort(sims)[::-1][:top_k]
         return [self._known_concepts_list[i] for i in top_idx]
 
     async def extract_knowledge(self, text_batch, known_concepts=None):
-        raw_data = None  # ← initialize here so except blocks can always reference it
+        chunk = {
+            "chunk_id": "legacy:chunk:0",
+            "text": text_batch,
+        }
+        result = await self.extract_knowledge_batch([chunk], {chunk["chunk_id"]: known_concepts or []})
+        return result
 
-        if self.seed_entities:
-            seed_list = ", ".join(self.seed_entities[:SEED_ENTITY_PRIORITY_COUNT])
-            priority_line = f"Extract academic concepts and relationships, prioritizing these key entities: {seed_list}.\n"
-        else:
-            priority_line = "Extract academic concepts and relationships from the text.\n"
+    async def extract_knowledge_batch(self, chunks, known_concepts_by_chunk=None):
+        raw_data = None  # so except blocks can always reference it
+        known_concepts_by_chunk = known_concepts_by_chunk or {}
 
-        known_line = ""
-        if known_concepts:
-            known_list = ", ".join(known_concepts)
-            known_line = (
-                f"If any of these concepts are referenced in this text, even in passing, "
-                f"extract them too using this exact name: {known_list}.\n"
-            )
+        priority_line = "Extract academic concepts and relationships from the text.\n"
+
+        known_lines = []
+        for chunk in chunks:
+            known_concepts = known_concepts_by_chunk.get(chunk["chunk_id"], [])
+            if known_concepts:
+                known_lines.append(
+                    f"For {chunk['chunk_id']}, preserve these known names if referenced: "
+                    f"{', '.join(known_concepts)}."
+                )
+        known_line = "\n".join(known_lines)
 
         prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
 
 {priority_line}{known_line}
 Relationship types: prerequisite, causes, part_of, explains, enables, related_to
-For each relationship, include both:
+Every relationship must include the chunk_id of the source chunk. Do not reproduce quotes or context text.
+For each relationship, include:
 - summary: a short explanation (one sentence max)
-- context: the exact phrase or sentence from the source text that supports the relationship
 
 Respond with ONLY this exact JSON structure:
-{{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "summary": "Short explanation.", "context": "Exact phrase."}}]}}"""
+{{"concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
+
+        user_text = "\n\n---\n\n".join(
+            f"CHUNK_ID: {chunk['chunk_id']}\nTEXT:\n{chunk['text']}"
+            for chunk in chunks
+        )
 
         try:
             async with ENGINE_EXTRACTION_SEMAPHORE:
                 response = await asyncio.to_thread(
-                    call_llm, self.client, self.llm_model, prompt, text_batch
+                    call_llm, self.client, self.llm_model, prompt, user_text, 700
                 )
             content = response.choices[0].message.content
 
             if not content or not content.strip():
-                print("LLM returned empty response")
+                logger.warning("chunk_extraction_empty_response")
                 return {"concepts": [], "relationships": []}
 
             # Strip markdown fences if the model wraps output anyway
@@ -223,7 +234,13 @@ Respond with ONLY this exact JSON structure:
 
             raw_data = json.loads(content)
             validated = ExtractionResult(**raw_data)
-            print("Done")
+            valid_chunk_ids = {chunk["chunk_id"] for chunk in chunks}
+            invalid_relationships = [
+                relationship for relationship in validated.relationships
+                if relationship.chunk_id not in valid_chunk_ids
+            ]
+            if invalid_relationships:
+                raise ValueError("LLM returned relationship provenance for an unknown chunk_id")
             return {
                 "concepts": validated.concepts,
                 "relationships": [
@@ -232,24 +249,26 @@ Respond with ONLY this exact JSON structure:
                         "to": r.to,
                         "relation": r.relation,
                         "summary": getattr(r, "summary", "") or "",
-                        "context": getattr(r, "context", "") or "",
+                        "chunk_id": r.chunk_id,
                     }
                     for r in validated.relationships
                 ]
             }
         except ValueError as e:
-            print(f"Extraction validation error: {e}")
-            print(f"Raw data was: {raw_data}")
+            logger.warning("chunk_extraction_validation_failed error=%s raw_data_present=%s", e, raw_data is not None)
             return {"concepts": [], "relationships": []}
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
+            logger.warning("chunk_extraction_json_failed error=%s", e)
             return {"concepts": [], "relationships": []}
         except RateLimitError as e:
-            print(e)
-            return {"concepts": [], "relationships": []}
+            logger.warning("chunk_extraction_rate_limited error=%s", e)
+            raise
+        except APIStatusError:
+            # Do not turn invalid model IDs, credentials, or other API errors
+            # into a misleading empty-but-successful extraction.
+            raise
         except Exception as e:
-            print(f"Error calling LLM: {e}")
-            print(f"Raw data was: {raw_data}")
+            logger.exception("chunk_extraction_failed raw_data_present=%s", raw_data is not None)
             return {"concepts": [], "relationships": []}
 
     def add_to_graph(self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None):
@@ -274,8 +293,8 @@ Respond with ONLY this exact JSON structure:
             to_node   = r.get("to", "").lower().strip()
             relation  = r.get("relation", "").lower().strip()
             summary   = (r.get("summary") or "").strip()
+            chunk_id  = (r.get("chunk_id") or "").strip()
             if from_node and to_node:
-                context = (r.get("context") or "").strip()
                 self.edges.append(
                     {
                         "from": from_node,
@@ -283,28 +302,53 @@ Respond with ONLY this exact JSON structure:
                         "relation": relation,
                         "source": doc_name,
                         "summary": summary,
-                        "context": context,
+                        "chunk_id": chunk_id,
                     }
                 )
 
+    def deduplicate_extracted_edges(self):
+        """Remove exact duplicate extracted edges without making an LLM call."""
+        unique = {}
+        for edge in self.edges:
+            key = (
+                edge.get("from", "").strip().lower(),
+                edge.get("to", "").strip().lower(),
+                edge.get("relation", "").strip().lower(),
+                edge.get("source", ""),
+            )
+            if key not in unique:
+                unique[key] = {**edge, "chunk_ids": set()}
+            chunk_ids = unique[key]["chunk_ids"]
+            chunk_ids.update(edge.get("chunk_ids", []))
+            if edge.get("chunk_id"):
+                chunk_ids.add(edge["chunk_id"])
+            if edge.get("summary") and not unique[key].get("summary"):
+                unique[key]["summary"] = edge["summary"]
+        for edge in unique.values():
+            edge["chunk_ids"] = sorted(edge["chunk_ids"])
+            edge.pop("chunk_id", None)
+        removed = len(self.edges) - len(unique)
+        self.edges = list(unique.values())
+        if removed:
+            logger.info("extraction_edge_deduplication removed=%d remaining=%d", removed, len(self.edges))
+        return removed
+
     def prune_low_value_concepts(self, doc_name, week_key, min_mentions=2):
         """
-        Drop concepts admitted from this doc/week that show no sign of being
-        a "key" concept: mentioned fewer than min_mentions times across this
-        doc's chunks, and not one of the curated seed_entities. Off by
-        default (call with min_mentions=1, or don't call it at all) so it
-        never changes behavior unless explicitly requested.
+        Drop concepts admitted from this doc/week that are mentioned fewer
+        than min_mentions times across this doc's chunks. Off by default
+        (call with min_mentions=1, or don't call it at all) so it never
+        changes behavior unless explicitly requested.
         """
         doc_week_concepts = [c for c in self.concepts if c["source"] == doc_name and c.get("week") == week_key]
         if not doc_week_concepts:
             return
 
         counts = Counter(c["name"] for c in doc_week_concepts)
-        seeds = set(self.seed_entities)
 
         dropped = {
             name for name, count in counts.items()
-            if count < min_mentions and name not in seeds
+            if count < min_mentions
         }
         if not dropped:
             return
@@ -320,19 +364,29 @@ Respond with ONLY this exact JSON structure:
         if doc_name in self._doc_concept_names:
             self._doc_concept_names[doc_name] -= dropped
 
-        print(f"Pruned {len(dropped)} low-value concept(s) from {doc_name} ({week_key}): {sorted(dropped)}")
+        logger.info(
+            "concepts_pruned document=%s week=%s dropped=%d",
+            doc_name,
+            week_key,
+            len(dropped),
+        )
 
     def fuse_graph(self):
         """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
-        print("Starting fusion...")
+        logger.info("graph_fusion_started concepts=%d edges=%d", len(self.concepts), len(self.edges))
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, self.client)
 
-        print(f"Fusion complete. Canonical nodes: {len(self.canonical_nodes)}, "
-              f"Fused edges: {len(self.fused_edges)}, Inferred edges: {len(self.inferred_edges)}")
+        logger.info(
+            "graph_fusion_complete canonical_nodes=%d fused_edges=%d inferred_edges=%d",
+            len(self.canonical_nodes),
+            len(self.fused_edges),
+            len(self.inferred_edges),
+        )
 
     def _merge_entities(self):
         """
         Entity Merging: Use cosine similarity to identify and merge semantically identical nodes.
+        No LLM call — deterministic, fast, reproducible.
         No LLM call — deterministic, fast, reproducible.
         """
         if not self.concepts:
@@ -342,7 +396,7 @@ Respond with ONLY this exact JSON structure:
         if len(node_names) < 2:
             return
 
-        embeddings = self.model.encode(node_names)
+        embeddings = self.model.encode(node_names, show_progress_bar=False)
 
         merged = set()
         threshold = 0.80  # tune this based on false positives you see
@@ -361,7 +415,7 @@ Respond with ONLY this exact JSON structure:
                     self.canonical_nodes[node_names[j]] = node_names[i]
                     merged.add(node_names[j])
 
-        print(f"Entity merging: {len(self.canonical_nodes)} merges via cosine similarity (threshold={threshold})")
+        logger.info("entity_merging_complete merges=%d threshold=%.2f", len(self.canonical_nodes), threshold)
 
     def _normalize_relation(self, relation):
         """
@@ -446,15 +500,18 @@ Respond with ONLY this exact JSON structure:
                         "conflicting_relations": relations
                     })
 
-        print(f"Conflict resolution: Processed {len(edge_groups)} edge groups, "
-              f"created {len(self.fused_edges)} fused edges")
+        logger.info(
+            "conflict_resolution_complete edge_groups=%d fused_edges=%d",
+            len(edge_groups),
+            len(self.fused_edges),
+        )
 
     def find_best_node(self, query):
         if not self.concepts:
             return None
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names)
-        query_embedding = self.model.encode([query.lower()])
+        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
+        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
         best_idx = np.argmax(similarities)
         if similarities[best_idx] > 0.7:
@@ -466,8 +523,8 @@ Respond with ONLY this exact JSON structure:
             return {"nodes": [], "edges": [], "prompt_text": ""}
 
         node_names      = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names)
-        query_embedding = self.model.encode([query.lower()])
+        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
+        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
 
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
 
@@ -523,8 +580,8 @@ Respond with ONLY this exact JSON structure:
         working_edges = self.fused_edges if self.fused_edges else self.edges
 
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names)
-        query_embedding = self.model.encode([query.lower()])
+        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
+        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
 
         seed_nodes = set()
@@ -587,14 +644,21 @@ Respond with ONLY this exact JSON structure:
         # store into the vector database
         texts = [chunk["text"] for chunk in chunks]
 
-        embeddings = self.model.encode(texts)
+        embeddings = self.model.encode(texts, show_progress_bar=False)
 
-        ids = [f"chunk_{self._chroma_chunk_counter + i}" for i in range(len(texts))]
+        ids = [
+            chunk.get("chunk_id", f"chunk_{self._chroma_chunk_counter + i}")
+            for i, chunk in enumerate(chunks)
+        ]
         self._chroma_chunk_counter += len(texts)
 
         metadatas = []
         for chunk in chunks:
-            meta = {"pages": chunk["pages"], "source": chunk.get("source", "unknown")}
+            meta = {
+                "chunk_id": chunk.get("chunk_id", ids[len(metadatas)]),
+                "pages": chunk["pages"],
+                "source": chunk.get("source", "unknown"),
+            }
             if week_key is not None:
                 meta["week"] = week_key
             metadatas.append(meta)
@@ -607,7 +671,7 @@ Respond with ONLY this exact JSON structure:
         )
 
     def retrieve_chunks(self, query, top_k=3):
-        query_embedding  = self.model.encode([query.lower()])
+        query_embedding  = self.model.encode([query.lower()], show_progress_bar=False)
 
         results = self.collections.query(
             query_embeddings=query_embedding,
@@ -640,17 +704,21 @@ Respond with ONLY this exact JSON structure:
         if not texts:
             return
 
-        embeddings = self.model.encode(texts)
-        for text, pages, embedding in zip(texts, pages_list, embeddings):
+        embeddings = self.model.encode(texts, show_progress_bar=False)
+        for chunk, text, pages, embedding in zip(chunks, texts, pages_list, embeddings):
             self.chunks_by_week[week_key].append({
-                "text": text, "pages": pages, "doc_name": doc_name, "embedding": embedding,
+                "chunk_id": chunk.get("chunk_id"),
+                "text": text,
+                "pages": pages,
+                "doc_name": doc_name,
+                "embedding": embedding,
             })
 
     def retrieve_chunks_for_week(self, query, week_key, top_k=2):
         pool = self.chunks_by_week.get(week_key, [])
         if not pool:
             return []
-        query_embedding = self.model.encode([query.lower()])
+        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
         chunk_embeddings = np.array([c["embedding"] for c in pool])
         similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
         top_indices = np.argsort(similarities)[-top_k:][::-1]
@@ -756,7 +824,7 @@ Respond with ONLY this exact JSON structure:
             )
             answer = response.choices[0].message.content
         except Exception as e:
-            print(f"Error in RAG query: {e}")
+            logger.exception("rag_query_failed")
             answer = "Error processing query"
 
         return {
@@ -778,5 +846,3 @@ Respond with ONLY this exact JSON structure:
             "graph_search_depth": 2 if working_edges else 0,
             "fusion_status": "fused" if self.fused_edges else "raw"
         }
-
-

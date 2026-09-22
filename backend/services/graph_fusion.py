@@ -7,10 +7,10 @@ from pathlib import Path
 import numpy as np
 from groq import BadRequestError, RateLimitError
 from sklearn.metrics.pairwise import cosine_similarity
-from app.config import FUSION_DIR
+from app.config import EXTRACTION_MODEL, FUSION_DIR
 from services.fusion_log import FusionLog
 
-_MODEL = "qwen/qwen3.6-27b"
+_MODEL = EXTRACTION_MODEL
 
 AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55

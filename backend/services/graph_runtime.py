@@ -1,7 +1,11 @@
 import json
+import logging
 from datetime import datetime
 
 from app.config import OUTPUT_DIR
+from services.llm_gateway import estimate_tokens, limiter
+
+logger = logging.getLogger(__name__)
 
 
 def save_seed_entities(seed_entities):
@@ -16,7 +20,7 @@ def save_seed_entities(seed_entities):
             json.dump(data, file, indent=2)
         return str(output_file)
     except Exception as error:
-        print(f"Error saving seed entities: {error}")
+        logger.exception("seed_entities_save_failed")
         return None
 
 
@@ -38,7 +42,7 @@ def save_extraction_result(timings, nodes, edges):
             json.dump(data, file, indent=2)
         return str(output_file)
     except Exception as error:
-        print(f"Error saving file: {error}")
+        logger.exception("extraction_result_save_failed")
         return None
 
 
@@ -59,7 +63,7 @@ def save_graph_json(nodes, edges, fusion_stats=None):
             json.dump(data, file, indent=2)
         return str(output_file)
     except Exception as error:
-        print(f"Error saving graph JSON: {error}")
+        logger.exception("graph_json_save_failed")
         return None
 
 
@@ -67,8 +71,12 @@ def get_collection(chroma, project_id, user_id="default"):
     return chroma.get_or_create_collection(name=f"user_{user_id}_project_{project_id}")
 
 
-def call_llm(client, model, prompt, text_batch):
+def call_llm(client, model, prompt, text_batch, max_tokens=1000):
     try:
+        limiter.acquire_sync(
+            estimate_tokens(prompt) + estimate_tokens(text_batch),
+            max_tokens,
+        )
         return client.chat.completions.create(
             messages=[
                 {"role": "system", "content": prompt},
@@ -76,8 +84,9 @@ def call_llm(client, model, prompt, text_batch):
             ],
             model=model,
             reasoning_effort="none",
+            max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
     except Exception as error:
-        print(f"LLM call failed: {error}")
+        logger.exception("llm_call_failed model=%s", model)
         raise
