@@ -202,23 +202,23 @@ def current_user(authorization: str = Header(default="")) -> sqlite3.Row:
         password_hash = hash_password(secrets.token_urlsafe(32))
 
         conn.execute(
-            """
-            INSERT INTO users
-                (auth_user_id, email, name, password_hash, salt, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(auth_user_id) DO UPDATE SET
-                email = excluded.email,
-                name = COALESCE(users.name, excluded.name)
-            """,
-            (
-                auth_user_id,
-                email,
-                name,
-                password_hash,
-                "",  # Argon2 includes salt in the hash, so store empty string
-                time.time(),
-            ),
-        )
+			"""
+			INSERT INTO users
+				(auth_user_id, email, name, password_hash, salt, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(email) DO UPDATE SET
+				auth_user_id = COALESCE(users.auth_user_id, excluded.auth_user_id),
+				name = COALESCE(users.name, excluded.name)
+			""",
+			(
+				auth_user_id,
+				email,
+				name,
+				password_hash,
+				"",
+				time.time(),
+			),
+		)
 
         # Fetch the final user record
         row = conn.execute(

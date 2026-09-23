@@ -1,5 +1,5 @@
 import sqlite3
-from database import connect
+from repositories.database import connect
 
 def document_public(row: sqlite3.Row) -> dict:
 	return {

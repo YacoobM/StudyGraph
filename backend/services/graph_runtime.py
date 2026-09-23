@@ -73,9 +73,9 @@ def get_collection(chroma, project_id, user_id="default"):
     return chroma.get_or_create_collection(name=f"user_{user_id}_project_{project_id}")
 
 
-def call_llm(client, model, prompt, text_batch, max_tokens=1000):
+async def call_llm(client, model, prompt, text_batch, max_tokens=1000):
     try:
-        limiter.acquire(
+        await limiter.acquire(
             estimate_tokens(prompt) + estimate_tokens(text_batch),
             max_tokens,
         )
