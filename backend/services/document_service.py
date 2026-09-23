@@ -1,19 +1,19 @@
-import fitz
-import os
+import asyncio
+import cv2
+import easyocr
+import numpy as np
+from io import BytesIO
 from pathlib import Path
+from PIL import Image
 from docx import Document
 from pptx import Presentation
-from io import BytesIO
-import easyocr
-import cv2
-import numpy as np
-from PIL import Image
 from google import genai
-import io
+import fitz
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+from app.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Initialize EasyOCR reader (better for handwriting than Paddle)
 reader = easyocr.Reader(['en'], gpu=False)
@@ -93,7 +93,7 @@ def extract_pptx(file_bytes):
     return pages
 
 
-def extract_image_ocr(file_bytes):
+async def extract_image_ocr(file_bytes):
     # Decode image from input bytes
     np_arr = np.frombuffer(file_bytes, np.uint8)
     image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -127,18 +127,21 @@ def extract_image_ocr(file_bytes):
         ]
 
     # Fall back to Gemini Flash for messy or handwritten text
-    pil_image = Image.open(io.BytesIO(file_bytes))
+    pil_image = Image.open(BytesIO(file_bytes))
     
     prompt = (
         "Transcribe all handwritten and printed text in this image accurately. "
         "Return ONLY the transcribed text."
     )
-    
-    response = get_ai_client().models.generate_content(
-        model='gemini-flash-latest',
-        contents=[pil_image, prompt]
+
+
+    response = await asyncio.to_thread(
+        lambda: get_ai_client().models.generate_content(
+            model='gemini-flash-latest',
+            contents=[pil_image, prompt]
+        )
     )
-        
+    
     return [
         {
             "page": 1,

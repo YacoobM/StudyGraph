@@ -9,6 +9,8 @@ from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 from app.logging_config import get_logger
 
+from utils.retry import retry_async
+
 WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#bdb2ff", "#ffc6ff"]
 MULTI_WEEK_COLOR = "#fcf6bd"
 DEFAULT_COLOR = "#d1d5db"
@@ -83,58 +85,33 @@ BATCH_SIZE = 3
 LLM_CONCURRENCY = asyncio.Semaphore(2)
 
 
+@retry_async(
+    on=(RATE_LIMIT_ERRORS, BAD_REQUEST_ERRORS),
+    max_attempts=5,
+    backoff=2.0,
+)
 async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, max_tokens=None):
-    def call():
-        kwargs = dict(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            model=LLM_MODEL,
-            reasoning_effort=NON_RAG_REASONING_EFFORT,
-        )
-        if max_tokens is not None:
-            kwargs["max_completion_tokens"] = max_tokens
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        return client.chat.completions.create(**kwargs)
-
+    """Call LLM with automatic retry on rate limits and bad requests."""
+    kwargs = dict(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        model=LLM_MODEL,
+        reasoning_effort=NON_RAG_REASONING_EFFORT,
+    )
+    if max_tokens is not None:
+        kwargs["max_completion_tokens"] = max_tokens
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+    
     estimated_input_tokens = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
     estimated_output_tokens = max_tokens or 1
-
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            await limiter.acquire(estimated_input_tokens, estimated_output_tokens)
-            async with LLM_CONCURRENCY:
-                response = await asyncio.to_thread(call)
-            return response.choices[0].message.content
-        except RATE_LIMIT_ERRORS as e:
-            if attempt == MAX_RETRIES:
-                logger.error("evolution_llm_rate_limit_exhausted retries=%d", MAX_RETRIES)
-                return None
-            retry_after = None
-            try:
-                retry_after = float(e.response.headers.get("retry-after"))
-            except (AttributeError, TypeError, ValueError):
-                pass
-            delay = retry_after if retry_after is not None else min(60, 5 * (3 ** attempt))
-            logger.warning(
-                "evolution_llm_rate_limited attempt=%d/%d retry_seconds=%.1f",
-                attempt + 1,
-                MAX_RETRIES,
-                delay,
-            )
-            await asyncio.sleep(delay)
-        except BAD_REQUEST_ERRORS as e:
-            if attempt == MAX_RETRIES:
-                logger.error("evolution_llm_bad_request_exhausted retries=%d", MAX_RETRIES)
-                return None
-            logger.warning("evolution_llm_bad_request attempt=%d/%d", attempt + 1, MAX_RETRIES)
-            await asyncio.sleep(1)
-        except Exception as e:
-            logger.exception("evolution_llm_call_failed")
-            return None
-    return None
+    
+    await limiter.acquire(estimated_input_tokens, estimated_output_tokens)
+    async with LLM_CONCURRENCY:
+        response = await asyncio.to_thread(lambda: client.chat.completions.create(**kwargs))
+    return response.choices[0].message.content
 
 
 def _batches(items, size):
