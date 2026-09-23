@@ -15,6 +15,10 @@ OUTPUT_DIR = DATA_DIR / "outputs"
 FUSION_DIR = OUTPUT_DIR / "fusion"
 UPLOADS_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "studygraph.db"
+SUPABASE_URL = os.getenv("SUPABASE_URL", os.getenv("VITE_SUPABASE_URL", "")).rstrip("/")
+SUPABASE_PUBLISHABLE_KEY = os.getenv(
+    "SUPABASE_PUBLISHABLE_KEY", os.getenv("VITE_SUPABASE_PUBLISHABLE_KEY", "")
+)
 
 
 def _model_setting(name: str, default: str) -> str:

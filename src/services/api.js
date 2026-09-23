@@ -1,4 +1,5 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { supabase } from './supabase.js'
 
 async function handleResponse(response) {
   const text = await response.text()
@@ -172,17 +173,10 @@ export async function fetchConceptSubgraph(conceptName) {
 // token plumbing
 // ---------------------------------------------------------------------------
 
-// Same key auth.jsx already uses, so AuthProvider and these calls stay in step.
-function authToken() {
-  try {
-    return localStorage.getItem('sg_token')
-  } catch {
-    return null   // storage throws in some sandboxed/private contexts
-  }
-}
-
-function authHeaders(extra = {}) {
-  const token = authToken()
+// Supabase owns token storage and refreshes expired sessions for us.
+async function authHeaders(extra = {}) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
   return token ? { ...extra, Authorization: `Bearer ${token}` } : extra
 }
 
@@ -225,7 +219,7 @@ export async function logout() {
   try {
     return await apiFetch(`${API_BASE_URL}/api/auth/logout`, {
       method: 'POST',
-      headers: authHeaders(),
+      headers: await authHeaders(),
     })
   } catch {
     return { ok: true }   // the local token is cleared regardless
@@ -234,7 +228,7 @@ export async function logout() {
 
 /** Confirms a restored token is still valid. Throws 401 if it isn't. */
 export async function me() {
-  return apiFetch(`${API_BASE_URL}/api/auth/me`, { headers: authHeaders() })
+  return apiFetch(`${API_BASE_URL}/api/auth/me`, { headers: await authHeaders() })
 }
 
 // ---------------------------------------------------------------------------
@@ -273,14 +267,14 @@ function toRow(doc) {
 // ---------------------------------------------------------------------------
 
 export async function listDocuments() {
-  const data = await apiFetch(`${API_BASE_URL}/api/documents`, { headers: authHeaders() })
+  const data = await apiFetch(`${API_BASE_URL}/api/documents`, { headers: await authHeaders() })
   return { ...data, documents: (data.documents || []).map(toRow) }
 }
 
 export async function patchDocument(id, fields) {
   return apiFetch(`${API_BASE_URL}/api/documents/${id}`, {
     method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: await authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(fields),
   })
 }
@@ -288,7 +282,7 @@ export async function patchDocument(id, fields) {
 export async function deleteDocument(id) {
   return apiFetch(`${API_BASE_URL}/api/documents/${id}`, {
     method: 'DELETE',
-    headers: authHeaders(),
+    headers: await authHeaders(),
   })
 }
 
@@ -313,7 +307,7 @@ export async function uploadDocument(
 
   const created = await apiFetch(`${API_BASE_URL}/api/documents`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: await authHeaders(),
     body: form,
   })
   const doc = created.document
@@ -369,18 +363,18 @@ export async function uploadDocument(
 
 /** Topics and questions generated from the concepts in the uploaded documents. */
 export async function fetchQuiz() {
-  return apiFetch(`${API_BASE_URL}/api/quiz`, { headers: authHeaders() })
+  return apiFetch(`${API_BASE_URL}/api/quiz`, { headers: await authHeaders() })
 }
 
 export async function saveQuizResult(quizId, correct, total, points) {
   return apiFetch(`${API_BASE_URL}/api/quiz/results`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: await authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ quiz_id: quizId, correct, total, points }),
   })
 }
 
 /** Per-document concept/edge counts, used to reconcile stuck rows. */
 export async function fetchDocumentStats() {
-  return apiFetch(`${API_BASE_URL}/api/documents/stats`, { headers: authHeaders() })
+  return apiFetch(`${API_BASE_URL}/api/documents/stats`, { headers: await authHeaders() })
 }
