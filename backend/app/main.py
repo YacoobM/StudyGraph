@@ -31,6 +31,7 @@ from app import state as runtime_state
 from app.config import LLM_API_KEY_ENV
 from services.graph_runtime import save_graph_json
 from services.llm_provider import create_llm_client
+from app.logging_config import get_logger
 
 from services import evolution_data, graph_fusion
 
@@ -67,7 +68,7 @@ client = create_llm_client(os.environ[LLM_API_KEY_ENV])
 runtime_state.configure_runtime(client, chroma)
 set_graph_source(lambda: runtime_state.engine)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @app.get("/health")

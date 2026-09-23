@@ -4,8 +4,9 @@ from datetime import datetime
 
 from app.config import COMPLETION_TOKEN_PARAMETER, NON_RAG_REASONING_EFFORT, OUTPUT_DIR
 from services.llm_gateway import estimate_tokens, limiter
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def save_seed_entities(seed_entities):

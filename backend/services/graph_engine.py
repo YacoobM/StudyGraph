@@ -2,7 +2,6 @@
 import hashlib
 import json
 import logging
-import time
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -16,6 +15,7 @@ from app.config import (
     RAG_MODEL,
     RAG_REASONING_EFFORT,
 )
+from app.logging_config import get_logger
 from services import graph_fusion
 from services.llm_provider import API_STATUS_ERRORS, RATE_LIMIT_ERRORS
 from services.graph_runtime import call_llm
@@ -25,7 +25,7 @@ ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
 CROSS_WEEK_CONCEPT_COUNT = 10
 DEFAULT_CHUNK_SIZE = 5600
 DEFAULT_CHUNK_OVERLAP = 800
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 PRUNED_REACTIVATION_SIMILARITY = 0.85
 
@@ -96,7 +96,7 @@ class StudyGraphEngine:
             if max(sims) < threshold:
                 kept.append(seed)
                 kept_embeddings.append(embeddings[i])
-        print(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
+        logger.info(f"Semantic deduplication: {len(seeds)} → {len(kept)} seeds")
         return kept
 
     def get_chunks(
@@ -514,40 +514,6 @@ Respond with ONLY this exact JSON structure:
             len(self.fused_edges),
             len(self.inferred_edges),
         )
-
-    def _merge_entities(self):
-        """
-        Entity Merging: Use cosine similarity to identify and merge semantically identical nodes.
-        No LLM call — deterministic, fast, reproducible.
-        No LLM call — deterministic, fast, reproducible.
-        """
-        if not self.concepts:
-            return
-
-        node_names = [c["name"] for c in self.concepts]
-        if len(node_names) < 2:
-            return
-
-        embeddings = self.model.encode(node_names, show_progress_bar=False)
-
-        merged = set()
-        threshold = 0.80  # tune this based on false positives you see
-
-        for i in range(len(node_names)):
-            if node_names[i] in merged:
-                continue
-
-            sims = cosine_similarity([embeddings[i]], embeddings)[0]
-
-            for j in range(i + 1, len(node_names)):
-                if node_names[j] in merged:
-                    continue
-
-                if sims[j] >= threshold:
-                    self.canonical_nodes[node_names[j]] = node_names[i]
-                    merged.add(node_names[j])
-
-        logger.info("entity_merging_complete merges=%d threshold=%.2f", len(self.canonical_nodes), threshold)
 
     def _normalize_relation(self, relation):
         """

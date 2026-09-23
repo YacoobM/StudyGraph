@@ -25,7 +25,9 @@ from services.llm_provider import RATE_LIMIT_ERRORS
 from utils.validate_file import guard_file
 
 router = APIRouter(tags=["upload"])
-logger = logging.getLogger(__name__)
+
+from app.logging_config import get_logger
+logger = get_logger(__name__)
 
 MAX_INPUT_TOKENS_PER_CALL = 4200
 MAX_CHUNKS_PER_BATCH = 4

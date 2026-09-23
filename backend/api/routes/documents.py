@@ -20,7 +20,9 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_SUFFIXES = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
 router = APIRouter(tags=["documents"])
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+logger = get_logger(__name__)
+
 
 
 @router.get("/api/documents")

@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 import time
 from collections import Counter, defaultdict
 
@@ -8,12 +7,14 @@ from app.config import EXTRACTION_MODEL, NON_RAG_REASONING_EFFORT
 from services.llm_gateway import estimate_tokens, limiter
 from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
+from app.logging_config import get_logger
+
 WEEK_COLORS = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#bdb2ff", "#ffc6ff"]
 MULTI_WEEK_COLOR = "#fcf6bd"
 DEFAULT_COLOR = "#d1d5db"
 
 LLM_MODEL = EXTRACTION_MODEL
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def get_week_color_map(engine):
