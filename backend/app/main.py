@@ -1,8 +1,7 @@
 ﻿import sys
-import logging
 import time
 from pathlib import Path
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 backend_dir = Path(__file__).resolve().parents[1]
 if str(backend_dir) not in sys.path:
@@ -18,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import asyncio
 import os
-import json
 from app.logging_config import configure_logging
 from chromadb import Client
 from schemas.graph import GraphResponse
@@ -33,8 +31,11 @@ from services.graph_runtime import save_graph_json
 from services.llm_provider import create_llm_client
 from app.logging_config import get_logger
 
-from services import evolution_data, graph_fusion
+from services import evolution_data
+from app.logging_config import get_logger
+from repositories.database import init_db
 
+logger = get_logger(__name__)
 load_dotenv()
 configure_logging()
 
@@ -49,6 +50,12 @@ app = FastAPI(
     version="0.1.0"
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on app startup"""
+    init_db()
+    logger.info("db intialised")
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"(http://localhost:\d+|http://127\.0\.0\.1:\d+|null)",

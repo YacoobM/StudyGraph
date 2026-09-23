@@ -82,8 +82,4 @@ async def logout(authorization: str = Header(default="")):
 			conn.execute("DELETE FROM sessions WHERE token = ?", (authorization[7:].strip(),))
 	return {"ok": True}
 
-
-init_db()
-
-
 __all__ = ["current_user", "router"]
