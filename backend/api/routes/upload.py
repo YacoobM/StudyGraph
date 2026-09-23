@@ -10,41 +10,33 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from app import state as runtime_state
 from app.config import LLM_API_KEY_ENV, UPLOADS_DIR
-from app import state as runtime_state
-from app.state import get_engine
-from app import state as runtime_state
-from repositories.database import connect
+from app.state import client, get_engine, set_engine
+from repositories.documents import _update_document_status
 from services.document_service import extract_text
+from services.graph_engine import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
 from services.graph_runtime import (
     save_extraction_result,
     save_graph_json,
 )
-from services.graph_engine import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
 from services.llm_gateway import estimate_tokens
 from services.llm_provider import RATE_LIMIT_ERRORS
-
+from utils.validate_file import guard_file
 
 router = APIRouter(tags=["upload"])
 logger = logging.getLogger(__name__)
 
-
-def _update_document_status(document_id, status, **fields):
-    if document_id is None:
-        return
-    allowed = {"status", "error", "week", "concepts", "relationships"}
-    updates = {key: value for key, value in fields.items() if key in allowed}
-    updates["status"] = status
-    assignments = ", ".join(f"{key} = ?" for key in updates)
-    with connect() as conn:
-        conn.execute(
-            f"UPDATE documents SET {assignments} WHERE id = ?",
-            (*updates.values(), document_id),
-        )
-
-
 MAX_INPUT_TOKENS_PER_CALL = 4200
 MAX_CHUNKS_PER_BATCH = 4
+
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/markdown",
+}
 
 
 def _make_extraction_batches(chunks):
@@ -67,7 +59,14 @@ def _make_extraction_batches(chunks):
     return batches
 
 
-async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None, batch_index=None, total_batches=None, retries=5):
+async def extract_with_exp_backoff(
+    engine,
+    chunks,
+    known_concepts_by_chunk=None,
+    batch_index=None,
+    total_batches=None,
+    retries=5,
+):
     delay = 5
     started = time.perf_counter()
     for attempt in range(1, retries + 1):
@@ -104,45 +103,27 @@ async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None,
 
 
 async def _fuse_when_idle(engine):
-    """Fuse the graph once this upload was the last one running.
-
-    Triggered here rather than from the browser, which cannot see the whole
-    picture: a second tab may be mid-upload, and two tabs finishing together
-    would each fire /api/fuse at a graph the other is still changing.
-    """
+    """Fuse the graph once this upload was the last one running."""
     async with runtime_state.fusion_lock:
         if runtime_state.uploads_in_flight():
-            return                      # a later upload will fuse when it lands
+            return
         done_status = engine.pipeline_status
-        if done_status.get("stage") != "done":
-            return                      # still building, or the upload failed
+        if done_status.get("stage") not in ("done", "partially_processed"):
+            return
 
-        # Hold the poll on "running" until the graph is really fused, so a
-        # client that stops at "done" cannot pick up the unfused graph.
         engine.pipeline_status = {**done_status, "stage": "running", "operation": "fusing"}
         try:
-            # Synchronous, and it makes blocking OpenAI calls: on the event loop
-            # it would freeze every request for the length of the fusion.
             await asyncio.to_thread(engine.fuse_graph)
         except Exception as error:
-            print(f"Fusion after upload failed: {error}")
-            traceback.print_exc()
+            logger.error("Fusion after upload failed: %s", error, exc_info=True)
             done_status = {**done_status, "fusion_error": str(error)}
 
-        # An upload that arrived while we were fusing has already put its own
-        # "running" status in the slot; leave it there.
         if not runtime_state.uploads_in_flight():
             engine.pipeline_status = done_status
 
 
 async def _pipeline_then_fuse(engine, *args, **kwargs):
-    """Run the upload pipeline, then fuse if nothing else is still processing.
-
-    A wrapper rather than an edit to _run_upload_pipeline, so the pipeline
-    stays exactly as it was.
-    """
-    # A fusion from an earlier upload is reading engine.concepts and
-    # engine.edges on a worker thread. Wait it out before appending to them.
+    """Run the upload pipeline, then fuse if nothing else is still processing."""
     async with runtime_state.fusion_lock:
         pass
     try:
@@ -164,8 +145,6 @@ def _schedule_upload_pipeline(
     document_id=None,
 ):
     """Schedule every upload through the shared completion-and-fusion flow."""
-    # Count before creating the task so fusion cannot start in the gap before
-    # the new pipeline begins running.
     runtime_state.upload_started()
     asyncio.create_task(
         _pipeline_then_fuse(
@@ -221,17 +200,6 @@ async def _run_upload_pipeline(
     try:
         safe_name = Path(filename).name
         _update_document_status(document_id, "running", week=week_key, error=None)
-        # set_status("seeding", error=None)
-        # save_seed_entities(engine.seed_entities)
-        # seed_duration = time.perf_counter() - phase_started
-        # logger.info(
-        #     "document_seeding_complete filename=%s week=%s pages=%d duration_ms=%.1f",
-        #     safe_name,
-        #     week_key,
-        #     len(pages),
-        #     len(engine.seed_entities),
-        #     seed_duration * 1000,
-        # )
 
         phase_started = time.perf_counter()
         set_status("chunking")
@@ -353,11 +321,6 @@ async def _run_upload_pipeline(
             for concept in engine.concepts
             if concept["source"] == filename and concept["week"] == week_key
         )
-        logger.info(
-            "document_evolution_deferred filename=%s week=%s",
-            safe_name,
-            week_key,
-        )
 
         working_edges = engine.fused_edges if engine.fused_edges else engine.edges
         document_concepts = [
@@ -395,15 +358,12 @@ async def _run_upload_pipeline(
             "week": week_key,
             "filename": filename,
             "chunks": len(chunks),
-            # "seeds_generated": len(engine.seed_entities),
-            # "seed_entities": engine.seed_entities,
             "raw_concepts": len(document_concepts),
             "total_edges": len(document_edges),
             "graph_saved_to": graph_save_path,
             "error": None,
             "latency_seconds": upload_latency,
             "phase_timings": {
-                # "seed_generation_seconds": round(seed_duration, 3),
                 "chunk_extraction_seconds": round(extraction_duration, 3),
                 "average_chunk_seconds": round(extraction_duration / len(chunks), 3) if chunks else 0,
                 "evolution_deferred": True,
@@ -461,6 +421,7 @@ async def start_upload_pipeline(
         _update_document_status(document_id, "error", error=str(error))
         logger.exception("upload_document_read_failed filename=%s document_id=%s", safe_filename, document_id)
         raise
+
     if stored_name is None:
         (UPLOADS_DIR / safe_filename).write_bytes(file_bytes)
 
@@ -516,6 +477,7 @@ async def retry_failed_upload_batches():
         for batch_id, item in pending.items()
     ]
     outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+
     retry_failures = []
     for (batch_id, item), outcome in zip(pending.items(), outcomes):
         if isinstance(outcome, Exception):
@@ -525,11 +487,12 @@ async def retry_failed_upload_batches():
                 "error": str(outcome),
             })
             continue
+
         pages = sorted({
             page
             for chunk in item["batch"]
             for page in (chunk.get("pages") or [])
-        }, engine.graph_name)
+        })
         engine.add_to_graph(
             outcome,
             item["filename"],
@@ -545,28 +508,45 @@ async def retry_failed_upload_batches():
             for failure in retry_failures
         }
 
-    item = next(iter(pending.values()))
-    filename = item["filename"]
-    week = item["week"]
-    document_id = item["document_id"]
+    batches_by_doc: dict[str, list[dict]] = {}
+    for item in pending.values():
+        document_id = item["document_id"]
+        batches_by_doc.setdefault(document_id, []).append(item)
+
     final_status = "partially_processed" if retry_failures else "done"
-    document_concepts = [c for c in engine.concepts if c["source"] == filename and c.get("week") == week]
-    document_edges = [e for e in engine.edges if e.get("source") == filename]
-    _update_document_status(
-        document_id,
-        final_status,
-        concepts=len(document_concepts),
-        relationships=len(document_edges),
-        error="Some extraction batches failed." if retry_failures else None,
-    )
+
+    for doc_id, items in batches_by_doc.items():
+        first_item = items[0]
+        filename = first_item["filename"]
+        week = first_item["week"]
+
+        document_concepts = [c for c in engine.concepts if c["source"] == filename and c.get("week") == week]
+        document_edges = [e for e in engine.edges if e.get("source") == filename]
+
+        _update_document_status(
+            doc_id,
+            final_status,
+            week=week,
+            concepts=len(document_concepts),
+            relationships=len(document_edges),
+            error="Some extraction batches failed." if retry_failures else None,
+        )
+
+    last_item = next(iter(pending.values()))
+    last_filename = last_item["filename"]
+    last_week = last_item["week"]
+    doc_concepts = [c for c in engine.concepts if c["source"] == last_filename and c.get("week") == last_week]
+    doc_edges = [e for e in engine.edges if e.get("source") == last_filename]
+
     engine.pipeline_status.update({
         "stage": final_status,
         "status": final_status,
         "failed_batches": retry_failures,
         "retryable": bool(retry_failures),
-        "raw_concepts": len(document_concepts),
-        "total_edges": len(document_edges),
+        "raw_concepts": len(doc_concepts),
+        "total_edges": len(doc_edges),
     })
+
     return engine.pipeline_status
 
 
@@ -574,8 +554,6 @@ async def retry_failed_upload_batches():
 async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_mentions: int = 1):
     if not os.getenv(LLM_API_KEY_ENV):
         raise HTTPException(status_code=503, detail="The AI Service is temporarily down. Please try again later.")
-
-    from app.state import client, set_engine
 
     upload_start = time.time()
     engine = get_engine()
@@ -587,7 +565,10 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
     parse_started = time.perf_counter()
     try:
         file_bytes = await file.read()
+        guard_file(file_bytes, safe_filename)
         pages = extract_text(file_bytes, safe_filename)
+    except HTTPException:
+        raise
     except Exception as error:
         logger.exception("upload_document_read_failed filename=%s", safe_filename)
         raise HTTPException(status_code=400, detail=str(error))
@@ -638,7 +619,7 @@ async def upload_pdf(file: UploadFile = File(...), max_nodes: int = None, min_me
 
 @router.get("/api/upload/status")
 async def get_pipeline_status():
-    from app.state import engine
+    engine = runtime_state.engine
     return engine.pipeline_status if engine is not None else {"stage": "idle"}
 
 
@@ -648,7 +629,11 @@ async def serve_uploaded_file(filename: str):
     upload_path = UPLOADS_DIR / safe_name
     if not upload_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(upload_path, media_type="application/pdf", headers={"Content-Disposition": f"inline; filename=\"{safe_name}\""})
+    return FileResponse(
+        upload_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+    )
 
 
 @router.get("/api/documents/file/{filename}")
