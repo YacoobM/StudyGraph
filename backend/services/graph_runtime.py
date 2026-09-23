@@ -75,7 +75,7 @@ def get_collection(chroma, project_id, user_id="default"):
 
 def call_llm(client, model, prompt, text_batch, max_tokens=1000):
     try:
-        limiter.acquire_sync(
+        limiter.acquire(
             estimate_tokens(prompt) + estimate_tokens(text_batch),
             max_tokens,
         )

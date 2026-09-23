@@ -226,8 +226,7 @@ Respond with ONLY this exact JSON structure:
 
         try:
             async with ENGINE_EXTRACTION_SEMAPHORE:
-                response = await asyncio.to_thread(
-                    call_llm,
+                response = await call_llm(
                     self.client,
                     self.llm_model,
                     prompt,

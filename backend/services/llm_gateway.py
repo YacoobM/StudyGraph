@@ -2,9 +2,7 @@ import asyncio
 import os
 import threading
 import time
-
 from app.config import LLM_PROVIDER
-
 
 class SharedTokenLimiter:
     def __init__(self, input_limit=7000, output_limit=1000, window_seconds=60.0):
@@ -37,17 +35,19 @@ class SharedTokenLimiter:
             return 0.0
         return max(self.window_seconds - (now - self._window_started), 0.1)
 
-    def acquire_sync(self, input_tokens, output_tokens):
-        while True:
-            with self._sync_lock:
-                wait = self._available_wait(input_tokens, output_tokens)
-            if wait == 0:
-                return
-            time.sleep(wait)
+    def acquire_sync(self, input_tokens: int, output_tokens: int) -> None:
+        """Synchronously acquire tokens. Blocks if necessary."""
+        with self._sync_lock:
+            wait_time = self._available_wait(input_tokens, output_tokens)
+        if wait_time > 0:
+            time.sleep(wait_time)
 
-    async def acquire(self, input_tokens, output_tokens):
-        await asyncio.to_thread(self.acquire_sync, input_tokens, output_tokens)
-
+    async def acquire(self, input_tokens: int, output_tokens: int) -> None:
+        """Asynchronously acquire tokens. Awaits if necessary."""
+        with self._sync_lock:
+            wait_time = self._available_wait(input_tokens, output_tokens)
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
 
 # The generic LLM_* settings override provider defaults. Groq preserves the
 # original conservative 7k input / 1k output budget when selected.
