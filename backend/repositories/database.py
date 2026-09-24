@@ -16,6 +16,7 @@ def init_db() -> None:
 			"""
 			CREATE TABLE IF NOT EXISTS users (
 				id            INTEGER PRIMARY KEY AUTOINCREMENT,
+				auth_user_id  TEXT,
 				email         TEXT    NOT NULL UNIQUE,
 				name          TEXT    NOT NULL,
 				password_hash TEXT    NOT NULL,
@@ -49,3 +50,7 @@ def init_db() -> None:
 			CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 			"""
 		)
+		columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+		if "auth_user_id" not in columns:
+			conn.execute("ALTER TABLE users ADD COLUMN auth_user_id TEXT")
+		conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id ON users(auth_user_id)")

@@ -7,7 +7,7 @@ import Inspector from '../components/Inspector.jsx'
 import NotesPane from '../components/NotesPane.jsx'
 import {
   listDocuments, uploadDocument, deleteDocument, fetchGraph, askQuestion,
-  getPipelineStatus, patchDocument, fetchDocumentStats,
+  getPipelineStatus, patchDocument, fetchDocumentStats, retryFailedUploadBatches,
 } from '../services/api.js'
 import '../styles/studygraph.css'
 import './Workspace.css'
@@ -52,6 +52,7 @@ export default function Workspace() {
   const [week, setWeek] = useState(1)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [canRetry, setCanRetry] = useState(false)
   const [drag, setDrag] = useState(false)
   const setBusyToast = (msg) => { setBusy(msg); setTimeout(() => setBusy(''), 1800) }
   const maxWeek = Math.max(1, ...graph.nodes.map((n) => n.week || 1))
@@ -231,11 +232,16 @@ export default function Workspace() {
     }
 
     setError('')
+    setCanRetry(false)
     setBusy(`Uploading ${file.name}…`)
     try {
-      await uploadDocument(file, 'llm', null, (s) => {
+      const result = await uploadDocument(file, 'llm', null, (s) => {
         if (s.stage === 'running') setBusy(`${s.operation || 'Processing'}…`)
       }, null)
+      if (result.raw?.stage === 'partially_processed') {
+        setError(`Some batches for ${file.name} could not be processed.`)
+        setCanRetry(true)
+      }
       setBusy('')
       await loadDocs()
       await loadGraph()          // the graph is rebuilt from the new concepts
@@ -244,6 +250,26 @@ export default function Workspace() {
       setBusy('')
       setError(`Could not process ${file.name}: ${e.message}`)
       loadDocs()
+    }
+  }
+
+  async function retryFailed() {
+    setCanRetry(false)
+    setError('')
+    setBusy('Retrying failed extraction batches…')
+    try {
+      const status = await retryFailedUploadBatches()
+      if (status.stage === 'partially_processed') {
+        setError('Some extraction batches still could not be processed.')
+        setCanRetry(true)
+      }
+      await loadDocs()
+      await loadGraph()
+    } catch (e) {
+      setError(`Could not retry failed batches: ${e.message}`)
+      setCanRetry(true)
+    } finally {
+      setBusy('')
     }
   }
 
@@ -331,7 +357,12 @@ export default function Workspace() {
         </header>
 
         {busy && <div className="ws-banner">{busy}</div>}
-        {error && <div className="ws-banner err">{error}</div>}
+        {error && (
+          <div className="ws-banner err">
+            <span>{error}</span>
+            {canRetry && <button onClick={retryFailed}>Retry failed batches</button>}
+          </div>
+        )}
 
         <section className="ws-body">
           {tab === 'graph' && (

@@ -1,4 +1,6 @@
 ﻿import sys
+import logging
+import time
 from pathlib import Path
 from collections import defaultdict, Counter
 
@@ -17,6 +19,7 @@ from dotenv import load_dotenv
 import asyncio
 import os
 import json
+from app.logging_config import configure_logging
 from groq import Groq
 from chromadb import Client
 from schemas.graph import GraphResponse
@@ -32,6 +35,7 @@ from services.graph_runtime import save_graph_json
 from services import evolution_data, graph_fusion
 
 load_dotenv()
+configure_logging()
 
 chroma = Client()
 
@@ -63,13 +67,12 @@ app.include_router(quiz_router)
 # (see backend/services/notes_service.py)
 app.include_router(notes_router)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 runtime_state.configure_runtime(client, chroma)
 set_graph_source(lambda: runtime_state.engine)
 set_notes_graph(lambda: runtime_state.engine)
 
-LLM_MODEL = "qwen/qwen3.6-27b"
-RAG_MODEL = "openai/gpt-oss-20b"
+logger = logging.getLogger(__name__)
 
 
 @app.get("/health")
@@ -171,6 +174,7 @@ async def get_graph():
             "relation": e["relation"],
             "summary": e.get("summary", ""),
             "context": e.get("context", ""),
+            "chunk_ids": e.get("chunk_ids", [e["chunk_id"]] if e.get("chunk_id") else []),
             "conflict_resolved": e.get("conflict_resolved", False)
         }
         for e in working_edges
@@ -262,6 +266,7 @@ async def fuse_knowledge_graph():
             detail="A document is still being processed. Fusion runs on its own once it finishes.",
         )
 
+    fusion_started = time.perf_counter()
     try:
         # fuse_graph is synchronous and makes blocking Groq calls. Left on the
         # event loop it would freeze every request — the upload status poll
@@ -277,6 +282,12 @@ async def fuse_knowledge_graph():
             "inferred_edges": len(engine.inferred_edges)
         })
 
+        logger.info(
+            "fusion_request_complete canonical_nodes=%d fused_edges=%d duration_ms=%.1f",
+            len(engine.canonical_nodes),
+            len(engine.fused_edges),
+            (time.perf_counter() - fusion_started) * 1000,
+        )
         return {
             "status": "success",
             "message": "Knowledge graph fusion complete",
@@ -289,6 +300,10 @@ async def fuse_knowledge_graph():
             "graph_saved_to": graph_save_path
         }
     except Exception as e:
+        logger.exception(
+            "fusion_request_failed duration_ms=%.1f",
+            (time.perf_counter() - fusion_started) * 1000,
+        )
         raise HTTPException(status_code=400, detail=str(e))
 
 
