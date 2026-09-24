@@ -81,7 +81,6 @@ const kindLabel = (n) => (n.kind === 'plan' ? `${n.days}-day plan` : 'Full notes
 // Badge text. The rail is 252px wide and these names run to forty characters,
 // so the extension goes and CSS truncates the rest; the full name is on the
 // title attribute.
-const docLabel = (file) => String(file || '').replace(/\.[^.]+$/, '')
 
 /**
  * The rail's contents. A plan groups by day number; a full note is one run
@@ -336,11 +335,11 @@ function SectionBody({ section }) {
       {section.relations?.length > 0 && (
         <>
           <div className="nt-block-label">Connections</div>
-          {section.relations.map(([from, verb, to], i) => (
+          {section.relations.map(([from, to, summary], i) => (
             <div className="nt-rel" key={i}>
               <span className="insp-pill">{from}</span>
-              <span className="nt-rel-verb">{verb}</span>
               <span className="insp-pill">{to}</span>
+              <p className="nt-rel-summary">{summary}</p>
             </div>
           ))}
         </>
@@ -437,7 +436,6 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
   const groups = useMemo(() => groupsFor(note), [note])
   // With one document every badge would read the same, so they earn their
   // place only once a note spans more than one.
-  const showBadges = note.docCount > 1
   const pct = pctOf(note.done, note.total)
   // The rail knows every section from the note, so it stays usable while the
   // body of the open one is still being written.
@@ -491,18 +489,7 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
                       onClick={(e) => { e.stopPropagation(); onToggleDone(s.index, !s.done) }}
                       title={s.done ? 'Mark not done' : 'Mark done'}
                     >✓</button>
-                    <div className="nt-rail-text">
-                      <div className="nt-rail-title">{s.title}</div>
-                      {showBadges && s.sources?.length > 0 && (
-                        <div className="nt-rail-badges">
-                          {s.sources.map((file) => (
-                            <span className="nt-rail-badge" key={file} title={file}>
-                              {docLabel(file)}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <div className="nt-rail-title">{s.title}</div>
                   </div>
                 ))}
               </div>

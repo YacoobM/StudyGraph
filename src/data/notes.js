@@ -70,13 +70,7 @@ function createdLabel(seconds) {
   return days === 1 ? 'yesterday' : days < 7 ? `${days} days ago` : 'last week'
 }
 
-/**
- * A note as the list cards and the contents rail want it.
- *
- * `sources` is every document a section's concepts came from, kept as a list.
- * Once fusion has merged the graph a section routinely spans more than one,
- * so there is no single document to reduce it to — the rail badges them all.
- */
+/** A note as the list cards and the contents rail want it. */
 function toNote(raw) {
   return {
     id: raw.id,
@@ -91,7 +85,6 @@ function toNote(raw) {
       id: s.id,
       title: s.title,
       day: s.day,
-      sources: s.sources || [],
       done: isDone(raw.id, i, s),
     })),
   }
@@ -156,7 +149,12 @@ function toSection(raw, noteId, index) {
     done: isDone(noteId, index, raw),
     concepts: raw.concepts || [],
     sources: (raw.sources || []).map((file) => ({ file })),
-    relations: (raw.relations || []).map((e) => [e.from, e.relation, e.to]),
+    // Only links with a summary are shown. A bare label from extraction or
+    // fusion is often wrong ("abstract data type is a type of data
+    // structure"), and the summary is the only part that says what the link is.
+    relations: (raw.relations || [])
+      .filter((e) => (e.summary || '').trim())
+      .map((e) => [e.from, e.to, e.summary.trim()]),
 
     lead: body.lead || '',
     body: (body.body || []).map(toParagraph),

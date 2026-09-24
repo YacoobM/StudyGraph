@@ -399,18 +399,18 @@ export async function fetchDocumentStats() {
 export async function planNote(documentIds, days = null) {
   return apiFetch(`${API_BASE_URL}/api/notes/plan`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: await authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ document_ids: documentIds, days }),
   })
 }
 
 /** Notes planned in this backend process, newest first. */
 export async function fetchNotes() {
-  return apiFetch(`${API_BASE_URL}/api/notes`, { headers: authHeaders() })
+  return apiFetch(`${API_BASE_URL}/api/notes`, { headers: await authHeaders() })
 }
 
 export async function fetchNote(noteId) {
-  return apiFetch(`${API_BASE_URL}/api/notes/${noteId}`, { headers: authHeaders() })
+  return apiFetch(`${API_BASE_URL}/api/notes/${noteId}`, { headers: await authHeaders() })
 }
 
 /**
@@ -423,7 +423,7 @@ export async function fetchNote(noteId) {
 export async function writeSection(sectionId, { signal } = {}) {
   return apiFetch(`${API_BASE_URL}/api/notes/sections/${sectionId}/write`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: await authHeaders(),
     signal,
   })
 }

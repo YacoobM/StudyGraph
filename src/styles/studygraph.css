@@ -2722,14 +2722,8 @@ input[type="range"].scrub::-webkit-slider-thumb {
 .nt-rail-item{ display:flex; gap:11px; padding:9px 10px; border-radius:9px; cursor:pointer; align-items:flex-start; }
 .nt-rail-item:hover{ background:#EAE7DE; }
 .nt-rail-item.active{ background:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.06); }
-.nt-rail-title{ font-size:13px; font-weight:500; line-height:1.4; color:var(--ink-soft); }
-/* Title and its document badges stack; min-width:0 lets a badge truncate
-   rather than widen the 252px rail. */
-.nt-rail-text{ flex:1; min-width:0; }
-.nt-rail-badges{ display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
-.nt-rail-badge{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:10.5px; line-height:1.5; color:#9A9E9C; border:1px solid var(--line);
-  border-radius:100px; padding:1px 7px; }
+/* min-width:0 lets a long title wrap instead of widening the 252px rail. */
+.nt-rail-title{ flex:1; min-width:0; font-size:13px; font-weight:500; line-height:1.4; color:var(--ink-soft); }
 .nt-rail-item.active .nt-rail-title{ color:var(--ink); font-weight:600; }
 /* .qz-check is styled as a span in the quiz study plan; as a button it needs
    the browser chrome cleared and its own done rule, since the quiz's is
@@ -2769,7 +2763,7 @@ input[type="range"].scrub::-webkit-slider-thumb {
 .nt-term-name{ font-weight:700; width:168px; flex-shrink:0; color:var(--ink); }
 .nt-term-def{ color:var(--ink-soft); line-height:1.55; }
 .nt-rel{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; font-size:13px; padding:6px 0; }
-.nt-rel-verb{ font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#9A9E9C; }
+.nt-rel-summary{ flex-basis:100%; font-size:12.5px; line-height:1.55; color:var(--ink-soft); margin-top:2px; }
 .nt-foot{ display:flex; align-items:center; justify-content:space-between; gap:14px; border-top:1px solid var(--line); margin-top:34px; padding-top:20px; flex-wrap:wrap; }
 .nt-done-btn{ border:1px solid var(--line); background:#fff; color:var(--ink); font-size:13px; font-weight:500; padding:9px 14px; border-radius:8px; display:inline-flex; align-items:center; gap:8px; }
 .nt-done-btn:hover{ border-color:var(--ink-soft); }
