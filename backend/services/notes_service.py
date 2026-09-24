@@ -551,7 +551,7 @@ def _degree(edges: list[dict]) -> dict[str, int]:
 # prompt
 # ---------------------------------------------------------------------------
 
-_PLAN_PROMPT_VERSION = "notes-plan-v1"
+_PLAN_PROMPT_VERSION = "notes-plan-v2"
 _DIVIDE_PROMPT_VERSION = "notes-divide-v1"
 
 _DIVIDE_SYSTEM = (
@@ -616,6 +616,12 @@ _PLAN_SYSTEM = (
     f"- No section may hold more than {MAX_SECTION_CONCEPTS} concepts. A group "
     "heading past that covers two units, so split it at the most natural seam "
     "and title each half for what it teaches.\n"
+    f"- No section may hold fewer than {MIN_SECTION_CONCEPTS} concepts. A lone "
+    "concept is a bullet, not a section: there is too little behind it to write "
+    "one from. Fold it into the section holding its nearest neighbours instead.\n"
+    "- Make the sections roughly even in size. A section far larger than the "
+    "others is two units under one heading, and one far smaller has too little "
+    "to write a section from.\n"
     "- ORDER BEFORE lists teaching order: if 'A before B' appears, the section "
     "holding A must come before the section holding B, or both must be in the "
     "same section. Respect every one of them.\n"
@@ -1680,6 +1686,25 @@ async def write_body(section: dict) -> tuple[Optional[dict], Optional[float]]:
     return body, None
 
 
+def _usage(response) -> dict:
+    """
+    What the call actually spent, as far as the response reports it.
+
+    thoughts is the one that matters for batching. gemini-2.5-flash reasons
+    before it answers and no thinking_config is set here, so whatever it
+    spends thinking comes out of the same 65,536-token response budget the
+    section bodies have to fit in. Batching N sections into one call cannot
+    be sized without it, and it is free to read — the number rides along on
+    a response already paid for.
+    """
+    meta = getattr(response, "usage_metadata", None)
+    if meta is None:
+        return {}
+    fields = ("prompt_token_count", "candidates_token_count",
+              "thoughts_token_count", "total_token_count")
+    return {f: getattr(meta, f, None) for f in fields}
+
+
 async def _generate_body(client, prompt: str) -> tuple[Optional[dict], Optional[float]]:
     """
     One Gemini call for a section body, retried on transient failures and
@@ -1753,8 +1778,21 @@ async def _generate_body(client, prompt: str) -> tuple[Optional[dict], Optional[
             print(f"Notes write: unusable response — {exc}")
             return None, None
 
-    body = parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
-    return normalise_unicode(body), None
+    body = normalise_unicode(
+        parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
+    )
+
+    used = _usage(response)
+    if used:
+        print(f"Notes write: tokens in={used.get('prompt_token_count')} "
+              f"out={used.get('candidates_token_count')} "
+              f"thoughts={used.get('thoughts_token_count')} "
+              f"total={used.get('total_token_count')}")
+        # Written onto the body as well as logged. The log lives in a terminal
+        # nobody kept; the cache is on disk and can be read back later.
+        body["usage"] = used
+
+    return body, None
 
 
 # ---------------------------------------------------------------------------
