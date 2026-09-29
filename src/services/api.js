@@ -7,6 +7,8 @@ async function handleResponse(response) {
   if (!response.ok) {
     const err = new Error(data?.detail || data?.error || response?.statusText || 'API request failed')
     err.response = { data, status: response.status }
+    const retryAfter = Number(response.headers.get('Retry-After'))
+    if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter
     throw err
   }
   return data
@@ -185,7 +187,11 @@ async function apiFetch(url, options = {}) {
   let response
   try {
     response = await fetch(url, options)
-  } catch {
+  } catch (e) {
+    // A caller that aborted on purpose gets its own error back. Reported as
+    // offline it would tell the reader to go and start a backend that is
+    // already running.
+    if (e?.name === 'AbortError') throw e
     const err = new Error(
       `Cannot reach the backend at ${API_BASE_URL}. Start it with: python dev_server.py`
     )
@@ -377,4 +383,47 @@ export async function saveQuizResult(quizId, correct, total, points) {
 /** Per-document concept/edge counts, used to reconcile stuck rows. */
 export async function fetchDocumentStats() {
   return apiFetch(`${API_BASE_URL}/api/documents/stats`, { headers: await authHeaders() })
+}
+
+// ---------------------------------------------------------------------------
+// revision notes
+//
+// Two steps, deliberately split. Planning groups the concepts into sections
+// and leaves every body empty; writing fills one body in and is only called
+// when a reader opens that section. Both are slow — planning runs one or more
+// LLM calls, writing runs twenty to thirty seconds — so callers need a busy
+// state for each.
+// ---------------------------------------------------------------------------
+
+/** Plans a note over the given documents. `days` splits it; null does not. */
+export async function planNote(documentIds, days = null) {
+  return apiFetch(`${API_BASE_URL}/api/notes/plan`, {
+    method: 'POST',
+    headers: await authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ document_ids: documentIds, days }),
+  })
+}
+
+/** Notes planned in this backend process, newest first. */
+export async function fetchNotes() {
+  return apiFetch(`${API_BASE_URL}/api/notes`, { headers: await authHeaders() })
+}
+
+export async function fetchNote(noteId) {
+  return apiFetch(`${API_BASE_URL}/api/notes/${noteId}`, { headers: await authHeaders() })
+}
+
+/**
+ * Writes one section's prose, or returns what was written before.
+ *
+ * Slow on the first open and immediate afterwards — the response's
+ * `generated` flag says which happened, and the section comes back with its
+ * `body` filled in either way.
+ */
+export async function writeSection(sectionId, { signal } = {}) {
+  return apiFetch(`${API_BASE_URL}/api/notes/sections/${sectionId}/write`, {
+    method: 'POST',
+    headers: await authHeaders(),
+    signal,
+  })
 }

@@ -23,6 +23,7 @@ from schemas.graph import GraphResponse
 from schemas.query import QueryRequest
 from api.routes.auth import router as auth_router
 from api.routes.documents import router as documents_router
+from api.routes.notes import router as notes_router, set_graph_source as set_notes_graph
 from api.routes.quiz import router as quiz_router, set_graph_source
 from api.routes.upload import router as upload_router
 from app import state as runtime_state
@@ -71,9 +72,15 @@ app.include_router(upload_router)
 
 app.include_router(quiz_router)
 
+# Revision-note planning and writing from the extracted graph
+# (see backend/services/notes_service.py)
+app.include_router(notes_router)
+
 client = create_llm_client(os.environ[LLM_API_KEY_ENV])
+
 runtime_state.configure_runtime(client, chroma)
 set_graph_source(lambda: runtime_state.engine)
+set_notes_graph(lambda: runtime_state.engine)
 
 logger = get_logger(__name__)
 

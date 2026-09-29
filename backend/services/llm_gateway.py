@@ -53,7 +53,7 @@ class SharedTokenLimiter:
 # original conservative 7k input / 1k output budget when selected.
 _provider_limits = {
     "openai": ("60000", "12000"),
-    "groq": ("7000", "1000"),
+    "groq": ("7000", "2000"),
 }[LLM_PROVIDER]
 _DEFAULT_INPUT_LIMIT = int(os.getenv("LLM_INPUT_TOKENS_PER_MINUTE", _provider_limits[0]))
 _DEFAULT_OUTPUT_LIMIT = int(os.getenv("LLM_OUTPUT_TOKENS_PER_MINUTE", _provider_limits[1]))
