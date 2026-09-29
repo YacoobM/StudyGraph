@@ -95,13 +95,16 @@ def create_session(user_id: int) -> str:
     """
     token = secrets.token_urlsafe(32)
     now = time.time()
-    with connect() as conn:
+    conn = connect()
+    try:
         conn.execute(
             "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?,?,?,?)",
             (token, user_id, now, now + SESSION_TTL_SECONDS),
         )
+        conn.commit()
+    finally:
+        conn.close()
     return token
-
 
 # === Supabase Integration ===
 
@@ -200,15 +203,15 @@ def current_user(authorization: str = Header(default="")) -> sqlite3.Row:
             or email.split("@", 1)[0]
         )
         password_hash = hash_password(secrets.token_urlsafe(32))
-
+        
         conn.execute(
 			"""
 			INSERT INTO users
 				(auth_user_id, email, name, password_hash, salt, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(email) DO UPDATE SET
-				auth_user_id = COALESCE(users.auth_user_id, excluded.auth_user_id),
-				name = COALESCE(users.name, excluded.name)
+                auth_user_id = excluded.auth_user_id,
+                name = excluded.name
 			""",
 			(
 				auth_user_id,
@@ -219,6 +222,8 @@ def current_user(authorization: str = Header(default="")) -> sqlite3.Row:
 				time.time(),
 			),
 		)
+
+        conn.commit()
 
         # Fetch the final user record
         row = conn.execute(
