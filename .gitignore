@@ -53,3 +53,8 @@ uploads/
 
 # Fusion run logs and verdict cache (regenerated every run)
 backend/data/outputs/fusion/
+
+backend/eval/docs
+
+backend/eval/data
+backend/eval/reports
