@@ -16,7 +16,7 @@ from app.logging_config import get_logger
 logger = get_logger(__name__)
 
 # Initialize EasyOCR reader (better for handwriting than Paddle)
-reader = easyocr.Reader(['en'], gpu=False)
+reader = None
 _ai_client = None
 
 def get_ai_client():
@@ -45,6 +45,9 @@ def extract_text(file_bytes, filename=None):
     elif suffix == ".pptx":
         return extract_pptx(file_bytes)
 
+    elif suffix in [".txt", ".md"]:
+        return [{"page": 1, "text": file_bytes.decode("utf-8")}]
+
     elif suffix in [".png", ".jpg", ".jpeg"]:
         return extract_image_ocr(file_bytes)
 
@@ -59,19 +62,26 @@ def extract_pdf(file_bytes):
 
 def extract_word_doc(file_bytes):
     document = Document(BytesIO(file_bytes))
-
-    text = "\n".join(
-        para.text
-        for para in document.paragraphs
-        if para.text.strip()
-    )
-
-    return [
-        {
-            "page": 1,
-            "text": text
-        }
-    ]
+    pages = []
+    current_text = ""
+    chars_accumulated = 0
+    
+    for para in document.paragraphs:
+        if para.text.strip():
+            current_text += para.text + "\n"
+            chars_accumulated += len(para.text) + 1
+            
+            # Split into pages at ~5000 chars (5x your chunk size)
+            # This gives get_chunks() room to create multiple chunks per page
+            if chars_accumulated > 5000:
+                pages.append({"page": len(pages) + 1, "text": current_text.strip()})
+                current_text = ""
+                chars_accumulated = 0
+    
+    if current_text.strip():
+        pages.append({"page": len(pages) + 1, "text": current_text.strip()})
+    
+    return pages if pages else [{"page": 1, "text": ""}]
         
 def extract_pptx(file_bytes):
     prs = Presentation(BytesIO(file_bytes))
@@ -94,6 +104,9 @@ def extract_pptx(file_bytes):
 
 
 async def extract_image_ocr(file_bytes):
+    global reader
+    if reader is None:
+        reader = easyocr.Reader(['en'], gpu=False)
     # Decode image from input bytes
     np_arr = np.frombuffer(file_bytes, np.uint8)
     image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
