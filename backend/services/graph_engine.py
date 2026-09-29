@@ -23,8 +23,8 @@ from services.graph_runtime import call_llm
 
 ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
 CROSS_WEEK_CONCEPT_COUNT = 10
-DEFAULT_CHUNK_SIZE = 5600
-DEFAULT_CHUNK_OVERLAP = 800
+DEFAULT_CHUNK_SIZE = 1024
+DEFAULT_CHUNK_OVERLAP = 150
 logger = get_logger(__name__)
 
 PRUNED_REACTIVATION_SIMILARITY = 0.85
@@ -846,7 +846,7 @@ Respond with ONLY this exact JSON structure:
         RAG Query: Retrieves text chunks and optionally uses graph context.
         Returns concise, well-cited answers.
         """
-        retrieved = self.retrieve_chunks(query, top_k=3)
+        retrieved = self.retrieve_chunks(query, top_k=5)
 
         if not retrieved:
             return {
