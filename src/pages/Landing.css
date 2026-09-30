@@ -17,10 +17,10 @@
   /* Section palette. Each band below the hero gets its own colour so the page
      reads as distinct sections; the "How it works" band reuses the graph
      canvas brown so it sits in the same family as the demo above it. */
-  --lp-yellow: #f2c14e;          /* headings, icons, numbers on brown */
-  --lp-yellow-soft: #eadba8;     /* body text on brown */
+  --lp-yellow: #f2c14e; /* headings, icons, numbers on brown */
+  --lp-yellow-soft: #eadba8; /* body text on brown */
   --lp-yellow-line: rgba(242, 193, 78, 0.32);
-  --lp-cta-bg: #4a2e1c;          /* final CTA band (espresso brown) */
+  --lp-cta-bg: #4a2e1c; /* final CTA band (espresso brown) */
 
   background: var(--bg-0);
   color: var(--text-0);
@@ -30,7 +30,9 @@
 
 .lp *,
 .lp *::before,
-.lp *::after { box-sizing: border-box; }
+.lp *::after {
+  box-sizing: border-box;
+}
 
 /* Every interactive element gets the same visible focus ring. */
 .lp :focus-visible {
@@ -51,7 +53,9 @@
   font-size: 13px;
   font-weight: 600;
 }
-.lp-skip:focus { left: 16px; }
+.lp-skip:focus {
+  left: 16px;
+}
 
 /* ---------------- buttons ---------------- */
 
@@ -68,23 +72,43 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
-.lp-btn-lg { padding: 12px 22px; font-size: 14.5px; }
+.lp-btn-lg {
+  padding: 12px 22px;
+  font-size: 14.5px;
+}
 
-.lp-btn-solid { background: var(--accent); color: #fff; }
-.lp-btn-solid:hover { background: var(--accent-hover); }
+.lp-btn-solid {
+  background: var(--accent);
+  color: #fff;
+}
+.lp-btn-solid:hover {
+  background: var(--accent-hover);
+}
 
 .lp-btn-outline {
   background: transparent;
   border-color: var(--border-strong);
   color: var(--text-0);
 }
-.lp-btn-outline:hover { background: var(--bg-2); border-color: var(--text-3); }
+.lp-btn-outline:hover {
+  background: var(--bg-2);
+  border-color: var(--text-3);
+}
 
-.lp-btn-quiet { background: transparent; color: var(--text-1); }
-.lp-btn-quiet:hover { color: var(--text-0); background: var(--bg-2); }
+.lp-btn-quiet {
+  background: transparent;
+  color: var(--text-1);
+}
+.lp-btn-quiet:hover {
+  color: var(--text-0);
+  background: var(--bg-2);
+}
 
 /* ---------------- navbar ---------------- */
 
@@ -120,7 +144,10 @@
   letter-spacing: -0.02em;
   color: var(--text-0);
 }
-.lp-wordmark-sm { font-size: 14px; cursor: default; }
+.lp-wordmark-sm {
+  font-size: 14px;
+  cursor: default;
+}
 
 .lp-nav-links {
   display: flex;
@@ -138,11 +165,20 @@
   font-weight: 500;
   color: var(--text-2);
   cursor: pointer;
-  transition: color 140ms ease, background 140ms ease;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
 }
-.lp-nav-links button:hover { color: var(--text-0); background: var(--bg-2); }
+.lp-nav-links button:hover {
+  color: var(--text-0);
+  background: var(--bg-2);
+}
 
-.lp-nav-actions { display: flex; align-items: center; gap: 8px; }
+.lp-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 /* ---------------- hero ---------------- */
 
@@ -180,7 +216,9 @@
   gap: 11px;
 }
 
-.lp-hero-visual { min-width: 0; }
+.lp-hero-visual {
+  min-width: 0;
+}
 
 /* ---------------- graph demo panel ---------------- */
 
@@ -204,17 +242,33 @@
   color: var(--lp-night-dim);
 }
 
-.lp-demo-title { font-weight: 600; letter-spacing: 0.01em; }
+.lp-demo-title {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
 
-.lp-demo-stats { display: flex; gap: 14px; font-family: var(--font-mono); }
-.lp-demo-stats b { color: var(--lp-night-text); font-weight: 600; }
-.lp-demo-new { color: #d8823f; }
+.lp-demo-stats {
+  display: flex;
+  gap: 14px;
+  font-family: var(--font-mono);
+}
+.lp-demo-stats b {
+  color: var(--lp-night-text);
+  font-weight: 600;
+}
+.lp-demo-new {
+  color: #d8823f;
+}
 
 .lp-demo-canvas {
   position: relative;
   height: clamp(320px, 36vw, 448px);
 }
-.lp-demo-canvas svg { width: 100%; height: 100%; display: block; }
+.lp-demo-canvas svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
 
 .lp-demo-timeline {
   display: flex;
@@ -242,14 +296,20 @@
   font-weight: 600;
   color: var(--lp-night-dim);
   cursor: pointer;
-  transition: color 160ms ease, border-color 160ms ease;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease;
 }
-.lp-demo-step:hover { color: var(--lp-night-text); }
+.lp-demo-step:hover {
+  color: var(--lp-night-text);
+}
 .lp-demo-step.on {
   color: var(--lp-night-text);
   border-color: var(--lp-night-line);
 }
-.lp-demo-step:focus-visible { outline-color: var(--lp-night-dim); }
+.lp-demo-step:focus-visible {
+  outline-color: var(--lp-night-dim);
+}
 
 .lp-demo-dot {
   width: 7px;
@@ -258,7 +318,10 @@
   background: currentColor;
   opacity: 0.55;
 }
-.lp-demo-step.on .lp-demo-dot { background: #c1652f; opacity: 1; }
+.lp-demo-step.on .lp-demo-dot {
+  background: #c1652f;
+  opacity: 1;
+}
 
 .lp-demo-replay {
   margin-left: 4px;
@@ -271,10 +334,17 @@
   font-weight: 600;
   color: var(--lp-night-dim);
   cursor: pointer;
-  transition: color 160ms ease, border-color 160ms ease;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease;
 }
-.lp-demo-replay:hover { color: var(--lp-night-text); border-color: rgba(255, 255, 255, 0.24); }
-.lp-demo-replay:focus-visible { outline-color: var(--lp-night-dim); }
+.lp-demo-replay:hover {
+  color: var(--lp-night-text);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+.lp-demo-replay:focus-visible {
+  outline-color: var(--lp-night-dim);
+}
 
 .lp-demo-caption {
   margin: 0;
@@ -301,19 +371,37 @@
   background: var(--lp-night);
   color: var(--lp-yellow);
 }
-.lp-section-night :focus-visible { outline-color: var(--lp-yellow); }
-.lp-section-night .lp-eyebrow { color: var(--lp-yellow); opacity: 0.8; }
-.lp-section-night .lp-section-head h2 { color: var(--lp-yellow); }
-.lp-section-night .lp-section-head p { color: var(--lp-yellow-soft); }
-.lp-section-night .lp-step h3 { color: var(--lp-yellow); }
-.lp-section-night .lp-step p { color: var(--lp-yellow-soft); }
-.lp-section-night .lp-step-num { color: var(--lp-yellow); opacity: 0.7; }
+.lp-section-night :focus-visible {
+  outline-color: var(--lp-yellow);
+}
+.lp-section-night .lp-eyebrow {
+  color: var(--lp-yellow);
+  opacity: 0.8;
+}
+.lp-section-night .lp-section-head h2 {
+  color: var(--lp-yellow);
+}
+.lp-section-night .lp-section-head p {
+  color: var(--lp-yellow-soft);
+}
+.lp-section-night .lp-step h3 {
+  color: var(--lp-yellow);
+}
+.lp-section-night .lp-step p {
+  color: var(--lp-yellow-soft);
+}
+.lp-section-night .lp-step-num {
+  color: var(--lp-yellow);
+  opacity: 0.7;
+}
 .lp-section-night .lp-step-icon {
   background: rgba(242, 193, 78, 0.06);
   border-color: var(--lp-yellow-line);
   color: var(--lp-yellow);
 }
-.lp-section-night .lp-step:hover .lp-step-icon { border-color: var(--lp-yellow); }
+.lp-section-night .lp-step:hover .lp-step-icon {
+  border-color: var(--lp-yellow);
+}
 
 .lp-section-head {
   max-width: var(--lp-max);
@@ -365,10 +453,15 @@
   padding-top: 8px;
   opacity: 0;
   transform: translateY(10px);
-  transition: opacity 520ms ease, transform 520ms ease;
+  transition:
+    opacity 520ms ease,
+    transform 520ms ease;
   transition-delay: calc(var(--i) * 110ms);
 }
-.lp-process.is-in .lp-step { opacity: 1; transform: none; }
+.lp-process.is-in .lp-step {
+  opacity: 1;
+  transform: none;
+}
 
 /* No connector rule between the desktop steps: the numbering carries the
    order on its own, and the rules cut across the row. The vertical spine in
@@ -393,9 +486,14 @@
   border-radius: var(--radius-md);
   background: var(--bg-1);
   color: var(--accent);
-  transition: border-color 160ms ease, transform 160ms ease;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
 }
-.lp-step-icon svg { width: 19px; height: 19px; }
+.lp-step-icon svg {
+  width: 19px;
+  height: 19px;
+}
 
 .lp-step:hover .lp-step-icon {
   border-color: var(--accent);
@@ -441,7 +539,9 @@
   border-radius: var(--radius-lg);
   transition: border-color 160ms ease;
 }
-.lp-benefit:hover { border-color: var(--border-strong); }
+.lp-benefit:hover {
+  border-color: var(--border-strong);
+}
 
 .lp-benefit h3 {
   margin: 0 0 9px;
@@ -466,7 +566,9 @@
   background: var(--lp-cta-bg);
   color: var(--lp-yellow);
 }
-.lp-cta :focus-visible { outline-color: var(--lp-yellow); }
+.lp-cta :focus-visible {
+  outline-color: var(--lp-yellow);
+}
 
 .lp-cta h2 {
   margin: 0;
@@ -481,8 +583,13 @@
   font-size: 15px;
   color: var(--lp-yellow-soft);
 }
-.lp-cta .lp-btn-solid { background: var(--lp-yellow); color: #2a1a0e; }
-.lp-cta .lp-btn-solid:hover { background: #f7d27a; }
+.lp-cta .lp-btn-solid {
+  background: var(--lp-yellow);
+  color: #2a1a0e;
+}
+.lp-cta .lp-btn-solid:hover {
+  background: #f7d27a;
+}
 
 /* ---------------- footer ---------------- */
 
@@ -505,7 +612,9 @@
   flex-wrap: wrap;
   gap: 4px 10px;
 }
-.lp-foot-sep { color: var(--text-3); }
+.lp-foot-sep {
+  color: var(--text-3);
+}
 .lp-foot-credit {
   font-size: 12px;
   font-weight: 600;
@@ -524,13 +633,22 @@
     padding-top: 52px;
     padding-bottom: 60px;
   }
-  .lp-hero-copy p { max-width: 58ch; }
-  .lp-benefits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-hero-copy p {
+    max-width: 58ch;
+  }
+  .lp-benefits {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 860px) {
-  .lp-nav-links { display: none; }
-  .lp-section { padding-top: 58px; padding-bottom: 58px; }
+  .lp-nav-links {
+    display: none;
+  }
+  .lp-section {
+    padding-top: 58px;
+    padding-bottom: 58px;
+  }
 
   /* Vertical connected timeline. The connector becomes the spine on the
      left, running from each marker down to the next. */
@@ -544,7 +662,7 @@
   }
   /* The vertical spine, running from each marker down to the next. */
   .lp-step::after {
-    content: '';
+    content: "";
     position: absolute;
     top: 44px;
     bottom: -4px;
@@ -556,30 +674,66 @@
     transition: transform 560ms ease;
     transition-delay: calc(var(--i) * 110ms + 180ms);
   }
-  .lp-process.is-in .lp-step::after { transform: scaleY(1); }
-  .lp-section-night .lp-step::after { background: var(--lp-yellow-line); }
-  .lp-step:last-child::after { display: none; }
+  .lp-process.is-in .lp-step::after {
+    transform: scaleY(1);
+  }
+  .lp-section-night .lp-step::after {
+    background: var(--lp-yellow-line);
+  }
+  .lp-step:last-child::after {
+    display: none;
+  }
   .lp-step-marker {
     position: static;
     margin-bottom: 8px;
   }
-  .lp-step-icon { position: absolute; left: 0; top: 0; }
-  .lp-step p { padding-right: 0; }
+  .lp-step-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+  .lp-step p {
+    padding-right: 0;
+  }
 
-  .lp-benefits { grid-template-columns: minmax(0, 1fr); }
+  .lp-benefits {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 560px) {
-  .lp { --lp-gutter: 16px; }
-  .lp-nav-inner { gap: 12px; }
-  .lp-nav-actions .lp-btn { padding: 8px 12px; font-size: 13px; }
-  .lp-hero { padding-top: 40px; }
-  .lp-hero-actions .lp-btn { flex: 1 1 auto; }
-  .lp-demo-bar { font-size: 11px; }
-  .lp-demo-stats { gap: 10px; }
-  .lp-demo-canvas { height: 280px; }
-  .lp-demo-timeline { padding: 12px 14px 4px; }
-  .lp-cta { padding-top: 60px; padding-bottom: 64px; }
+  .lp {
+    --lp-gutter: 16px;
+  }
+  .lp-nav-inner {
+    gap: 12px;
+  }
+  .lp-nav-actions .lp-btn {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .lp-hero {
+    padding-top: 40px;
+  }
+  .lp-hero-actions .lp-btn {
+    flex: 1 1 auto;
+  }
+  .lp-demo-bar {
+    font-size: 11px;
+  }
+  .lp-demo-stats {
+    gap: 10px;
+  }
+  .lp-demo-canvas {
+    height: 280px;
+  }
+  .lp-demo-timeline {
+    padding: 12px 14px 4px;
+  }
+  .lp-cta {
+    padding-top: 60px;
+    padding-bottom: 64px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -590,6 +744,11 @@
     transition-duration: 0.001ms !important;
     transition-delay: 0ms !important;
   }
-  .lp-step { opacity: 1; transform: none; }
-  .lp-step::after { transform: none; }
+  .lp-step {
+    opacity: 1;
+    transform: none;
+  }
+  .lp-step::after {
+    transform: none;
+  }
 }

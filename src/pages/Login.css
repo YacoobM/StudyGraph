@@ -75,10 +75,14 @@
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-2);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
-.sg-auth .seg button:hover { color: var(--text-0); }
+.sg-auth .seg button:hover {
+  color: var(--text-0);
+}
 
 .sg-auth .seg button.on {
   background: var(--bg-elev);
@@ -123,9 +127,15 @@
   transition: border-color 0.15s ease;
 }
 
-.sg-auth .sg-field input::placeholder { color: var(--text-3); }
-.sg-auth .sg-field input:focus { border-color: var(--accent); }
-.sg-auth .sg-field input.bad { border-color: var(--danger); }
+.sg-auth .sg-field input::placeholder {
+  color: var(--text-3);
+}
+.sg-auth .sg-field input:focus {
+  border-color: var(--accent);
+}
+.sg-auth .sg-field input.bad {
+  border-color: var(--danger);
+}
 
 .sg-auth .sg-field .hint {
   margin-top: 5px;
@@ -141,8 +151,12 @@
 
 /* Password reveal. This replaces a confirm-password field: being able to read
    what you typed does the same job without typing it twice. */
-.sg-auth .pw-wrap { position: relative; }
-.sg-auth .pw-wrap input { padding-right: 62px; }
+.sg-auth .pw-wrap {
+  position: relative;
+}
+.sg-auth .pw-wrap input {
+  padding-right: 62px;
+}
 
 .sg-auth .pw-toggle {
   position: absolute;
@@ -173,7 +187,7 @@
   border: none;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: var(--bg-0);           /* dark text on the teal, for contrast */
+  color: var(--bg-0); /* dark text on the teal, for contrast */
   cursor: pointer;
   font-family: inherit;
   font-size: 15px;
@@ -181,8 +195,13 @@
   transition: background 0.15s ease;
 }
 
-.sg-auth .auth-submit:hover:not(:disabled) { background: var(--accent-hover); }
-.sg-auth .auth-submit:disabled { opacity: 0.55; cursor: default; }
+.sg-auth .auth-submit:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.sg-auth .auth-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 
 .sg-auth .auth-formerr {
   margin-top: 15px;

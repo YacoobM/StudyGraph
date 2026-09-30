@@ -43,106 +43,15 @@ async function pollUntilDone(pollFn, { intervalMs = 1500, timeoutMs = 10 * 60 * 
   }
 }
 
-
-
-// Backend hardcodes the model server-side and has no /api/models route.
-export async function listModels() {
-  return {
-    providers: [
-      {
-        id: 'groq',
-        name: 'Groq',
-        available: true,
-        env_var: 'GROQ_API_KEY',
-        models: [{ id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B (server-fixed)' }],
-      },
-    ],
-    default: { provider: 'groq', model: 'llama-3.3-70b-versatile' },
-    note: 'Backend ignores the selected model — picker is currently cosmetic.',
-  }
-}
-
-
-
-
-export async function generateGraph(_docIds, _provider, _model) {
-
-  await safeFetchJson(`${API_BASE_URL}/api/fuse`, { method: 'POST' })
-  return fetchGraph()
-}
-
-// Raw GET /api/graph, with no /api/fuse call — used to restore whatever
-// graph the backend already has (e.g. on mount) without re-triggering
-// fusion. Same response shape generateGraph() resolves to.
 export async function fetchGraph() {
   return safeFetchJson(`${API_BASE_URL}/api/graph`, { method: 'GET' })
 }
 
-export function getDocumentFileUrl(filename) {
-  return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`
-}
 
-// Clears cached summaries/comparisons for a concept so the next description/
-// evolution fetch regenerates them from Groq — the way to recover a concept
-// whose cached summary is the raw-excerpt fallback (see is_fallback on
-// fetchConceptDescription/fetchConcept) or is just wrong for any reason.
 export async function regenerateConcept(conceptName) {
   return safeFetchJson(`${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`, {
     method: 'POST',
   })
-}
-
-function buildGraphPayload(raw) {
-  if (!raw) return { nodes: [], relationships: [], stats: {} }
-
-  const nodes = Array.isArray(raw.nodes)
-    ? raw.nodes.map((node) => {
-      const { id, name, description, source, is_canonical, color, appears_in_weeks, ...rest } = node
-      return {
-        id,
-        label: name || 'Concept',
-        // Use the color from the backend, with a fallback for older data structures.
-        color: color || (is_canonical ? '#4D7C0F' : '#6D28D9'),
-        properties: {
-          ...rest,
-          ...(name ? { name } : {}),
-          ...(description ? { description } : {}),
-          ...(source ? { source } : {}),
-          ...(appears_in_weeks !== undefined ? { appears_in_weeks } : {}),
-        },
-      }
-    })
-    : []
-
-  const relationshipsSource = raw.edges || raw.relationships || []
-  const relationships = Array.isArray(relationshipsSource)
-    ? relationshipsSource.map((rel) => {
-      const { id, source, target, relation, label, summary, context, ...rest } = rel
-      return {
-        id: id || `${source}_${target}`,
-        source,
-        target,
-        type: relation || label || 'RELATED_TO',
-        properties: {
-          ...rest,
-          ...(summary ? { summary } : {}),
-          ...(context ? { context } : {}),
-        },
-      }
-    })
-    : []
-
-  const stats = raw.stats || {
-    total_nodes: nodes.length,
-    total_relationships: relationships.length,
-  }
-
-  return { nodes, relationships, stats, is_fused: !!raw.is_fused }
-}
-
-export async function getGraph() {
-  const rawGraph = await safeFetchJson(`${API_BASE_URL}/api/graph`)
-  return buildGraphPayload(rawGraph)
 }
 
 export async function askQuestion(question) {
@@ -241,12 +150,7 @@ export async function me() {
 // row shape
 // ---------------------------------------------------------------------------
 
-/**
- * The backend returns filename/concepts/size_kb; Builder's table renders
- * name/nodes/type/upload_status. Map between them here rather than editing
- * Builder, so the existing table keeps working untouched. Backend names are
- * preserved alongside, so newer components can use either.
- */
+
 function toRow(doc) {
   const ext = (doc.filename?.split('.').pop() || '').toUpperCase()
   const label = {
