@@ -53,6 +53,3 @@ uploads/
 
 # Fusion run logs and verdict cache (regenerated every run)
 backend/data/outputs/fusion/
-
-# Frontend test harness build output
-.harness-dist/
