@@ -30,7 +30,7 @@ const CHAR_W = 6.0          // Inter at 10.5px, rounded up to cover the label ha
 const LINE_H = 11.5
 
 /* Zoom at which each tier's label becomes readable enough to be worth drawing. */
-const LABEL_ZOOM = { high: 0, mid: 0.85, low: 1.45 }
+const LABEL_ZOOM = { high: 0, mid: 0.85, low: 1.35 }
 
 function wrapLabel(name) {
   const words = String(name).split(' ')
@@ -623,8 +623,11 @@ export default function ConceptGraph({
     const fh = Math.max(120, h - pad.top - pad.bottom)
     const xs = sim.nodes().map((n) => n.x)
     const ys = sim.nodes().map((n) => n.y)
+    // The lowest node's name is usually drawn under it, so leave room for
+    // one label line at the bottom — otherwise it runs under the timeline.
+    // The sides and top already have the toolbar/legend padding above.
     const x0 = Math.min(...xs), x1 = Math.max(...xs)
-    const y0 = Math.min(...ys), y1 = Math.max(...ys)
+    const y0 = Math.min(...ys), y1 = Math.max(...ys) + 34
     const k = Math.min(fw / Math.max(1, x1 - x0), fh / Math.max(1, y1 - y0), 1.6)
     const t = d3.zoomIdentity
       .translate(pad.left + fw / 2 - k * (x0 + x1) / 2,

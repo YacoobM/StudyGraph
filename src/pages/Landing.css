@@ -14,6 +14,13 @@
   --lp-night-line: rgba(255, 255, 255, 0.09);
   --lp-night-text: #f3eedd;
   --lp-night-dim: #96897a;
+  /* Section palette. Each band below the hero gets its own colour so the page
+     reads as distinct sections; the "How it works" band reuses the graph
+     canvas brown so it sits in the same family as the demo above it. */
+  --lp-yellow: #f2c14e;          /* headings, icons, numbers on brown */
+  --lp-yellow-soft: #eadba8;     /* body text on brown */
+  --lp-yellow-line: rgba(242, 193, 78, 0.32);
+  --lp-cta-bg: #4a2e1c;          /* final CTA band (espresso brown) */
 
   background: var(--bg-0);
   color: var(--text-0);
@@ -288,6 +295,26 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* "How StudyGraph works" — full-width band in the graph canvas brown, with
+   every piece of content inside it in yellow. */
+.lp-section-night {
+  background: var(--lp-night);
+  color: var(--lp-yellow);
+}
+.lp-section-night :focus-visible { outline-color: var(--lp-yellow); }
+.lp-section-night .lp-eyebrow { color: var(--lp-yellow); opacity: 0.8; }
+.lp-section-night .lp-section-head h2 { color: var(--lp-yellow); }
+.lp-section-night .lp-section-head p { color: var(--lp-yellow-soft); }
+.lp-section-night .lp-step h3 { color: var(--lp-yellow); }
+.lp-section-night .lp-step p { color: var(--lp-yellow-soft); }
+.lp-section-night .lp-step-num { color: var(--lp-yellow); opacity: 0.7; }
+.lp-section-night .lp-step-icon {
+  background: rgba(242, 193, 78, 0.06);
+  border-color: var(--lp-yellow-line);
+  color: var(--lp-yellow);
+}
+.lp-section-night .lp-step:hover .lp-step-icon { border-color: var(--lp-yellow); }
+
 .lp-section-head {
   max-width: var(--lp-max);
   margin: 0 auto 46px;
@@ -434,11 +461,12 @@
 /* ---------------- final CTA ---------------- */
 
 .lp-cta {
-  max-width: var(--lp-max);
-  margin: 0 auto;
   padding: 88px var(--lp-gutter);
   text-align: center;
+  background: var(--lp-cta-bg);
+  color: var(--lp-yellow);
 }
+.lp-cta :focus-visible { outline-color: var(--lp-yellow); }
 
 .lp-cta h2 {
   margin: 0;
@@ -451,22 +479,38 @@
 .lp-cta p {
   margin: 12px 0 26px;
   font-size: 15px;
-  color: var(--text-2);
+  color: var(--lp-yellow-soft);
 }
+.lp-cta .lp-btn-solid { background: var(--lp-yellow); color: #2a1a0e; }
+.lp-cta .lp-btn-solid:hover { background: #f7d27a; }
 
 /* ---------------- footer ---------------- */
 
 .lp-foot {
   max-width: var(--lp-max);
   margin: 0 auto;
-  padding: 24px var(--lp-gutter) 40px;
-  border-top: 1px solid var(--border);
+  padding: 28px var(--lp-gutter) 40px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
+  gap: 8px;
+  text-align: center;
   font-size: 12.5px;
   color: var(--text-3);
+}
+.lp-foot-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.lp-foot-sep { color: var(--text-3); }
+.lp-foot-credit {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
 }
 
 /* =========================================================================
@@ -513,6 +557,7 @@
     transition-delay: calc(var(--i) * 110ms + 180ms);
   }
   .lp-process.is-in .lp-step::after { transform: scaleY(1); }
+  .lp-section-night .lp-step::after { background: var(--lp-yellow-line); }
   .lp-step:last-child::after { display: none; }
   .lp-step-marker {
     position: static;

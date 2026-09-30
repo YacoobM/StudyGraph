@@ -1436,7 +1436,7 @@ a {
 @media (max-width: 760px) {
   .gx-search input { width: 104px; }
   .gx-toolbar { top: 54px; right: 12px; gap: 6px; }
-  .gx-legend { font-size: 10px; gap: 4px 10px; padding: 6px 9px; }
+  .gx-legend { font-size: 10px; gap: 4px 10px; padding: 6px 9px; max-width: calc(100% - 200px); }
   .gx-hint { display: none; }
 }
 

@@ -161,7 +161,7 @@ export default function Landing() {
         </section>
 
         {/* ---------------- process ---------------- */}
-        <section className="lp-section" id="lp-how">
+        <section className="lp-section lp-section-night" id="lp-how">
           <div className="lp-section-head">
             <span className="lp-eyebrow">How StudyGraph works</span>
             <h2>Four steps, from a folder of documents to a map you can think with.</h2>
@@ -212,8 +212,12 @@ export default function Landing() {
       </main>
 
       <footer className="lp-foot">
-        <span className="lp-wordmark lp-wordmark-sm">StudyGraph</span>
-        <span>A knowledge graph for the way you actually study.</span>
+        <div className="lp-foot-line">
+          <span className="lp-wordmark lp-wordmark-sm">StudyGraph</span>
+          <span className="lp-foot-sep" aria-hidden="true">·</span>
+          <span>A knowledge graph for the way you actually study.</span>
+        </div>
+        <div className="lp-foot-credit">Developed by MCS03</div>
       </footer>
     </div>
   )
