@@ -30,6 +30,20 @@ function statusLabel(s) {
   if (v === 'queued') return 'Queued'
   return s ? s[0].toUpperCase() + s.slice(1) : 'Queued'
 }
+/**
+ * Display-only tidy-up of a filename: FIT3143-Topic-2-2024.pdf reads as
+ * "FIT3143 Topic 2 2024" in the header. The stored filename and the backend's
+ * document identifier are untouched — this never leaves the header.
+ */
+function prettyName(filename) {
+  if (!filename) return ''
+  return String(filename)
+    .replace(/\.[A-Za-z0-9]{1,5}$/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || String(filename)
+}
+
 const fmtSize = (kb) => (kb == null ? '—' : kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`)
 function fmtWhen(ts) {
   if (!ts) return '—'
@@ -297,6 +311,15 @@ export default function Workspace() {
 
   const t = totals || { count: docs.length, concepts: 0, relationships: 0 }
 
+  // One document names the graph; several are counted rather than picking one
+  // arbitrarily and implying the graph came only from it.
+  const rawTitle = docs.length === 1 ? (docs[0].name || docs[0].filename || '') : ''
+  const title = docs.length === 0
+    ? 'Untitled graph'
+    : docs.length === 1
+      ? prettyName(rawTitle)
+      : `${docs.length} documents`
+
   return (
     <div className="ws">
       {/* ---------------- sidebar ---------------- */}
@@ -333,15 +356,17 @@ export default function Workspace() {
       {/* ---------------- main ---------------- */}
       <main className="ws-main">
         <header className="ws-top">
-          <div>
-            <div className="ws-title">
-              {docs.length ? docs[0].name || docs[0].filename : 'Untitled graph'}
-            </div>
-            <div className="ws-sub">
-              {graph.nodes.length
-                ? `${graph.nodes.length} concepts · ${graph.edges.length} links`
-                : 'No sources yet'}
-            </div>
+          <div className="ws-head">
+            <div className="ws-title" title={rawTitle}>{title}</div>
+            {graph.nodes.length ? (
+              <div className="ws-facts">
+                <span><b>{graph.nodes.length}</b> concepts</span>
+                <span><b>{graph.edges.length}</b> relationships</span>
+                <span>Week <b>{week}</b> of {maxWeek}</span>
+              </div>
+            ) : (
+              <div className="ws-sub">No sources yet</div>
+            )}
           </div>
           <nav className="ws-tabs">
             {TABS.map((x) => (
@@ -389,12 +414,13 @@ export default function Workspace() {
               )}
             </div>
           )}
-          {tab === 'graph' && graph.nodes.length > 0 && (
+          {tab === 'graph' && graph.nodes.length > 0 && selected && (
             <Inspector
               node={selected}
               nodes={graph.nodes}
               edges={graph.edges}
               maxWeek={maxWeek}
+              onClose={() => setSelected(null)}
             />
           )}
 

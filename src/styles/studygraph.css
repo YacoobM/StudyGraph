@@ -122,379 +122,11 @@ a {
   transform: translateX(-50%) translateY(0);
 }
 
-/* ============================= MARKETING (light base, per design spec) ============================= */
-.mkt-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 22px 48px;
-  border-bottom: 1px solid var(--line);
-}
-.wordmark2 {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  background: none;
-  border: none;
-}
-.mkt-nav-links {
-  display: flex;
-  align-items: center;
-  gap: 36px;
-}
-.mlink {
-  background: none;
-  border: none;
-  font-size: 14.5px;
-  color: var(--ink-soft);
-  font-weight: 500;
-}
-.mlink:hover {
-  color: var(--ink);
-}
-.mkt-nav-cta {
-  background: none;
-  border: 1.5px solid var(--ink);
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
-  padding: 9px 18px;
-  border-radius: 8px;
-}
-.mkt-nav-cta:hover {
-  background: var(--ink);
-  color: #fff;
-}
-@media (max-width: 820px) {
-  .mkt-nav-links {
-    display: none;
-  }
-}
+/* The marketing/landing styles that used to live here moved to
+   src/pages/Landing.css with the landing page redesign. .screen,
+   .toast, .node-tip and .scrub above are shared with the workspace
+   and stayed. */
 
-.mkt-hero {
-  text-align: center;
-  padding: 140px 32px 0;
-  max-width: 760px;
-  margin: 0 auto;
-}
-.mkt-eyebrow {
-  display: inline-block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-tint);
-  padding: 7px 14px;
-  border-radius: 100px;
-  margin-bottom: 28px;
-}
-.mkt-hero h1 {
-  font-size: clamp(38px, 5.6vw, 64px);
-  font-weight: 800;
-  line-height: 1.12;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-.mkt-hero p {
-  font-size: 18px;
-  color: var(--ink-soft);
-  line-height: 1.6;
-  max-width: 520px;
-  margin: 24px auto 0;
-}
-.mkt-hero-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  margin-top: 36px;
-}
-.btn-primary-t {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-size: 15.5px;
-  font-weight: 600;
-  padding: 14px 26px;
-}
-.btn-primary-t:hover {
-  background: var(--accent-dark);
-}
-.btn-secondary-t {
-  background: none;
-  border: 1.5px solid var(--line);
-  color: var(--ink);
-  border-radius: 10px;
-  font-size: 15.5px;
-  font-weight: 600;
-  padding: 14px 26px;
-}
-.btn-secondary-t:hover {
-  border-color: var(--ink);
-}
-@media (max-width: 560px) {
-  .mkt-hero-actions {
-    flex-direction: column;
-  }
-  .btn-primary-t,
-  .btn-secondary-t {
-    width: 100%;
-  }
-}
-
-.mkt-panel-wrap {
-  max-width: 1100px;
-  margin: 76px auto 0;
-  padding: 0 32px;
-}
-.mkt-panel {
-  background: var(--night);
-  border-radius: 20px;
-  overflow: hidden;
-  box-shadow: 0 40px 90px rgba(20, 22, 26, 0.16);
-}
-.mkt-panel-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 22px;
-  border-bottom: 1px solid var(--night-line);
-}
-.mkt-panel-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--night-slate);
-}
-.live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--copper);
-}
-.mkt-panel-bar-right {
-  display: flex;
-  gap: 18px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11.5px;
-  color: var(--night-slate);
-}
-.mkt-panel-bar-right .v {
-  color: var(--night-text);
-}
-.mkt-panel-canvas-wrap {
-  position: relative;
-  height: 420px;
-}
-#heroCanvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.mkt-panel-footer {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 14px 22px 18px;
-  border-top: 1px solid var(--night-line);
-}
-.wk {
-  font-size: 12.5px;
-  color: var(--night-slate);
-  white-space: nowrap;
-}
-.wk b {
-  color: var(--night-text);
-  font-weight: 600;
-}
-input[type="range"].scrub {
-  -webkit-appearance: none;
-  flex: 1;
-  height: 3px;
-  border-radius: 3px;
-  background: var(--night-line);
-  outline: none;
-}
-input[type="range"].scrub::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--copper);
-  cursor: pointer;
-  margin-top: -5px;
-  border: 2px solid var(--night);
-}
-
-.mkt-trust {
-  text-align: center;
-  padding: 64px 32px 0;
-}
-.mkt-trust-label {
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  margin-bottom: 24px;
-}
-.mkt-trust-logos {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 44px;
-  flex-wrap: wrap;
-}
-.mkt-trust-logos span {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--ink);
-  opacity: 0.35;
-  letter-spacing: -0.01em;
-}
-
-.mkt-section {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 120px 32px;
-}
-.mkt-section-head {
-  max-width: 560px;
-  margin-bottom: 56px;
-}
-.mkt-section-eyebrow {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
-  margin-bottom: 14px;
-}
-.mkt-section-head h2 {
-  font-size: clamp(28px, 3.4vw, 38px);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
-.mkt-section-head p {
-  color: var(--ink-soft);
-  font-size: 16px;
-  margin-top: 16px;
-  line-height: 1.6;
-}
-.mkt-card-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 28px;
-}
-.mkt-card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 36px 32px;
-}
-.mkt-card .num {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  margin-bottom: 24px;
-  display: block;
-}
-.mkt-card h3 {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 10px;
-}
-.mkt-card p {
-  font-size: 14.5px;
-  color: var(--ink-soft);
-  line-height: 1.6;
-}
-@media (max-width: 820px) {
-  .mkt-card-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.mkt-testimonial {
-  background: var(--cream);
-  padding: 100px 32px;
-}
-.mkt-t-inner {
-  max-width: 680px;
-  margin: 0 auto;
-  text-align: center;
-}
-.mkt-t-inner p {
-  font-size: 23px;
-  font-weight: 500;
-  line-height: 1.5;
-  color: var(--ink);
-  letter-spacing: -0.01em;
-}
-.mkt-t-person {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 28px;
-}
-.mkt-t-avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: var(--accent-tint);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 13px;
-}
-.mkt-t-name {
-  font-size: 14px;
-  text-align: left;
-}
-.mkt-t-name b {
-  font-weight: 600;
-  display: block;
-}
-.mkt-t-name span {
-  color: var(--ink-soft);
-  font-size: 13px;
-}
-
-.cta-band {
-  background: var(--night);
-  border-radius: 24px;
-  margin: 0 32px 32px;
-  padding: 100px 32px;
-  text-align: center;
-}
-.cta-band h2 {
-  font-size: clamp(28px, 3.8vw, 42px);
-  font-weight: 700;
-  color: var(--night-text);
-  max-width: 600px;
-  margin: 0 auto 16px;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-.cta-band p {
-  color: var(--night-slate);
-  font-size: 15.5px;
-  margin-bottom: 32px;
-}
-.cta-btn {
-  background: var(--copper);
-  color: #1b1200;
-  font-weight: 700;
-  font-size: 15px;
-  padding: 15px 30px;
-  border-radius: 10px;
-  border: none;
-}
-.foot-note {
-  margin-top: 36px;
-  font-size: 12.5px;
-  color: var(--night-slate);
-}
 
 /* ============================= APP SHELL ============================= */
 .app {
@@ -860,21 +492,8 @@ input[type="range"].scrub::-webkit-slider-thumb {
   overflow: hidden;
   box-shadow: 0 20px 50px rgba(20, 22, 26, 0.14);
 }
-.ws-graph-legend {
-  position: absolute;
-  top: 18px;
-  left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--night-slate);
-}
-.ws-graph-legend .row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+/* .ws-graph-legend was the graph's old stacked legend; the graph now uses the
+   compact .gx-legend further down. .swatch stays — NotesPane still uses it. */
 .swatch {
   width: 8px;
   height: 8px;
@@ -904,8 +523,43 @@ input[type="range"].scrub::-webkit-slider-thumb {
   color: var(--night-text);
   font-weight: 600;
 }
+/* The week scrubber sits on the dark graph card, so it cannot keep the
+   browser's default control colours. */
 .ws-timeline input[type="range"] {
   max-width: 520px;
+  width: 100%;
+  /* 26px tall so it is actually tappable, while the visible track stays the
+     4px hairline the design calls for. */
+  height: 26px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.16))
+    center / 100% 4px no-repeat;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.ws-timeline input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--copper);
+  cursor: pointer;
+}
+.ws-timeline input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--copper);
+  cursor: pointer;
+}
+.ws-timeline input[type="range"]:focus-visible {
+  outline: 2px solid rgba(243, 238, 221, 0.75);
+  outline-offset: 4px;
 }
 .node-tip {
   position: absolute;
@@ -924,13 +578,99 @@ input[type="range"].scrub::-webkit-slider-thumb {
 }
 
 .inspector {
-  width: 320px;
+  width: 330px;
   flex-shrink: 0;
   border-left: 1px solid var(--line);
   background: #fff;
-  padding: 22px;
+  padding: 18px 22px 26px;
   overflow-y: auto;
 }
+
+/* header */
+.insp-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.insp-close {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.insp-close:hover { background: var(--cream); color: var(--ink); }
+.insp-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* chips */
+.insp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+.insp-chip {
+  padding: 3px 9px;
+  border-radius: 100px;
+  background: var(--accent-tint);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.insp-chip.quiet {
+  background: var(--cream);
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+/* connections */
+.insp-rels {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.insp-rels li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+}
+.insp-rels li:hover { background: var(--cream); }
+.insp-rel-arrow { color: var(--ink-soft); font-size: 12px; }
+.insp-rel-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.insp-rel-type {
+  grid-column: 2;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+.insp-none {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
 .insp-empty {
   color: #9a9e9c;
   font-size: 13.5px;
@@ -1179,11 +919,6 @@ input[type="range"].scrub::-webkit-slider-thumb {
   color: var(--copper);
   font: 600 12px inherit;
   cursor: pointer;
-}
-@media (max-width: 900px) {
-  .inspector {
-    display: none;
-  }
 }
 
 #ws-chat {
@@ -1534,95 +1269,175 @@ input[type="range"].scrub::-webkit-slider-thumb {
    (4) D3 knowledge-graph canvas   (2) topic-based quiz system
    ====================================================================== */
 
-/* ---------- graph panel controls ---------- */
-.gx-toolbar {
+/* ---------- graph panel controls ----------
+   Chrome that floats over the dark graph card: legend, search, toolbar and
+   hint. All of it is deliberately quiet — the graph is the subject. */
+
+.gx-legend {
   position: absolute;
   top: 16px;
-  right: 16px;
-  display: flex;
-  gap: 6px;
+  left: 18px;
   z-index: 4;
-}
-.gx-btn {
-  min-width: 30px;
-  height: 30px;
-  padding: 0 9px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid var(--night-line);
-  color: var(--night-text);
-  font-size: 12px;
-  font-weight: 600;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(6px);
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 7px 11px;
+  background: rgba(23, 19, 9, 0.6);
+  border: 1px solid var(--night-line);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--night-slate);
+  pointer-events: none;
 }
-.gx-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
+.gx-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.gx-legend i { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+/* ---------- search ---------- */
+
 .gx-search {
   position: absolute;
   top: 16px;
-  left: 20px;
-  z-index: 4;
+  right: 18px;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 7px;
-  background: rgba(255, 255, 255, 0.07);
+  padding: 0 8px 0 10px;
+  height: 32px;
+  background: rgba(23, 19, 9, 0.72);
   border: 1px solid var(--night-line);
-  border-radius: 100px;
-  padding: 6px 14px;
-  backdrop-filter: blur(6px);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
 }
+.gx-search > svg { width: 13px; height: 13px; color: var(--night-slate); flex-shrink: 0; }
 .gx-search input {
+  width: 168px;
   border: none;
-  outline: none;
   background: none;
-  color: var(--night-text);
-  font-family: "Inter", sans-serif;
+  outline: none;
+  font-family: inherit;
   font-size: 12.5px;
-  width: 150px;
+  color: var(--night-text);
 }
-.gx-search input::placeholder {
+.gx-search input::placeholder { color: var(--night-slate); }
+.gx-search:focus-within { border-color: rgba(243, 238, 221, 0.4); }
+/* The wrapper lights up, but the input carries its own ring so the indicator
+   is on the element that actually has focus. */
+.gx-search input:focus-visible {
+  outline: 2px solid rgba(243, 238, 221, 0.8);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.gx-search-clear {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 15px;
+  line-height: 1;
   color: var(--night-slate);
 }
-.ws-graph-legend {
-  top: auto;
-  bottom: 96px;
-  left: 20px;
+.gx-search-clear:hover { color: var(--night-text); }
+
+/* ---------- toolbar ---------- */
+
+.gx-toolbar {
+  position: absolute;
+  top: 58px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
 }
+.gx-group {
+  display: flex;
+  gap: 1px;
+  padding: 3px;
+  background: rgba(23, 19, 9, 0.72);
+  border: 1px solid var(--night-line);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+.gx-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--night-slate);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.gx-btn-wide { padding: 0 10px; font-size: 11.5px; }
+.gx-btn:hover { background: rgba(255, 255, 255, 0.09); color: var(--night-text); }
+.gx-btn.on { background: rgba(193, 101, 47, 0.28); color: #f0c6a5; }
+.gx-btn:focus-visible {
+  outline: 2px solid rgba(243, 238, 221, 0.75);
+  outline-offset: 1px;
+}
+
+/* ---------- canvas ---------- */
+
 #wsGraphSvg {
   width: 100%;
   height: 100%;
   display: block;
   cursor: grab;
 }
-#wsGraphSvg:active {
-  cursor: grabbing;
-}
-.gx-node circle {
-  transition:
-    stroke 0.15s ease,
-    opacity 0.15s ease;
-}
+#wsGraphSvg:active { cursor: grabbing; }
+.gx-node { transition: opacity 180ms ease; }
+.gx-node circle { transition: r 160ms ease, stroke-width 160ms ease; }
 .gx-node text {
   pointer-events: none;
   font-family: "Inter", sans-serif;
 }
+.gx-node:focus-visible {
+  outline: 2px solid #f3eedd;
+  outline-offset: 3px;
+  border-radius: 50%;
+}
+.gx-node:focus-visible circle { stroke: #f3eedd; stroke-width: 2.6; }
+.gx-edge { transition: opacity 180ms ease; }
 .gx-edge-label {
   font-family: "JetBrains Mono", monospace;
   font-size: 8.5px;
-  fill: var(--night-slate);
-  pointer-events: none;
+  fill: rgba(200, 190, 172, 0.9);
+  paint-order: stroke;
+  stroke: rgba(20, 17, 9, 0.85);
+  stroke-width: 3px;
 }
 .gx-hint {
   position: absolute;
-  bottom: 70px;
+  bottom: 72px;
   right: 20px;
-  font-size: 11px;
-  color: var(--night-slate);
   z-index: 4;
+  font-size: 10.5px;
+  color: var(--night-slate);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gx-node, .gx-node circle, .gx-edge { transition: none; }
+}
+
+/* Narrow viewports: the toolbar drops its labels to stay out of the way. */
+@media (max-width: 760px) {
+  .gx-search input { width: 104px; }
+  .gx-toolbar { top: 54px; right: 12px; gap: 6px; }
+  .gx-legend { font-size: 10px; gap: 4px 10px; padding: 6px 9px; }
+  .gx-hint { display: none; }
 }
 
 /* ---------- quiz: overview ---------- */
@@ -2827,3 +2642,48 @@ input[type="range"].scrub::-webkit-slider-thumb {
 body{ font-family:var(--font-body); }
 .mono, .nt-eyebrow, .nt-pick-sub, .nt-week{ font-family:var(--font-mono-stack); }
 .nt-body, .nt-lead, .nt-para-head, .nt-term, .nt-eg, .nt-tbl{ font-family:var(--font-body); }
+
+
+/* ===================== INSPECTOR: SMALL SCREENS =====================
+   Below 900px the right-hand panel becomes a bottom sheet, so the graph keeps
+   the full width of a phone screen instead of losing a third of it. */
+@media (max-width: 900px) {
+  /* NotesPane reuses .inspector for its context rail; it kept its previous
+     behaviour of dropping out on small screens. */
+  .inspector.nt-ctx { display: none; }
+
+  .inspector.insp-concept {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: auto;
+    max-height: 62vh;
+    padding: 14px 18px 22px;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 34px rgba(20, 22, 26, 0.18);
+    animation: insp-rise 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  /* the grab handle, so it reads as a sheet rather than a stuck panel */
+  .inspector.insp-concept::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 0 auto 12px;
+    border-radius: 2px;
+    background: var(--line);
+  }
+}
+
+@keyframes insp-rise {
+  from { transform: translateY(14px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector.insp-concept { animation: none; }
+}
