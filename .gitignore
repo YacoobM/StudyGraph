@@ -53,3 +53,14 @@ uploads/
 
 # Fusion run logs and verdict cache (regenerated every run)
 backend/data/outputs/fusion/
+supabase/.branches/_current_branch
+supabase/.temp/cli-latest
+supabase/.temp/pooler-url
+supabase/.temp/project-ref
+supabase/.temp/postgres-version
+supabase/.temp/rest-version
+supabase/.temp/gotrue-version
+supabase/.temp/storage-migration
+supabase/.temp/storage-version
+StudyGraph-conversation.md
+backend/tests/test_graph_persistence.py
