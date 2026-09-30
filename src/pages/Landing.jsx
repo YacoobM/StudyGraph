@@ -161,12 +161,13 @@ export default function Landing() {
         </section>
 
         {/* ---------------- process ---------------- */}
-        <section className="lp-section lp-section-night" id="lp-how">
+        <section className="lp-section" id="lp-how">
           <div className="lp-section-head">
             <span className="lp-eyebrow">How StudyGraph works</span>
             <h2>Four steps, from a folder of documents to a map you can think with.</h2>
           </div>
 
+          <div className="lp-process-box">
           <ol className={`lp-process${revealed ? ' is-in' : ''}`} ref={processRef}>
             {STEPS.map((s, i) => (
               <li className="lp-step" key={s.n} style={{ '--i': i }}>
@@ -179,6 +180,7 @@ export default function Landing() {
               </li>
             ))}
           </ol>
+          </div>
         </section>
 
         {/* ---------------- benefits ---------------- */}
