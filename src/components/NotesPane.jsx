@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { listNotes, createNote, getSection, setSectionDone } from '../data/notes.js'
+import { saveQuizResult } from '../services/api.js'
+import QuizRunner from './QuizRunner.jsx'
 
 /**
  * Notes tab — list, create and detail, switched on local state.
@@ -348,6 +350,45 @@ function SectionBody({ section }) {
   )
 }
 
+/**
+ * The section's quiz, taken inline below the section's footer row. Opened
+ * and closed by the "Quiz this section" button on that row. Passing marks
+ * the section complete; the reader can still untick it. The pass mark is the
+ * server's (quiz_service.pass_mark), so this and the saved result agree.
+ */
+function SectionQuiz({ section, noteTitle, onPassed, onClose }) {
+  const [saveError, setSaveError] = useState('')
+  const total = section.quiz.length
+  const need = section.passMark ?? total
+
+  function finish({ answers, correct, total }) {
+    setSaveError('')
+    saveQuizResult({
+      quizId: section.quizId, kind: 'section', answers, correct, total,
+      title: section.title, group: noteTitle,
+    }).catch((e) => setSaveError(`Your score was not saved: ${e.message}`))
+    if (correct >= need) onPassed()
+  }
+
+  return (
+    <div className="nt-quiz">
+      <QuizRunner
+        inline
+        title="Close quiz"
+        questions={section.quiz}
+        onExit={onClose}
+        onFinish={finish}
+        need={need}
+        passTitle="Section complete"
+        passText="The section is marked complete in the contents."
+        failText={`Get ${need} of ${total} right to complete the section. Reread the section and try again.`}
+        exitLabel="Close quiz"
+      />
+      {saveError && <div className="nt-error">{saveError}</div>}
+    </div>
+  )
+}
+
 function ContextPanel({ section: loaded, open, onClose }) {
   // Empty until the section arrives: the rail knows a section exists before
   // its concepts and sources are fetched, so every block below is optional.
@@ -426,12 +467,21 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
   const [railOn, setRailOn] = useState(true)
   const [ctxOn, setCtxOn] = useState(true)
   const center = useRef(null)
+  const quizBox = useRef(null)
+  const [quizOpen, setQuizOpen] = useState(false)
 
-  // Moving to another section starts at the top. Marking one done does not
-  // touch this, so the reader keeps their place.
+  // Moving to another section starts at the top, with its quiz closed.
+  // Marking one done does not touch this, so the reader keeps their place.
   useEffect(() => {
     if (center.current) center.current.scrollTop = 0
+    setQuizOpen(false)
   }, [note.id, index])
+
+  // Opening the quiz brings it into view: it opens below the footer row,
+  // which can sit at the very bottom of the scroll area.
+  useEffect(() => {
+    if (quizOpen) quizBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [quizOpen])
 
   const groups = useMemo(() => groupsFor(note), [note])
   // With one document every badge would read the same, so they earn their
@@ -445,6 +495,7 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
     ? `DAY ${day} OF ${note.days}`
     : `SECTION ${index + 1} OF ${note.total}`
   const hasNext = index < note.total - 1
+  const hasQuiz = Boolean(section?.quiz && section.quizId)
 
   return (
     <div className="pane nt-detail">
@@ -553,10 +604,30 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
               >
                 <span className="qz-check">✓</span>{section?.done ? 'Done' : 'Mark done'}
               </button>
-              {hasNext && (
-                <button className="btn-start" onClick={() => onOpenSection(index + 1)}>Next</button>
-              )}
+              <div className="nt-foot-right">
+                {hasQuiz && (
+                  <button className={quizOpen ? 'btn-secondary' : 'btn-primary2'}
+                          onClick={() => setQuizOpen((v) => !v)} aria-expanded={quizOpen}>
+                    {quizOpen ? 'Close quiz' : 'Quiz this section'}
+                  </button>
+                )}
+                {hasNext && (
+                  <button className="btn-start" onClick={() => onOpenSection(index + 1)}>Next</button>
+                )}
+              </div>
             </div>
+
+            {hasQuiz && quizOpen && (
+              <div ref={quizBox}>
+                <SectionQuiz
+                  key={section.id}
+                  section={section}
+                  noteTitle={note.title}
+                  onClose={() => setQuizOpen(false)}
+                  onPassed={() => { if (!section.done) onToggleDone(index, true) }}
+                />
+              </div>
+            )}
           </div>
         </div>
 

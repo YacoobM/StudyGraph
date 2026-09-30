@@ -48,57 +48,52 @@ from services import evolution_data, key_sentences
 router = APIRouter(tags=["notes"])
 logger = logging.getLogger(__name__)
 
-# Sections the LLM is asked for. Above 7 the sections get too thin to write a
-# body from. Left to the bare range the model picks the minimum, which on the
-# network-flow graph produced a single 14-concept section covering two
-# distinct units, so build_plan_prompt computes a range per call rather than
-# leaving it to choose the floor.
-#
-# MIN_SECTIONS is a floor for large sets only, from SECTION_FLOOR_FROM
-# concepts. Applied to every set it forced a 9-concept, 7-page lecture into
-# four sections, each written from the same text, so they repeated each other.
-MIN_SECTIONS = 4
-MAX_SECTIONS = 7
-SECTION_FLOOR_FROM = 16
+# Sections per document. A document is cut into contiguous sections of about
+# SECTION_CHARS characters; one under SINGLE_SECTION_BELOW stays whole. No
+# document gets more than MAX_SECTIONS_PER_DOCUMENT — a longer one gets longer
+# sections instead — and no note more than MAX_NOTE_SECTIONS, reached by
+# growing the section size for every document alike. The earlier rule (one
+# section per document up to 8,000 characters) left Lecture 5's scheduling
+# problem and its BST material in one section.
+SECTION_CHARS = 3500
+SINGLE_SECTION_BELOW = 4500
+MAX_SECTIONS_PER_DOCUMENT = 6
+MAX_NOTE_SECTIONS = 10
 
-# Source text behind one section, in characters. The section count is capped
-# at the documents' text length divided by this, so a short lecture is not
-# split more finely than it has material for: Lecture 5 (about 5,400
-# characters over 7 pages) gets two sections at most.
-SOURCE_CHARS_PER_SECTION = 2500
 
-# A section is what one sitting covers and what the write step turns into one
-# body. Past roughly this many concepts it stops being a unit and becomes a
-# list. MAX_SECTIONS * MAX_SECTION_CONCEPTS must stay above
-# _MAX_PROMPT_CONCEPTS below, or the two instructions cannot both be satisfied.
-MAX_SECTION_CONCEPTS = 8
+def document_section_count(chars: int, size: float = SECTION_CHARS) -> int:
+    """
+    How many sections one document's text is worth at a section size of
+    `size` characters: one below SINGLE_SECTION_BELOW (scaled with the size),
+    else about chars / size, at least two and at most
+    MAX_SECTIONS_PER_DOCUMENT. At the cap the sections simply get longer.
+    """
+    if chars < SINGLE_SECTION_BELOW * size / SECTION_CHARS:
+        return 1
+    return min(MAX_SECTIONS_PER_DOCUMENT, max(2, round(chars / size)))
 
-# The other end of the same idea: a section of one concept is a bullet, not a
-# study unit. Two per section is the floor, so the requested section count
-# scales down with the concept count — four concepts give two sections, not
-# four sections of one, and not an error.
-MIN_SECTION_CONCEPTS = 2
 
-# Prompt budget. The plan prompt carries concept names and relation pairs only,
-# never source text, and these caps keep it near 1000 input tokens. When there
-# is more material than this, the highest-degree concepts and the constraints
-# between them are kept — they carry the most structure.
-_MAX_PROMPT_CONCEPTS = 50
-_MAX_PROMPT_ORDERING = 30
-_MAX_PROMPT_COHESION = 20
+def note_section_counts(lengths: dict[str, int]) -> dict[str, int]:
+    """
+    Sections per document for one note, {document: count}. Past
+    MAX_NOTE_SECTIONS in total, the section size grows for every document
+    alike, so each one's share shrinks in proportion, until the note fits or
+    every document is down to one section.
+    """
+    size = float(SECTION_CHARS)
+    counts = {d: document_section_count(n, size) for d, n in lengths.items()}
+    while sum(counts.values()) > MAX_NOTE_SECTIONS and any(c > 1 for c in counts.values()):
+        size *= 1.05
+        counts = {d: document_section_count(n, size) for d, n in lengths.items()}
+    return counts
 
-# Planning is recursive. A set that fits _MAX_PROMPT_CONCEPTS is grouped into
-# sections in one call; anything larger is first divided into coarse parts that
-# do fit, and each part is planned by the same function. Depth therefore falls
-# out of the concept count instead of needing a rule per size.
-#
-# Parts are bounded rather than sized to exactly one call each, so a very large
-# set divides again instead of asking for forty parts at once. With these two
-# numbers the reachable scope is _MAX_PROMPT_CONCEPTS * _MAX_DIVIDE_PARTS **
-# _MAX_PLAN_DEPTH, far past anything a student uploads — the depth cap is a
-# guard against a model that will not shrink the set, not a scope limit.
-_MAX_DIVIDE_PARTS = MAX_SECTIONS
-_MAX_PLAN_DEPTH = 3
+
+# A section is written from the concepts first taught in its stretch of one
+# document. Grouping is deterministic (group_by_document); the one plan call
+# only names the sections. Its answer is small — a few titles — so the call
+# gets a small budget.
+_TITLE_MAX_WORDS = 8
+_TITLES_MAX_TOKENS = 400
 
 # --- write step -------------------------------------------------------------
 # Writing a section runs when the reader opens it, not when the note is made,
@@ -230,8 +225,23 @@ def _load_section(user_id: int, section_id: int):
     return None, None
 
 
+def _passed_quizzes(user_id) -> set[str]:
+    """Section quiz ids this user has passed, from the saved attempts."""
+    from services.quiz_service import passed_quiz_ids
+    return passed_quiz_ids(user_id)
+
+
+def _is_done(section: dict, passed) -> bool:
+    """A section is done when it was marked so or its quiz has a saved passing
+    attempt. The second survives a reload and a restart; a manual untick of a
+    passed section is the client's to hold."""
+    quiz_id = (section.get("body") or {}).get("quiz_id")
+    return bool(section["done"] or (quiz_id and quiz_id in passed))
+
+
 def _note_public(note: dict) -> dict:
     """Serialiser, in the shape of repositories.documents.document_public."""
+    passed = _passed_quizzes(note["user_id"])
     return {
         "id": note["id"],
         "title": note["title"],
@@ -241,12 +251,22 @@ def _note_public(note: dict) -> dict:
         "documents": note["documents"],
         "created_at": note["created_at"],
         "total": len(note["sections"]),
-        "done": sum(1 for s in note["sections"] if s["done"]),
-        "sections": [_section_public(s) for s in note["sections"]],
+        "done": sum(1 for s in note["sections"] if _is_done(s, passed)),
+        "sections": [_section_public(s, passed) for s in note["sections"]],
     }
 
 
-def _section_public(section: dict) -> dict:
+def _served_body(body):
+    """The body as it leaves the backend: its quiz shuffled (quiz_service.
+    shuffle_quiz) and the pass mark for its length attached. The stored body,
+    cached ones included, keeps the order the model wrote."""
+    if not body or not body.get("quiz"):
+        return body
+    from services.quiz_service import pass_mark, shuffle_quiz
+    return {**body, "quiz": shuffle_quiz(body["quiz"]), "quiz_pass_mark": pass_mark(len(body["quiz"]))}
+
+
+def _section_public(section: dict, passed=frozenset()) -> dict:
     return {
         "id": section["id"],
         "note_id": section["note_id"],
@@ -256,8 +276,11 @@ def _section_public(section: dict) -> dict:
         "concepts": section["concepts"],
         "relations": section["relations"],
         "sources": section["sources"],
-        "body": section["body"],
-        "done": section["done"],
+        # The section's must-cover source sentences. The UI no longer reads
+        # them (the per-question Review link is gone); kept as data.
+        "must_cover": section.get("must_cover") or [],
+        "body": _served_body(section["body"]),
+        "done": _is_done(section, passed),
     }
 
 
@@ -568,6 +591,46 @@ def _degree(edges: list[dict]) -> dict[str, int]:
     return degree
 
 
+# Labels that set two ideas against each other. A subset of _SYMMETRIC: these
+# are the pairs a student confuses, so they make the best wrong options.
+_CONTRAST = ("contrast*", "differ*", "distinguish*", "unlike", "versus", "vs",
+             "opposite*", "opposed to", "as opposed to", "alternative to")
+
+
+def is_contrast(relation: str) -> bool:
+    return _match(_normalise_relation(relation), _CONTRAST)
+
+
+# Size of a section's distractor pool. Enough to give five questions three
+# wrong options each some choice, without the pool outweighing the section.
+_MAX_DISTRACTOR_POOL = 12
+
+
+def section_neighbours(names, edges: list[dict]) -> list[dict]:
+    """
+    Concepts one link outside a section: the distractor pool for its quiz.
+
+    Each entry names the outside concept, the section concepts it links to,
+    and which of those links are contrasts. Contrasted concepts come first,
+    then the most connected — a concept tied to several of the section's
+    ideas is the likelier confusion.
+    """
+    inside = set(names)
+    links: dict[str, set] = defaultdict(set)
+    contrasts: dict[str, set] = defaultdict(set)
+    for e in edges:
+        a, b = e.get("from"), e.get("to")
+        if not a or not b or (a in inside) == (b in inside):
+            continue
+        outside, anchor = (b, a) if a in inside else (a, b)
+        links[outside].add(anchor)
+        if is_contrast(e.get("relation")):
+            contrasts[outside].add(anchor)
+    ranked = sorted(links, key=lambda n: (-len(contrasts[n]), -len(links[n]), n))
+    return [{"name": n, "links": sorted(links[n]), "contrasts": sorted(contrasts[n])}
+            for n in ranked[:_MAX_DISTRACTOR_POOL]]
+
+
 # ---------------------------------------------------------------------------
 # prompt
 # ---------------------------------------------------------------------------
@@ -583,55 +646,20 @@ def _degree(edges: list[dict]) -> dict[str, int]:
 # v6: positions are measured on the document's content only — no running
 # heads, title, author lines, overview list or references — so a concept named
 # in the overview is placed where it is taught.
-_PLAN_PROMPT_VERSION = "notes-plan-v6"
-_DIVIDE_PROMPT_VERSION = "notes-divide-v1"
-
-_DIVIDE_SYSTEM = (
-    "You split a list of concepts from a student's lecture material into a few "
-    "coarse parts, so that each part can be planned in detail separately. This "
-    "is not the final grouping — it only has to be a sensible first cut.\n"
-    "Rules:\n"
-    "- Use ONLY the concept names given, copied exactly. Invent nothing.\n"
-    "- Every concept must appear in exactly one part.\n"
-    "- Make the parts roughly equal in size. A part far larger than the others "
-    "defeats the purpose of splitting at all.\n"
-    "- Keep concepts belonging to the same topic in the same part, so each part "
-    "can be taught on its own.\n"
-    "- Order the parts from foundations to consequences.\n"
-    "- A part title is a short noun phrase naming the area it covers.\n"
-    'Respond ONLY as JSON: {"sections": [{"title": "...", "concepts": ["...", "..."]}]}.'
-)
-
-
-def section_range(n: int, source_cap: Optional[int] = None) -> tuple[int, int]:
-    """
-    How many sections to ask for, given `n` concepts and at most `source_cap`
-    sections' worth of source text (None when unknown).
-
-    Both ends fall out of the per-section size limits rather than being fixed:
-    at most MAX_SECTION_CONCEPTS per section sets the floor on the count, at
-    least MIN_SECTION_CONCEPTS per section sets the ceiling. MIN_SECTIONS
-    raises the floor only from SECTION_FLOOR_FROM concepts.
-
-    The source cap lowers the ceiling and wins over the floor: a short
-    document is written as few sections even when that puts more than
-    MAX_SECTION_CONCEPTS concepts in one. build_plan_prompt loosens the size
-    limit to match.
-    """
-    most = min(MAX_SECTIONS, max(1, n // MIN_SECTION_CONCEPTS))
-    if source_cap is not None:
-        most = max(1, min(most, source_cap))
-    least = -(-n // MAX_SECTION_CONCEPTS)
-    if n >= SECTION_FLOOR_FROM:
-        least = max(least, MIN_SECTIONS)
-    return min(least, most), most
-
-
-def section_size_limit(n: int, least: int) -> int:
-    """Most concepts one section may hold: MAX_SECTION_CONCEPTS, unless the
-    section count was capped so low that `n` cannot fit under it."""
-    return max(MAX_SECTION_CONCEPTS, -(-n // max(1, least)))
-
+# v7: one section per document by default (document_section_count), not one
+# per 2,500 characters overall, so the requested count changed.
+# v8: grouping is deterministic — each document's concepts, in contiguous
+# ranges by source position when the document is split — and the one call
+# only writes titles. Asked to group, the model grouped by topic: Lecture 5's
+# BST and Rank material went into a section with all of Lecture 6.
+# v9: sections of about 3,500 characters (a document under 4,500 stays
+# whole), at most 6 per document and 10 per note; must-cover picks stay in
+# their own document's sections.
+# v10: must-cover picks go to the section whose text range contains them
+# (concept distance only for a pick that cannot be located), and a concept
+# the text never names joins the section holding most of its neighbours
+# rather than the document's last.
+_PLAN_PROMPT_VERSION = "notes-plan-v10"
 
 def document_texts(filenames: set[str]) -> dict[str, str]:
     """
@@ -669,147 +697,47 @@ def document_texts(filenames: set[str]) -> dict[str, str]:
 
 
 def source_section_cap(filenames: set[str]) -> Optional[int]:
-    """How many sections the documents' text can fill, or None when the
-    engine holds no chunks for them."""
-    total = sum(len(t) for t in document_texts(filenames).values())
-    if not total:
+    """How many sections the documents' text is worth in all
+    (note_section_counts), or None when the engine holds no chunks for
+    them."""
+    texts = {d: len(t) for d, t in document_texts(filenames).items() if t}
+    if not texts:
         return None
-    return max(1, total // SOURCE_CHARS_PER_SECTION)
+    return sum(note_section_counts(texts).values())
 
 
-def build_divide_prompt(concept_names, parts_wanted: int) -> str:
-    """
-    The user half of the divide prompt.
-
-    Names only — no ordering or cohesion lists. Those are what make the
-    grouping prompt expensive, and a first cut does not need them; the detailed
-    constraints are applied when each part is planned. That is what lets this
-    call carry several times more concepts than a grouping call.
-    """
-    names = sorted(concept_names)
-    return (
-        f"{len(names)} concepts to split into exactly {parts_wanted} parts of "
-        f"roughly {-(-len(names) // parts_wanted)} concepts each.\n\n"
-        "CONCEPTS:\n" + ", ".join(names)
-    )
-
-_PLAN_SYSTEM = (
-    "You group concepts extracted from a student's own lecture material into "
-    "the sections of a revision note. You are given concept names and the "
-    "relationships between them, never the source text.\n"
-    "The request states how many sections to produce; follow it, and aim for "
-    "the middle of the range it gives rather than its floor. Rules:\n"
-    "- Use ONLY the concept names given, copied exactly. Invent nothing.\n"
-    "- Every concept must appear in exactly one section.\n"
-    "- No section may hold more concepts than the request allows. A group "
-    "heading past that covers two units, so split it at the most natural seam "
-    "and title each half for what it teaches.\n"
-    f"- No section may hold fewer than {MIN_SECTION_CONCEPTS} concepts. A lone "
-    "concept is a bullet, not a section: there is too little behind it to write "
-    "one from. Fold it into the section holding its nearest neighbours instead.\n"
-    "- Make the sections roughly even in size. A section far larger than the "
-    "others is two units under one heading, and one far smaller has too little "
-    "to write a section from.\n"
-    "- ORDER BEFORE lists teaching order: if 'A before B' appears, the section "
-    "holding A must come before the section holding B, or both must be in the "
-    "same section. Respect every one of them.\n"
-    "- GROUP TOGETHER lists pairs a learner is likely to confuse. Put such a "
-    "pair in the same section wherever the ordering rules allow, so the note "
-    "can draw the distinction.\n"
-    "- A section title is a short noun phrase naming what the section teaches, "
-    "at most 8 words. Do not number the titles.\n"
+_TITLES_SYSTEM = (
+    "You name the sections of a student's revision note. Each section is given "
+    "with the document it comes from and the concepts it covers, in the order "
+    "that document teaches them. The sections are already decided; you only "
+    "write their titles.\n"
+    "Rules:\n"
+    "- One title per section, in the order given.\n"
+    f"- A title is a short noun phrase naming what the section teaches, at most "
+    f"{_TITLE_MAX_WORDS} words. Do not number it, and do not use the file name.\n"
     "- A title may only name concepts in that section. Do not name a topic, "
-    "technique or structure that is not in its concept list, however likely "
-    "it seems to belong there.\n"
-    "- Order the sections so the note reads from foundations to consequences.\n"
-    "- A concept may be tagged with where it first appears in the source: "
-    "which document (D1, D2, ...) and how far through it (0% is the start). "
-    "Concepts close together in the same document are taught together there, "
-    "so group them together. Put concepts from different documents in one "
-    "section only when they are strongly related: the same topic, or one "
-    "directly built on the other.\n"
-    'Respond ONLY as JSON: {"sections": [{"title": "...", "concepts": ["...", "..."]}]}.'
+    "technique or structure that is not in its concept list.\n"
+    "- Sections from the same document must get different titles.\n"
+    'Respond ONLY as JSON: {"titles": ["...", "..."]}.'
 )
 
 
-def _concept_lines(names, locality) -> list[str]:
-    """
-    The CONCEPTS block. With positions, one concept per line in source order,
-    tagged with where it first appears: "(D2, 40%)" is 40% of the way through
-    the second document, and the document tag is left off when there is only
-    one. Without them, the old comma-separated list.
-    """
-    if not locality:
-        return ["CONCEPTS:", ", ".join(sorted(names))]
-    doc_order, positions = locality
-    many = len(doc_order) > 1
-    unplaced = (float("inf"), float("inf"))
-    lines = []
-    if many:
-        lines += ["DOCUMENTS:"] + [f"D{i + 1} = {d}" for i, d in enumerate(doc_order)] + [""]
-    lines.append("CONCEPTS, in source order, with where each first appears:")
-    for name in sorted(names, key=lambda n: (positions.get(n, unplaced), n)):
-        spot = positions.get(name)
-        if spot is None:
-            lines.append(f"- {name} (position unknown)")
-        else:
-            doc, frac = spot
-            where = f"D{doc + 1}, {round(frac * 100)}%" if many else f"{round(frac * 100)}%"
-            lines.append(f"- {name} ({where})")
-    return lines
-
-
-def build_plan_prompt(concept_names, ordering, cohesion, degree,
-                      source_cap: Optional[int] = None, locality=None) -> str:
-    """
-    The user half of the plan prompt.
-
-    Trimmed to the caps at the top of this module. When there is more material
-    than fits, the best-connected concepts and the constraints between them are
-    kept: a constraint between two hub concepts shapes the plan far more than
-    one between two leaves.
-    """
-    ranked = sorted(concept_names, key=lambda n: (-degree.get(n, 0), n))
-    kept = set(ranked[:_MAX_PROMPT_CONCEPTS])
-
-    def weight(pair):
-        return -(degree.get(pair[0], 0) + degree.get(pair[1], 0))
-
-    ordering = [p for p in ordering if p[0] in kept and p[1] in kept]
-    cohesion = [p for p in cohesion if p[0] in kept and p[1] in kept]
-    ordering = sorted(ordering, key=weight)[:_MAX_PROMPT_ORDERING]
-    cohesion = sorted(cohesion, key=weight)[:_MAX_PROMPT_COHESION]
-
-    least, most = section_range(len(kept), source_cap)
-    count = (f"Produce exactly {least} section{'s' if least != 1 else ''}."
-             if least == most else
-             f"Produce between {least} and {most} sections.")
-    lines = [
-        f"{len(kept)} concepts to place. {count} No section may hold more than "
-        f"{section_size_limit(len(kept), least)} concepts.",
-        "",
-        *_concept_lines(kept, locality),
-    ]
-    if ordering:
-        lines += ["", "ORDER BEFORE:"]
-        lines += [f"- {a} before {b}" for a, b in ordering]
-    if cohesion:
-        lines += ["", "GROUP TOGETHER:"]
-        lines += [f"- {a} + {b}" for a, b in cohesion]
-    return "\n".join(lines)
+def build_titles_prompt(sections) -> str:
+    """The user half of the titles call: each section's document and its
+    concepts in source order."""
+    lines = [f"{len(sections)} section{'s' if len(sections) != 1 else ''} to title.", ""]
+    for i, section in enumerate(sections, 1):
+        where = section.get("document") or "several documents"
+        lines += [f"SECTION {i} — from {where}:", ", ".join(section["concepts"]), ""]
+    return "\n".join(lines).rstrip()
 
 
 # ---------------------------------------------------------------------------
 # response validation
 # ---------------------------------------------------------------------------
 
-class _PlannedSection(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
-    concepts: list[str] = Field(min_length=1)
-
-
-class _PlanResponse(BaseModel):
-    sections: list[_PlannedSection] = Field(min_length=1)
+class _TitlesResponse(BaseModel):
+    titles: list[str] = Field(min_length=1)
 
 
 # ---------------------------------------------------------------------------
@@ -844,11 +772,15 @@ def _load_cache(path: Path) -> dict:
 
 
 def _save_cache(path: Path, cache: dict) -> None:
-    """Write a cache; best-effort, a failure is not fatal."""
+    """Write a cache; best-effort, a failure is not fatal. Written to a
+    temporary file and swapped in, so a reader never loads half a file as an
+    empty cache and an interrupted write keeps the previous one."""
+    tmp = path.with_suffix(".tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cache, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
     except OSError:
         pass
 
@@ -984,235 +916,145 @@ def _llm_client():
     return _client
 
 
-async def _request_groups(system: str, user: str, cache_key: str, what: str):
+async def request_titles(sections, cache_key: str) -> Optional[list[str]]:
     """
-    One call that asks the model to put concepts into titled groups, cached.
-
-    Dividing and grouping differ only in their prompt — both return
-    {"title", "concepts"} objects and both validate against _PlanResponse — so
-    the retry, timeout, validation and caching live here once. Returns the list
-    of groups, or None when the call or its validation failed.
+    The one plan call: a title for each section, cached. Returns one title per
+    section, or None when the call or its validation failed — the caller then
+    names the sections itself. A short or overlong answer is padded or cut to
+    the section count rather than thrown away.
     """
     cache = _load_plan_cache()
     cached = cache.get(cache_key)
-    if isinstance(cached, list) and cached:
+    if isinstance(cached, list) and len(cached) == len(sections):
         return cached
 
     client = _llm_client()
     if client is None:
         return None
-
     try:
         raw = await asyncio.wait_for(
             evolution_data._call_with_retry(
-                client, system, user,
-                json_mode=True,
-                temperature=0.2,
-                # Headroom over the largest measured grouping call: the
-                # 35-concept network-flow graph used 1581 completion tokens
-                # at the pinned low reasoning effort (see _low_reasoning).
-                # That was on the previous model; re-measure from the
-                # "Notes plan:" usage line. The shared llm_gateway limiter
-                # rejects any single call above LLM_OUTPUT_TOKENS_PER_MINUTE,
-                # so this must stay at or below that.
-                max_tokens=2000,
+                client, _TITLES_SYSTEM, build_titles_prompt(sections),
+                json_mode=True, temperature=0.2, max_tokens=_TITLES_MAX_TOKENS,
             ),
             timeout=_PLAN_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
-        print(f"Notes plan: {what} call exceeded {_PLAN_TIMEOUT_SECONDS}s — giving up.")
+        print(f"Notes plan: titles call exceeded {_PLAN_TIMEOUT_SECONDS}s — using fallback titles.")
         return None
     if not raw:
         return None
-
     try:
-        parsed = _PlanResponse.model_validate_json(raw)
+        parsed = _TitlesResponse.model_validate_json(raw)
     except ValidationError as exc:
-        print(f"Notes plan: model returned an unusable {what} — {exc}")
+        print(f"Notes plan: unusable titles — {exc}")
         return None
 
-    groups = [{"title": s.title.strip(), "concepts": s.concepts} for s in parsed.sections]
-    cache[cache_key] = groups
+    titles = [" ".join(t.split()[:_TITLE_MAX_WORDS]).strip() for t in parsed.titles]
+    titles = (titles + [""] * len(sections))[:len(sections)]
+    cache[cache_key] = titles
     _save_plan_cache(cache)
-    return groups
-
-
-async def request_sections(concept_names, ordering, cohesion, degree, cache_key,
-                           source_cap: Optional[int] = None, locality=None):
-    """Asks the model to group a set that already fits one call into sections."""
-    return await _request_groups(
-        _PLAN_SYSTEM,
-        build_plan_prompt(concept_names, ordering, cohesion, degree, source_cap, locality),
-        cache_key, "grouping",
-    )
-
-
-async def request_divide(concept_names, parts_wanted, cache_key):
-    """Asks the model for a coarse first cut of a set too large to group."""
-    return await _request_groups(
-        _DIVIDE_SYSTEM,
-        build_divide_prompt(concept_names, parts_wanted),
-        cache_key, "division",
-    )
+    return titles
 
 
 # ---------------------------------------------------------------------------
 # assembly
 # ---------------------------------------------------------------------------
 
-def reconcile_sections(sections, concept_names, edges):
+def group_by_document(concept_names, sources_by_concept, doc_order, positions, texts,
+                      edges=(), encode=None) -> list[dict]:
     """
-    Maps the model's answer back onto the real concept set.
+    The note's sections, decided without a model.
 
-    The model is told to copy names exactly and mostly does, but it changes
-    case, swaps in a typographic hyphen and occasionally invents. Names are
-    matched on their normalised form; unknown ones are dropped; names it placed
-    twice stay in the first section; anything it missed is placed into whichever
-    section already holds most of its neighbours, so a stray concept lands
-    beside its own material rather than in a bin at the end.
+    Every concept belongs to the document where it is first taught
+    (positions). Each document is cut into as many contiguous, equal ranges
+    of its text as note_section_counts gives it (one for a short document),
+    and each concept goes to the range its first position falls in. Ranges
+    left empty are dropped and their neighbours widened over them, so a
+    document's sections still tile it: each carries "range" (from, to), as
+    fractions of the document's content, and must-cover picks are assigned
+    by it.
+
+    A concept whose name never appears in the text goes to the first of its
+    own documents, into the section there holding most of its graph
+    neighbours (`edges`), else the one whose concept names are closest to it
+    (`encode`), else the document's last. Sections come out in document
+    order, then source order, with no titles — request_titles names them.
     """
-    by_key = {_name_key(n): n for n in concept_names}
-    placed, out = set(), []
+    rank = {doc: i for i, doc in enumerate(doc_order)}
+    by_doc: dict[str, list[tuple[float, str]]] = defaultdict(list)
+    unplaced: dict[str, list[str]] = defaultdict(list)
+    for name in concept_names:
+        if name in positions:
+            d, frac = positions[name]
+            by_doc[doc_order[d]].append((frac, name))
+            continue
+        own = sorted((s for s in sources_by_concept.get(name, ()) if s in rank), key=rank.get)
+        if own:
+            unplaced[own[0]].append(name)
 
-    for s in sections:
-        names = []
-        for raw in s["concepts"]:
-            real = by_key.get(_name_key(raw))
-            if real and real not in placed:
-                placed.add(real)
-                names.append(real)
-        if names:
-            out.append({"title": s["title"], "concepts": names})
-
-    if not out:
-        return []
-
-    missing = [n for n in concept_names if n not in placed]
-    if missing:
-        neighbours: dict[str, set] = defaultdict(set)
-        for e in edges:
-            neighbours[e["from"]].add(e["to"])
-            neighbours[e["to"]].add(e["from"])
-        for name in missing:
-            near = neighbours.get(name, set())
-            best = max(
-                range(len(out)),
-                key=lambda i: len(near.intersection(out[i]["concepts"])),
-            )
-            out[best]["concepts"].append(name)
-
-    return out
-
-
-def _edges_within(edges: list[dict], names) -> list[dict]:
-    """Edges with both endpoints inside a subset — the constraints that still
-    apply once planning descends into one part."""
-    inside = set(names)
-    return [e for e in edges if e["from"] in inside and e["to"] in inside]
+    counts = note_section_counts({doc: len(texts.get(doc, "")) for doc in doc_order
+                                  if by_doc.get(doc) or unplaced.get(doc)})
+    sections = []
+    for doc in doc_order:
+        spots = sorted(by_doc.get(doc, ()))
+        if not spots and not unplaced.get(doc):
+            continue
+        parts = counts.get(doc, 1)
+        ranges: list[list[str]] = [[] for _ in range(parts)]
+        for frac, name in spots:
+            ranges[min(parts - 1, int(frac * parts))].append(name)
+        kept = [k for k, names in enumerate(ranges) if names] or [parts - 1]
+        # Widen the kept ranges over the dropped ones: each runs from its own
+        # start (the first one from 0) to the next one's start (the last to 1).
+        starts = [0.0] + [k / parts for k in kept[1:]]
+        ends = starts[1:] + [1.0]
+        here = [{"title": "", "concepts": list(ranges[k]), "document": doc, "range": (a, b)}
+                for k, a, b in zip(kept, starts, ends)]
+        for name in sorted(unplaced.get(doc, ())):
+            _place_unplaced(name, here, edges, encode)
+        sections += here
+    return sections
 
 
-async def plan_sections(concept_names, edges, key_prefix, trace, depth: int = 0,
-                        source_cap: Optional[int] = None, locality=None):
-    """
-    Groups a concept set into sections, dividing first when it is too large to
-    put in one prompt.
+def _place_unplaced(name, sections, edges, encode) -> None:
+    """Adds a concept the text never names to the section, among `sections`
+    (one document's), holding most of its graph neighbours; with no
+    neighbours to go on, the one whose concept names are closest by
+    embedding; with no encoder either, the last."""
+    near = {e["to"] for e in edges if e.get("from") == name} | \
+           {e["from"] for e in edges if e.get("to") == name}
+    scores = [len(near.intersection(s["concepts"])) for s in sections]
+    if max(scores, default=0) > 0:
+        best = max(range(len(sections)), key=lambda i: (scores[i], -i))
+    elif encode is not None and len(sections) > 1:
+        vecs = encode([name] + [", ".join(s["concepts"]) or s["document"] for s in sections])
+        best = max(range(len(sections)), key=lambda i: float(vecs[0] @ vecs[i + 1]))
+    else:
+        best = len(sections) - 1
+    sections[best]["concepts"].append(name)
 
-    A set within _MAX_PROMPT_CONCEPTS is grouped directly. Anything larger is
-    cut into parts that do fit and each part is planned by this same function,
-    so depth follows from the concept count rather than from a rule per size.
-    Sections come back flat and in order: the parts are scaffolding for the
-    planning, not a level in the note.
 
-    Two things stop it running away, both because the model may ignore the
-    sizes it was asked for. Depth is capped, and a division that returns a part
-    no smaller than what went in is discarded — in either case what is on hand
-    is grouped instead of being divided again. Both outcomes are recorded in
-    `trace`, since grouping an oversized set is exactly the case where concepts
-    beyond the prompt cap get placed by the neighbour fallback rather than by
-    the model.
+def fallback_title(section, index_in_doc: int, parts_in_doc: int) -> str:
+    """A section's name when the titles call is unavailable: its document's
+    own title, with the part number when the document was split."""
+    from services.quiz_service import document_title
+    base = document_title(section["document"]) if section.get("document") else "Mixed sources"
+    return base if parts_in_doc == 1 else f"{base} (part {index_in_doc + 1})"
 
-    `source_cap` is the most sections the source text can fill (see
-    source_section_cap). When the set is divided, each part gets a share of it
-    in proportion to its concepts.
 
-    `locality` is (document order, concept positions) from concept_positions,
-    shown to the model so it groups what the source teaches together.
-
-    Returns the sections, or None if a call failed.
-    """
-    n = len(concept_names)
-
-    async def group_here(reason):
-        ordering, cohesion = derive_constraints(edges)
-        planned = await request_sections(
-            concept_names, ordering, cohesion, _degree(edges),
-            # The cap changes the prompt, so it is part of what identifies the call.
-            _call_key(key_prefix, f"group:cap={source_cap}", concept_names),
-            source_cap, locality,
-        )
-        if planned is None:
-            return None
-        sections = reconcile_sections(planned, concept_names, edges)
-        trace.append({"depth": depth, "kind": "group", "reason": reason,
-                      "concepts": n, "produced": len(sections),
-                      "source_cap": source_cap})
-        return sections
-
-    if n <= _MAX_PROMPT_CONCEPTS:
-        return await group_here("fits one call")
-    if depth >= _MAX_PLAN_DEPTH:
-        return await group_here("depth cap reached")
-
-    wanted = min(_MAX_DIVIDE_PARTS, max(2, -(-n // _MAX_PROMPT_CONCEPTS)))
-    divided = await request_divide(
-        concept_names, wanted, _call_key(key_prefix, "divide", concept_names),
-    )
-    parts = reconcile_sections(divided, concept_names, edges) if divided else []
-
-    if len(parts) < 2 or any(len(p["concepts"]) >= n for p in parts):
-        biggest = max((len(p["concepts"]) for p in parts), default=0)
-        print(f"Notes plan: division of {n} concepts came back as {len(parts)} part(s), "
-              f"largest {biggest} — not smaller, so grouping without dividing.")
-        trace.append({"depth": depth, "kind": "divide", "reason": "rejected",
-                      "concepts": n, "produced": len(parts)})
-        return await group_here("division did not shrink the set")
-
-    trace.append({"depth": depth, "kind": "divide", "reason": f"{wanted} parts asked",
-                  "concepts": n, "produced": len(parts)})
-
+def name_sections(sections, titles: Optional[list[str]]) -> list[dict]:
+    """Puts the titles on, falling back per section for any the call did not
+    supply."""
+    per_doc = Counter(s.get("document") for s in sections)
+    seen: Counter = Counter()
     out = []
-    for part in parts:
-        names = part["concepts"]
-        share = (None if source_cap is None
-                 else max(1, round(source_cap * len(names) / n)))
-        sub = await plan_sections(
-            names, _edges_within(edges, names), key_prefix, trace, depth + 1,
-            share, locality,
-        )
-        if sub is None:
-            return None
-        out += sub
+    for i, section in enumerate(sections):
+        doc = section.get("document")
+        title = (titles[i] if titles and i < len(titles) else "").strip()
+        out.append({**section, "title": title or fallback_title(section, seen[doc], per_doc[doc])})
+        seen[doc] += 1
     return out
-
-
-def summarise_trace(trace: list[dict]) -> dict:
-    """Depth reached and what happened at each level, for the response."""
-    levels = {}
-    for step in trace:
-        row = levels.setdefault(step["depth"], {
-            "depth": step["depth"], "divide_calls": 0, "group_calls": 0,
-            "concepts_seen": 0, "produced": 0, "reasons": [],
-        })
-        row["divide_calls" if step["kind"] == "divide" else "group_calls"] += 1
-        row["concepts_seen"] += step["concepts"]
-        row["produced"] += step["produced"]
-        if step["reason"] not in row["reasons"]:
-            row["reasons"].append(step["reason"])
-    return {
-        "depth": max(levels) if levels else 0,
-        "calls": len(trace),
-        "levels": [levels[d] for d in sorted(levels)],
-    }
 
 
 def split_across_days(sizes: list[int], days: Optional[int]) -> list[Optional[int]]:
@@ -1269,28 +1111,70 @@ def _week_number(week) -> float:
     return float(match.group()) if match else float("inf")
 
 
-def _occurrences(name: str, text: str) -> list[int]:
+# The single-word fallback in _occurrences is used only when that word is
+# this rare in the document. "tree height" is not a phrase in Lecture 6, and
+# its fallback "height" occurs ten times there, all through the AVL material,
+# which pulled four AVL picks into the tree-height section; "rotation" (for
+# "tree rotation") occurs twice and still places its concept.
+_FALLBACK_MAX_HITS = 3
+
+
+def _name_pattern(key: str) -> str:
+    """A normalised name as a whole-word pattern that also takes a plural."""
+    return rf"\b{re.escape(key)}(?:e?s)?\b"
+
+
+# A soft hyphen is where a typesetter broke a word across lines; with what
+# follows it (the line break) removed, "sub­\nstitution" is one word again.
+_SOFT_HYPHEN_BREAK = re.compile("­\\s*")
+_APOSTROPHES = re.compile("['‘’ʼ]")
+
+
+def _prepare_text(text: str) -> str:
+    """NFKC (folds the ﬁ and ﬀ ligatures the CS lecture PDFs carry) and
+    soft-hyphen line breaks joined. Line structure is otherwise kept, since
+    key_sentences.content_lines reads it."""
+    return _SOFT_HYPHEN_BREAK.sub("", unicodedata.normalize("NFKC", str(text or "")))
+
+
+def _match_form(text: str) -> str:
+    """The form concept names and document text are compared in: prepared as
+    above, apostrophes folded (fusion's canonical names drop them, so
+    "laplaces demon" has to find "Laplace's demon"), then lowercased with
+    separators and whitespace collapsed. Applied to both sides."""
+    return _normalise_relation(_APOSTROPHES.sub("", _prepare_text(text)))
+
+
+def _occurrences(name: str, text: str, others=()) -> list[int]:
     """
     Every place a concept appears in a document's normalised text, in order.
 
-    Tries the name, then its singular or plural, then its longest word, and
-    uses the first of those that appears at all, since extracted names are
-    often a rewording ("data structure augmentation" for a lecture that says
-    "augment"). The longest word is the most specific one and least likely to
-    hit an unrelated mention.
+    The name is matched as whole words, allowing a plural. Longer concept
+    names in `others` that contain it are masked first, so "binary search" is
+    not found inside every "binary search tree" — that put Lecture 5's BST
+    insertion pick in the binary search section.
+
+    When the name itself never appears, its longest word (five letters or
+    more) stands in, since extracted names are often a rewording ("data
+    structure augmentation" for a lecture that says "augment") — but only
+    when that word is rare in the document (_FALLBACK_MAX_HITS). A common
+    word is not evidence of the concept.
     """
-    key = _normalise_relation(name)
+    key = _match_form(name)
     if not key:
         return []
-    variants = [key, key[:-1] if key.endswith("s") else key + "s"]
+    masked = text
+    for other in sorted({_match_form(o) for o in others}, key=len, reverse=True):
+        if other and other != key and re.search(rf"\b{re.escape(key)}\b", other):
+            masked = re.sub(_name_pattern(other), lambda m: " " * len(m.group()), masked)
+    hits = [m.start() for m in re.finditer(_name_pattern(key), masked)]
+    if hits:
+        return hits
     words = [w for w in re.split(r"[^a-z0-9]+", key) if len(w) >= 5]
-    if words:
-        variants.append(max(words, key=len))
-    for variant in variants:
-        hits = [m.start() for m in re.finditer(rf"\b{re.escape(variant)}", text)]
-        if hits:
-            return hits
-    return []
+    if not words or len(words) == len(key.split()) == 1:
+        return []
+    hits = [m.start() for m in re.finditer(_name_pattern(max(words, key=len)), masked)]
+    return hits if len(hits) <= _FALLBACK_MAX_HITS else []
 
 
 def _first_position(name: str, text: str) -> Optional[int]:
@@ -1310,7 +1194,7 @@ def _content_body(text: str) -> str:
     of Lecture 5, and the overview list put "avl tree" at 2% of Lecture 6,
     ahead of where either lecture teaches them.
     """
-    return _normalise_relation(key_sentences.content_text(text))
+    return _match_form(key_sentences.content_text(_prepare_text(text)))
 
 
 def concept_occurrences(concept_names, sources_by_concept, doc_order, texts):
@@ -1332,7 +1216,7 @@ def concept_occurrences(concept_names, sources_by_concept, doc_order, texts):
                 continue
             body = bodies.get(doc, "")
             spots += [(rank[doc], pos / max(len(body), 1))
-                      for pos in _occurrences(name, body)]
+                      for pos in _occurrences(name, body, concept_names)]
         if spots:
             out[name] = sorted(spots)
     return out
@@ -1341,30 +1225,10 @@ def concept_occurrences(concept_names, sources_by_concept, doc_order, texts):
 def concept_positions(occurrences):
     """
     Where each concept first appears: {name: (document index, fraction)}, the
-    earliest of its occurrences. Used by the plan prompt for grouping and by
-    order_sections for the final order.
+    earliest of its occurrences. group_by_document places each concept in
+    its document, and its range of a split one, by this.
     """
     return {name: spots[0] for name, spots in occurrences.items()}
-
-
-def order_sections(sections, positions):
-    """
-    Reorders sections by where their material first appears in the source:
-    document order first, then position within the document.
-
-    The model orders "foundations to consequences" from relation pairs alone
-    and has no idea where anything sits in the lecture, so on Lectures 5 + 6
-    it put the runway reservation problem, which opens Lecture 5 and motivates
-    everything after it, last. A lecture already orders its material for
-    teaching, so the source order is used instead.
-
-    A section sits at its earliest concept. Concepts found in no text sort
-    after everything placed; ties keep the model's order.
-    """
-    unplaced = (float("inf"), float("inf"))
-    placed = [(min((positions.get(n, unplaced) for n in s["concepts"]), default=unplaced), i, s)
-              for i, s in enumerate(sections)]
-    return [s for _, _, s in sorted(placed, key=lambda t: (t[0], t[1]))]
 
 
 # ---------------------------------------------------------------------------
@@ -1435,6 +1299,19 @@ async def assign_must_cover(sections, doc_order, occurrences, texts) -> list[lis
     _ASSIGN_TIE of the closest are tied, and the pick goes to whichever one's
     concept names it is most similar to. A pick whose document holds none of
     the sections' concepts is placed on similarity alone.
+
+    A pick only goes to a section of its own document, whenever that
+    document has any: a section is written from its own document's chunks,
+    so a pick from another would be a sentence it cannot see. Lecture 6's
+    "BSTs support insert, delete ... in O(h)" otherwise went to Lecture 5's
+    BST section, whose names Lecture 6 had copied.
+
+    When the sections carry text ranges (group_by_document), a pick whose
+    position is found in the text goes to the section whose range contains
+    it, and the concept-distance rule above is only the fallback for a pick
+    that cannot be located. Distance let one concept named all through a
+    document ("avl tree" in Lecture 6) take every pick, which left Lecture
+    6's second range empty.
     """
     empty = [[] for _ in sections]
     picks = await document_picks(texts)
@@ -1451,32 +1328,120 @@ async def assign_must_cover(sections, doc_order, occurrences, texts) -> list[lis
         for p in items:
             # Placed in the same text concept_occurrences measured, so the
             # two fractions compare; the raw fraction is the fallback.
-            key = _normalise_relation(p["text"])[:40]
+            key = _match_form(p["text"])[:40]
             at = body.find(key) if key else -1
             frac = at / max(len(body), 1) if at >= 0 else p["fraction"]
-            flat.append((rank[doc], frac, p["text"]))
+            flat.append((rank[doc], frac, p["text"], at >= 0))
     if not flat:
         return empty
 
     def work():
-        return (encode([t for _, _, t in flat]),
+        return (encode([t for _, _, t, _ in flat]),
                 encode([", ".join(s["concepts"]) for s in sections]))
 
     pick_emb, section_emb = await asyncio.to_thread(work)
 
     out: list[list] = [[] for _ in sections]
-    for (doc, frac, text), vec in zip(flat, pick_emb):
-        dist = []
-        for s in sections:
-            near = [abs(f - frac) for c in s["concepts"]
+    for (doc, frac, text, located), vec in zip(flat, pick_emb):
+        own = [i for i, s in enumerate(sections) if s.get("document") == doc_order[doc]]
+        if located and own and all(sections[i].get("range") for i in own):
+            inside = [i for i in own
+                      if sections[i]["range"][0] <= frac < sections[i]["range"][1]
+                      or (frac >= 1.0 and sections[i]["range"][1] >= 1.0)]
+            if inside:
+                out[inside[0]].append((doc, frac, text))
+                continue
+        pool = own or list(range(len(sections)))
+        dist = {}
+        for i in pool:
+            near = [abs(f - frac) for c in sections[i]["concepts"]
                     for d, f in occurrences.get(c, ()) if d == doc]
-            dist.append(min(near) if near else float("inf"))
-        best = min(dist)
-        tied = (range(len(sections)) if best == float("inf")
-                else [i for i, d in enumerate(dist) if d <= best + _ASSIGN_TIE])
+            dist[i] = min(near) if near else float("inf")
+        best = min(dist.values())
+        tied = (pool if best == float("inf")
+                else [i for i in pool if dist[i] <= best + _ASSIGN_TIE])
         choice = max(tied, key=lambda i: float(vec @ section_emb[i]))
         out[choice].append((doc, frac, text))
     return [[t for _, _, t in sorted(group)] for group in out]
+
+
+# A section that ends up with this few must-cover picks after assignment has
+# too little of its own to be a section, and merges into a neighbour.
+MERGE_MAX_PICKS = 2
+
+
+def _section_label(section) -> str:
+    """How a section is named before it has a title (merging runs first):
+    its title if set, else its document and first concepts."""
+    if section.get("title"):
+        return section["title"]
+    head = ", ".join(section["concepts"][:3])
+    return f"{section.get('document') or 'mixed'}: {head}"
+
+
+def merge_thin_section(sections, must_cover, positions):
+    """
+    Folds the thinnest section into its nearest neighbour, at most once.
+
+    A section qualifies with MERGE_MAX_PICKS or fewer must-cover picks. Its
+    neighbour must be adjacent and in the same document: each section's
+    document is where its earliest concept is taught. Of two such
+    neighbours, the one whose own start is nearer wins. The neighbour keeps
+    its title. Returns (sections, merged), `merged` naming what went where,
+    or None when nothing qualified. The caller reassigns must-cover picks.
+    """
+    if len(sections) < 2:
+        return sections, None
+
+    def start(s):
+        spots = [positions[c] for c in s["concepts"] if c in positions]
+        return min(spots) if spots else None
+
+    thin = [i for i, picks in enumerate(must_cover) if len(picks) <= MERGE_MAX_PICKS]
+    for i in sorted(thin, key=lambda i: (len(must_cover[i]), i)):
+        here = start(sections[i])
+        if here is None:
+            continue
+        near = []
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(sections):
+                there = start(sections[j])
+                if there is not None and there[0] == here[0]:
+                    near.append((abs(there[1] - here[1]), j))
+        if not near:
+            continue
+        _, j = min(near)
+        into = sections[j]
+        concepts = (sections[i]["concepts"] + into["concepts"] if i < j
+                    else into["concepts"] + sections[i]["concepts"])
+        merged = {**into, "concepts": concepts}
+        if sections[i].get("range") and into.get("range"):
+            # Adjacent ranges of one document, so their union is contiguous.
+            merged["range"] = (min(sections[i]["range"][0], into["range"][0]),
+                               max(sections[i]["range"][1], into["range"][1]))
+        out = [merged if k == j else s for k, s in enumerate(sections) if k != i]
+        return out, {"merged": _section_label(sections[i]), "into": _section_label(into),
+                     "picks": len(must_cover[i])}
+    return sections, None
+
+
+def section_document(concepts, positions, doc_order) -> Optional[str]:
+    """
+    The one document a section belongs to, or None when it spans several.
+
+    Each concept counts for the document where it is first taught
+    (positions). The document holding the most of them is the section's
+    home; a tie between documents, or no placed concept at all, means the
+    section spans several. With one section per document this is the
+    document the section was planned from; only a merge across documents,
+    which merge_thin_section does not make, would leave a tie.
+    """
+    counts = Counter(doc_order[positions[c][0]] for c in concepts
+                     if c in positions and positions[c][0] < len(doc_order))
+    if not counts:
+        return None
+    (top, n), *rest = counts.most_common()
+    return None if rest and rest[0][1] == n else top
 
 
 def _written_sentences(body: dict) -> list[str]:
@@ -1560,6 +1525,11 @@ def build_note(user_id, title, document_ids, filenames, sections,
                 {s for n in names for s in sources_by_concept.get(n, ())}
             ),
             "must_cover": list(section.get("must_cover") or []),
+            "neighbours": section_neighbours(names, edges),
+            # The document the section is written from. Its extracts, and so
+            # its paragraph count, come from this document alone; None means
+            # it spans several and draws on all of the note's documents.
+            "document": section.get("document"),
             "body": None,
             "done": False,
         })
@@ -1680,9 +1650,29 @@ def _title_for(filenames: list[str]) -> str:
 # it was shortened, and called a market economy "also known as a capitalistic
 # economy" where the source lists capitalistic and command as its two kinds.
 #
+# v13: the same call also writes a five-question section quiz. The request
+# carries a distractor pool — concepts one link outside the section, contrasts
+# marked — because concept-map context is what makes distractors plausible
+# (Scaria et al. 2025). MUST COVER points are numbered so a question can say
+# which one it tests. The quiz is checked in code and dropped, never retried.
+#
+# v14: the other sections' must-cover picks are listed as covered elsewhere,
+# not only their concept names, and the paragraph count follows the source
+# length up to 12 instead of stopping at 7. A section that belongs to one
+# document is written from that document's chunks only, which also sets its
+# paragraph count; the document is part of the cache key.
+# v15: table cells must agree with the prose and the extracts for their row.
+# A Lecture 5 section said the k-minute check is O(1) once the insertion point
+# is found, and its table said O(n).
+# v16: sections are smaller (about 3,500 characters) and picks stay in their
+# own document, so what each section is asked to cover changed.
+# v17: picks are assigned by text range and unplaced concepts by neighbours,
+# so sections' concepts and must-cover lists changed again.
+#
 # Each bump changes the cache key, so bodies written under an older prompt are
-# never served.
-_WRITE_PROMPT_VERSION = "notes-write-v12"
+# never served. Sections written before v13 therefore have no quiz until they
+# are written again.
+_WRITE_PROMPT_VERSION = "notes-write-v17"
 
 # Pinned, not the "-latest" alias document_service uses for OCR. That alias
 # was returning 503 UNAVAILABLE on every attempt while this exact model
@@ -1711,10 +1701,11 @@ _WRITE_SYSTEM = (
     "to a concept listed under COVERED IN OTHER SECTIONS.\n"
     "\n"
     "OTHER SECTIONS OF THE NOTE cover the concepts listed under COVERED IN "
-    "OTHER SECTIONS. The extracts may discuss them too, because they come from "
-    "the same pages. Leave them out: do not explain, define, tabulate or give "
-    "an example of them. Name one only where a sentence about this section's "
-    "own concepts cannot be written without it.\n"
+    "OTHER SECTIONS and the points listed under KEY POINTS COVERED IN OTHER "
+    "SECTIONS. The extracts may discuss them too, because they come from the "
+    "same pages. Leave them out: do not explain, define, tabulate or give an "
+    "example of them. Name one only where a sentence about this section's own "
+    "concepts cannot be written without it.\n"
     "\n"
     "THE RELATIONS ARE NOT MATERIAL TO WRITE FROM. They were extracted from "
     "the same documents and tell you only which connections matter enough to "
@@ -1768,7 +1759,12 @@ _WRITE_SYSTEM = (
     "- example: a worked example, ONLY if the extracts contain one to work "
     "from. Otherwise null.\n"
     "- table: a comparison table, ONLY if the section genuinely contrasts two "
-    "or more things along shared dimensions. Otherwise null.\n"
+    "or more things along shared dimensions. Otherwise null. Every cell must "
+    "agree with the extracts and with what your own prose says about that row: "
+    "never give a different value — a cost, a complexity, a count — in the "
+    "table than the body gives for the same thing. If the body says the "
+    "k-minute check is O(1) once the insertion point is found, the table says "
+    "O(1) too.\n"
     "\n"
     "COMPARISONS. When the extracts compare several structures or options, "
     "give each one's cost separately, as the extracts state it for that one. "
@@ -1808,7 +1804,39 @@ _WRITE_SYSTEM = (
     "defined that briefly, leave it out — the body covers it. Otherwise null.\n"
     "\n"
     "A block with no material is null. Never pad one to fill it, and never "
-    "produce an empty list or an example invented to have something there."
+    "produce an empty list or an example invented to have something there.\n"
+    "\n"
+    "QUIZ. Also fill quiz: five multiple-choice questions on this section, "
+    "each answerable from what you wrote in lead and body alone.\n"
+    "- bloom is the level: about two 'remember' (recall a fact or "
+    "definition), two 'understand' (explain why or how, or tell two ideas "
+    "apart) and one 'apply' (use an idea on a case the section describes).\n"
+    "- d is the difficulty: 'easy', 'medium' or 'hard'.\n"
+    "- One question per MUST COVER point where possible. Never two questions "
+    "on the same fact.\n"
+    "- ref says what the question tests: 'P1', 'P2', ... for a body "
+    "paragraph, counted in the order you wrote them, or 'M1', 'M2', ... for "
+    "a MUST COVER point as numbered in the request.\n"
+    "- o: four options, three only if no fourth plausible one exists. "
+    "Exactly one is correct; a is its 0-based index. Every option is "
+    "different, and the correct answer never reappears reworded as a wrong "
+    "one.\n"
+    "- Wrong options are plausible confusions a student could actually make. "
+    "Prefer concepts from the DISTRACTOR POOL, above all those marked as "
+    "contrasting, or concepts of this section confused with each other. "
+    "Never an option that is also true, never 'all of the above' or 'none "
+    "of the above', never a joke.\n"
+    # Added without bumping _WRITE_PROMPT_VERSION. The prompt text is not in
+    # the cache key, and a bump would rewrite every cached section (one Gemini
+    # call each, on a 20-a-day quota) for a cue that the serve-time shuffle
+    # and the longest_correct count already cover. Cached sections keep the
+    # quiz they were written with; sections written from now on get the line.
+    "- Keep the options about the same length and grammatical form, so the "
+    "longest or most detailed option is not a clue to the answer.\n"
+    "- The question must not give its answer away in its wording.\n"
+    "- why: ONE sentence saying why the answer is right, from the section.\n"
+    "- The DISTRACTOR POOL is for wrong options only. It is not material: "
+    "never explain or teach a pool concept in the notes."
 )
 
 
@@ -1846,6 +1874,22 @@ class _WriteParagraph(BaseModel):
     parts: list[_WriteSpan]
 
 
+class _WriteQuestion(BaseModel):
+    """
+    One section-quiz question, in quiz_service's question shape plus `bloom`
+    and `ref`. Plain strings rather than enums: the values are checked by
+    validate_quiz, which drops a bad question instead of failing the body.
+    `id` is not asked for — it is derived from the text in code.
+    """
+    q: str
+    o: list[str]
+    a: int
+    why: str
+    d: str
+    bloom: str
+    ref: str
+
+
 class _WriteBody(BaseModel):
     """The fixed block structure. Gemini takes this as a responseSchema, so the
     shape is enforced by the API rather than asked for in the prompt and
@@ -1855,6 +1899,7 @@ class _WriteBody(BaseModel):
     example: Optional[_WriteExample] = None
     table: Optional[_WriteTable] = None
     terms: Optional[list[_WriteTerm]] = None
+    quiz: Optional[list[_WriteQuestion]] = None
 
 
 _gemini_client_instance = None
@@ -1883,7 +1928,7 @@ def _gemini_client():
     return _gemini_client_instance
 
 
-def _write_key(section: dict, other_concepts=()) -> str:
+def _write_key(section: dict, other_concepts=(), other_picks=()) -> str:
     """
     Cache key for one section's prose: prompt version, model, and what the
     section is. Identity is the title, concepts and relations recorded at plan
@@ -1904,7 +1949,12 @@ def _write_key(section: dict, other_concepts=()) -> str:
             for e in section["relations"]
         ),
         "others": sorted(other_concepts),
+        "other_picks": list(other_picks),
         "must_cover": list(section.get("must_cover") or []),
+        # Which document the extracts come from changes what is written.
+        "document": section.get("document"),
+        # The distractor pool is prompt input since v13, so it is identity.
+        "neighbours": section.get("neighbours") or [],
     }, sort_keys=True, ensure_ascii=False)
     digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
     return f"{_WRITE_PROMPT_VERSION}|{GEMINI_MODEL}|section:{digest}"
@@ -1951,37 +2001,36 @@ async def gather_chunks(concept_names, documents=None) -> list[dict]:
     return await asyncio.to_thread(collect)
 
 
-# Body paragraphs per section: about one per two to three concepts, at least
-# two, at most seven. A fixed two to four squeezed Lecture 6's 13 concepts into
-# four paragraphs and the derivations were what got cut.
+# Body paragraphs per section follow the source: about one per
+# PARAGRAPH_SOURCE_CHARS characters of the extracts the section is written
+# from, and never more than PARAGRAPH_CEILING. The concept count sets the
+# floor (about one paragraph per three concepts, at least two), unless the
+# source is too short to fill it. A fixed maximum of seven squeezed a whole
+# lecture into seven paragraphs once a section became a document; the length
+# rule is what stopped a two-page handout from being padded to seven and
+# repeating its equilibrium explanation three times.
 MIN_PARAGRAPHS = 2
-MAX_PARAGRAPHS = 7
-
-
-# The paragraph count is also capped by how much source text the section is
-# written from: about one paragraph per this many characters of extracts. A
-# two-page economics handout (about 2,500 characters of bullets) holding 17
-# concepts was asked for six to seven paragraphs and repeated its equilibrium
-# explanation three times to fill them. Lecture 6 (4,890 characters) still
-# gets the full seven.
+PARAGRAPH_CEILING = 12
 PARAGRAPH_SOURCE_CHARS = 650
 
 
 def paragraph_range(n_concepts: int, source_chars: Optional[int] = None) -> tuple[int, int]:
     """
     (fewest, most) body paragraphs for a section of `n_concepts` written from
-    `source_chars` characters of extracts: the smaller of the concept-based
-    range and the length-based cap, never below MIN_PARAGRAPHS.
+    `source_chars` characters of extracts. Without a length, the concept
+    count alone decides: one per three to one per two, within the ceiling.
     """
-    least = min(MAX_PARAGRAPHS, max(MIN_PARAGRAPHS, -(-n_concepts // 3)))
-    most = min(MAX_PARAGRAPHS, max(least, -(-n_concepts // 2)))
-    if source_chars is not None:
-        cap = max(MIN_PARAGRAPHS, source_chars // PARAGRAPH_SOURCE_CHARS)
-        least, most = min(least, cap), min(most, cap)
+    by_concepts = max(MIN_PARAGRAPHS, -(-n_concepts // 3))
+    if source_chars is None:
+        least = min(PARAGRAPH_CEILING, by_concepts)
+        return least, min(PARAGRAPH_CEILING, max(least, -(-n_concepts // 2)))
+    by_length = max(MIN_PARAGRAPHS, source_chars // PARAGRAPH_SOURCE_CHARS)
+    least = min(PARAGRAPH_CEILING, max(MIN_PARAGRAPHS, min(by_concepts, by_length)))
+    most = max(least, min(PARAGRAPH_CEILING, by_length))
     return least, most
 
 
-def build_write_prompt(section: dict, chunks: list[dict], other_concepts=()) -> str:
+def build_write_prompt(section: dict, chunks: list[dict], other_concepts=(), other_picks=()) -> str:
     """
     The material half of the write prompt.
 
@@ -2000,6 +2049,15 @@ def build_write_prompt(section: dict, chunks: list[dict], other_concepts=()) -> 
     if other_concepts:
         lines += ["COVERED IN OTHER SECTIONS — leave these out:",
                   ", ".join(sorted(other_concepts)), ""]
+    if other_picks:
+        # The other sections' own key points, not just their concept names:
+        # Lecture 6 is one chunk, so every section's extracts hold all of it,
+        # and names alone left two sections both writing the AVL insert
+        # example and the heap vs AVL table.
+        lines += ["KEY POINTS COVERED IN OTHER SECTIONS — the extracts include "
+                  "these, but other sections teach them; leave them out:"]
+        lines += [f"- {p}" for p in other_picks]
+        lines.append("")
 
     lines.append("SOURCE EXTRACTS — write the section from these:")
     if chunks:
@@ -2014,21 +2072,39 @@ def build_write_prompt(section: dict, chunks: list[dict], other_concepts=()) -> 
             "MUST COVER — the source's key points for this section. Cover each "
             "one in your own words. They do not override the rules: nothing "
             "beyond the extracts, and nothing that belongs to COVERED IN OTHER "
-            "SECTIONS.",
+            "SECTIONS. Quiz refs use these numbers.",
         ]
-        lines += [f"- {p}" for p in section["must_cover"]]
+        lines += [f"M{i}. {p}" for i, p in enumerate(section["must_cover"], 1)]
         lines.append("")
 
     if section["relations"]:
         lines += [
             "CONNECTIONS TO COVER — a checklist, not material to quote. Each "
             "line is a link worth explaining; explain what it means in the "
-            "words of the extracts above, and never use the label itself:",
+            "words of the extracts above, and never use the label itself. "
+            "[contrast] marks two ideas the source sets against each other:",
         ]
         lines += [f"- {e['from']} / {e.get('relation', 'relates to')} / {e['to']}"
+                  + (" [contrast]" if is_contrast(e.get("relation")) else "")
                   for e in section["relations"]]
     else:
         lines.append("CONNECTIONS TO COVER: none recorded between these concepts.")
+
+    pool = section.get("neighbours") or []
+    lines.append("")
+    if pool:
+        lines += [
+            "DISTRACTOR POOL — concepts one link outside this section. Use them "
+            "only as wrong quiz options; never explain them in the notes:",
+        ]
+        for n in pool:
+            if n.get("contrasts"):
+                lines.append(f"- {n['name']} — contrasts with {', '.join(n['contrasts'])}")
+            else:
+                lines.append(f"- {n['name']} — linked to {', '.join(n['links'])}")
+    else:
+        lines.append("DISTRACTOR POOL: none — draw wrong options from this "
+                     "section's own concepts.")
     return "\n".join(lines)
 
 
@@ -2170,6 +2246,150 @@ def find_label_violations(body: dict, relations: list[dict]) -> list[tuple[str, 
     return found
 
 
+# Section quiz. Five asked for; fewer than QUIZ_MIN_QUESTIONS surviving the
+# checks is not worth offering, and the section is saved without one.
+QUIZ_QUESTIONS = 5
+QUIZ_MIN_QUESTIONS = 3
+_QUIZ_DIFFICULTIES = ("easy", "medium", "hard")
+_QUIZ_BLOOM = {"remember": "easy", "understand": "medium", "apply": "hard"}
+_QUIZ_REF = re.compile(r"^\s*([PM])\s*(\d+)\s*$", re.I)
+
+
+def _quiz_ref(raw, paragraphs: int, must_cover: int) -> Optional[dict]:
+    """'P2' or 'M1' as {"kind", "index"} (0-based), or None when it does not
+    point at anything that exists. A bad ref costs the question its Review
+    link, not the question."""
+    match = _QUIZ_REF.match(str(raw or ""))
+    if not match:
+        return None
+    kind = "paragraph" if match.group(1).upper() == "P" else "must_cover"
+    index = int(match.group(2)) - 1
+    limit = paragraphs if kind == "paragraph" else must_cover
+    return {"kind": kind, "index": index} if 0 <= index < limit else None
+
+
+# Item-writing flaws. The first four drop a question; the last three are
+# counted only, because on the saved quizzes they fired mostly on deliberate
+# contrasts (O(1) / O(n) / O(lg n)) and on correct options that happen to say
+# "all".
+IWF_DROP = ("duplicate_stem", "all_none_of_the_above", "true_false", "answer_in_stem")
+IWF_LOG = ("longest_correct", "absolute_terms", "duplicate_options")
+_STEM_JACCARD = 0.7
+_OPTION_JACCARD = 0.8
+_ABOVE = re.compile(r"\b(?:all|none|both|neither) of (?:the )?(?:above|these|the options)\b", re.I)
+_ABSOLUTE = re.compile(r"\b(?:always|never|all|none|only|every|nothing|completely|entirely)\b", re.I)
+_TRUE_FALSE = frozenset({"true", "false", "yes", "no", "correct", "incorrect"})
+_STOPWORDS = frozenset(
+    "a an the of in on at to for from by with and or is are was were be been being which what "
+    "who whom whose when where why how does do did this that these those it its as into than "
+    "then there their they can could would should will may might must".split())
+
+
+def _content_words(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", _name_key(text))
+    content = {w for w in words if w not in _STOPWORDS}
+    return content or set(words)
+
+
+def _jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0
+
+
+def _flaws(q: str, options: list[str], answer: int, kept_stems: list[set]) -> list[str]:
+    """The item-writing flaws one question shows, by the names in IWF_DROP
+    and IWF_LOG."""
+    found = []
+    stem = _content_words(q)
+    if any(_jaccard(stem, other) >= _STEM_JACCARD for other in kept_stems):
+        found.append("duplicate_stem")
+    if any(_ABOVE.search(o) for o in options):
+        found.append("all_none_of_the_above")
+    if {_name_key(o).rstrip(".!?;: ") for o in options} <= _TRUE_FALSE:
+        found.append("true_false")
+    correct = _name_key(options[answer]).rstrip(".!?;: ")
+    if len(correct) >= 3 and re.search(rf"(?<!\w){re.escape(correct)}(?!\w)", _name_key(q)):
+        found.append("answer_in_stem")
+    lengths = [len(o) for o in options]
+    others = [n for i, n in enumerate(lengths) if i != answer]
+    if (lengths.count(max(lengths)) == 1 and lengths[answer] == max(lengths)
+            and lengths[answer] >= 1.25 * (sum(others) / len(others))):
+        found.append("longest_correct")
+    if any(_ABSOLUTE.search(o) for o in options):
+        found.append("absolute_terms")
+    words = [_content_words(o) for o in options]
+    if any(_jaccard(words[i], words[j]) >= _OPTION_JACCARD
+           for i in range(len(words)) for j in range(i + 1, len(words))):
+        found.append("duplicate_options")
+    return found
+
+
+def validate_quiz(items, quiz_id: str, paragraphs: int,
+                  must_cover: int) -> tuple[Optional[list], int, dict]:
+    """
+    The section quiz, checked in code — no second model reads it.
+
+    A question is dropped when it has no question or explanation text, fewer
+    than three or more than four options, an empty option, two options that
+    match once normalised (which also catches the answer repeated as a wrong
+    option), or an answer index out of range; or when it shows one of the
+    IWF_DROP flaws, a stem much like one already kept among them. IWF_LOG
+    flaws are counted and the question kept. Returns (questions, dropped,
+    flags), flags counting every flaw seen by name; questions is None when
+    fewer than QUIZ_MIN_QUESTIONS survive.
+    """
+    kept, stems, dropped = [], [], 0
+    flags = {name: 0 for name in IWF_DROP + IWF_LOG}
+    for item in items or []:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        q = str(item.get("q") or "").strip()
+        why = str(item.get("why") or "").strip()
+        options = [str(o or "").strip() for o in (item.get("o") or [])]
+        answer = item.get("a")
+        # Trailing sentence punctuation is dropped for the comparison, so "the
+        # minimum." repeats "The minimum". Symbols stay: C++ is not C.
+        keys = [_name_key(o).rstrip(".!?;: ") for o in options]
+        if (not q or not why
+                or not 3 <= len(options) <= 4
+                or not all(keys)
+                or len(set(keys)) != len(keys)
+                or not isinstance(answer, int) or isinstance(answer, bool)
+                or not 0 <= answer < len(options)):
+            dropped += 1
+            continue
+        found = _flaws(q, options, answer, stems)
+        for name in found:
+            flags[name] += 1
+        if any(name in IWF_DROP for name in found):
+            dropped += 1
+            continue
+        stems.append(_content_words(q))
+        bloom = str(item.get("bloom") or "").strip().lower()
+        bloom = bloom if bloom in _QUIZ_BLOOM else None
+        d = str(item.get("d") or "").strip().lower()
+        if d not in _QUIZ_DIFFICULTIES:
+            d = _QUIZ_BLOOM.get(bloom, "medium")
+        digest = hashlib.sha1(f"{quiz_id}:{q}".encode("utf-8")).hexdigest()[:10]
+        kept.append({
+            "id": f"{quiz_id}-{digest}", "q": q, "o": options, "a": answer,
+            "why": why, "d": d, "bloom": bloom,
+            "ref": _quiz_ref(item.get("ref"), paragraphs, must_cover),
+        })
+    dropped += max(0, len(kept) - QUIZ_QUESTIONS)
+    kept = kept[:QUIZ_QUESTIONS]
+    return (kept if len(kept) >= QUIZ_MIN_QUESTIONS else None), dropped, flags
+
+
+def section_quiz_id(cache_key: str) -> str:
+    """A section quiz's id, from its write-cache key. Section ids restart with
+    the process; the cache key does not, so results stored against this id
+    still find their quiz after a restart."""
+    return "sec-" + hashlib.sha1(cache_key.encode("utf-8")).hexdigest()[:12]
+
+
 def _rewrite_instruction(violations: list[tuple[str, str]]) -> str:
     """The correction appended to the prompt for the one retry."""
     lines = [
@@ -2238,14 +2458,15 @@ def _is_transient(exc: Exception) -> bool:
                 "INTERNAL", "429", "503"))
 
 
-async def write_body(section: dict, documents=None,
-                     other_concepts=()) -> tuple[Optional[dict], Optional[float]]:
+async def write_body(section: dict, documents=None, other_concepts=(),
+                     other_picks=()) -> tuple[Optional[dict], Optional[float]]:
     """
     Writes one section's prose. Consults the write cache first and writes back
     on success.
 
     `documents` are the note's files, which extracts are limited to;
-    `other_concepts` are what the note's other sections cover.
+    `other_concepts` are what the note's other sections cover, and
+    `other_picks` their must-cover sentences.
 
     Returns (body, retry_after) — the block structure, or None with the wait
     the model server asked for when it refused on quota.
@@ -2257,7 +2478,7 @@ async def write_body(section: dict, documents=None,
     section = {**section, "relations": [
         e for e in section["relations"] if str(e.get("summary") or "").strip()
     ]}
-    cache_key = _write_key(section, other_concepts)
+    cache_key = _write_key(section, other_concepts, other_picks)
     cached = _load_write_cache().get(cache_key)
     if isinstance(cached, dict) and cached.get("lead"):
         return cached, None
@@ -2272,7 +2493,7 @@ async def write_body(section: dict, documents=None,
               f"({len(section['concepts'])} concepts) — nothing to write from.")
         return None, None
 
-    prompt = build_write_prompt(section, chunks, other_concepts)
+    prompt = build_write_prompt(section, chunks, other_concepts, other_picks)
     body, retry_after = await _generate_body(client, prompt)
     if body is None:
         return None, retry_after
@@ -2313,6 +2534,19 @@ async def write_body(section: dict, documents=None,
     ]
     body["sources"] = sorted({c.get("source") for c in chunks if c.get("source")})
     body["chunks_used"] = len(chunks)
+
+    # Checked, never retried: a section with a weak quiz is saved without one
+    # rather than costing another call or failing the write.
+    quiz_id = section_quiz_id(cache_key)
+    quiz, dropped, flags = validate_quiz(body.get("quiz"), quiz_id, len(body.get("body") or []),
+                                         len(section.get("must_cover") or []))
+    body["quiz"] = quiz
+    body["quiz_id"] = quiz_id if quiz else None
+    body["quiz_dropped"] = dropped
+    body["quiz_flags"] = flags
+    logger.info("notes_write_quiz section=%s kept=%d dropped=%d flags=%s",
+                section["id"], len(quiz or []), dropped,
+                {name: n for name, n in flags.items() if n})
 
     await _store_written(cache_key, body)
     return body, None
@@ -2407,8 +2641,15 @@ async def _generate_body(client, prompt: str) -> tuple[Optional[dict], Optional[
         try:
             parsed = _WriteBody.model_validate_json(response.text or "")
         except (ValidationError, AttributeError) as exc:
-            print(f"Notes write: unusable response — {exc}")
-            return None, None
+            # A malformed quiz must not cost the section: try again without it.
+            try:
+                raw = json.loads(response.text or "")
+                raw.pop("quiz", None)
+                parsed = _WriteBody.model_validate(raw)
+                print(f"Notes write: quiz unusable, section kept without it — {exc}")
+            except (ValidationError, ValueError, TypeError, AttributeError):
+                print(f"Notes write: unusable response — {exc}")
+                return None, None
 
     body = normalise_unicode(
         parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
@@ -2440,7 +2681,9 @@ class PlanRequest(BaseModel):
 @router.post("/api/notes/plan", status_code=201)
 async def plan_note(body: PlanRequest, user=Depends(current_user)):
     """
-    Groups the concepts of the given documents into revision sections.
+    Plans a note: one section per document, or contiguous ranges of a long
+    one, each holding the concepts first taught there. Must-cover picks are
+    assigned, a thin section is merged, and one model call titles the rest.
 
     Sections come back empty: this decides what each one covers, not what it
     says. Filling a body in is the write step.
@@ -2457,8 +2700,8 @@ async def plan_note(body: PlanRequest, user=Depends(current_user)):
             detail="Nothing has been extracted from those documents yet. "
                    "Wait for processing to finish, then try again.",
         )
-    # Derived here only for the diagnostics below. Planning re-derives them per
-    # subproblem, since a part's constraints are the edges inside that part.
+    # Diagnostics only: grouping no longer uses the relations, but a corpus
+    # whose labels this classifier cannot read is still worth reporting.
     ordering, cohesion = derive_constraints(edges)
 
     # A corpus whose extractor favours verbs this vocabulary does not know
@@ -2474,7 +2717,7 @@ async def plan_note(body: PlanRequest, user=Depends(current_user)):
               f"label the classifier does not know: {list(unrecognised)[:8]}")
 
     source_cap = source_section_cap(filenames)
-    logger.info("notes_plan concepts=%d max_sections=%s",
+    logger.info("notes_plan concepts=%d sections_by_length=%s",
                 len(concept_names), source_cap if source_cap is not None else "unknown")
 
     doc_order = _document_order(user["id"], body.document_ids)
@@ -2482,29 +2725,37 @@ async def plan_note(body: PlanRequest, user=Depends(current_user)):
     occurrences = concept_occurrences(concept_names, sources_by_concept, doc_order, texts)
     positions = concept_positions(occurrences)
 
-    trace: list[dict] = []
-    sections = await plan_sections(
-        concept_names, edges,
-        _plan_key(_PLAN_PROMPT_VERSION, body.document_ids, body.days),
-        trace, source_cap=source_cap, locality=(doc_order, positions),
-    )
-    if sections is None:
-        raise HTTPException(
-            status_code=503,
-            detail="The AI Service is temporarily down. Please try again later.",
-        )
-
+    sections = group_by_document(concept_names, sources_by_concept, doc_order, positions, texts,
+                                 edges=edges, encode=_encoder())
     if not sections:
         raise HTTPException(
-            status_code=503,
-            detail="The AI Service returned an unusable plan. Please try again.",
+            status_code=400,
+            detail="None of those documents' concepts could be placed in their text.",
         )
 
-    sections = order_sections(sections, positions)
-
     must_cover = await assign_must_cover(sections, doc_order, occurrences, texts)
+    sections, merged = merge_thin_section(sections, must_cover, positions)
+    if merged:
+        logger.info("notes_plan_merge merged=%r into=%r picks=%d",
+                    merged["merged"], merged["into"], merged["picks"])
+        must_cover = await assign_must_cover(sections, doc_order, occurrences, texts)
+
+    # The one model call: titles for sections that are already decided. It
+    # can fail without failing the plan — the sections are named from their
+    # documents instead.
+    titles_key = _call_key(_plan_key(_PLAN_PROMPT_VERSION, body.document_ids, body.days),
+                           "titles", ["\x01".join(s["concepts"]) for s in sections])
+    titles = await request_titles(sections, titles_key)
+    if titles is None:
+        print("Notes plan: titles call unavailable — naming sections after their documents.")
+    sections = name_sections(sections, titles)
+
     for section, picks in zip(sections, must_cover):
         section["must_cover"] = picks
+        # Grouping already fixed each section's document; a merge keeps the
+        # neighbour's. section_document is the check for anything spanning two.
+        section["document"] = (section.get("document")
+                               or section_document(section["concepts"], positions, doc_order))
     logger.info("notes_plan sections=%d must_cover=%d per_section=%s",
                 len(sections), sum(len(p) for p in must_cover),
                 [len(p) for p in must_cover])
@@ -2533,7 +2784,9 @@ async def plan_note(body: PlanRequest, user=Depends(current_user)):
             "unrecognised_edges": sum(unrecognised.values()),
             "unrecognised_labels": unrecognised,
         },
-        "plan": summarise_trace(trace),
+        "plan": {"grouping": "per document", "sections": len(sections),
+                 "titles": "model" if titles is not None else "fallback",
+                 "merged": merged},
     }
 
 
@@ -2553,6 +2806,27 @@ async def plan_note(body: PlanRequest, user=Depends(current_user)):
 _WRITES_IN_FLIGHT: dict[int, asyncio.Task] = {}
 
 
+def section_sources(note: dict, section: dict) -> set[str]:
+    """The documents a section's extracts are retrieved from: its own
+    document when it has one, else all of the note's. Cross-document links
+    still reach it through its relations, shown under Connections."""
+    home = section.get("document")
+    return {home} if home in note["documents"] else set(note["documents"])
+
+
+def _register_quiz(user_id, note: dict, section: dict) -> None:
+    """Records a written section's quiz with its note and section titles, so
+    the Quiz tab can list it after the in-memory note is gone."""
+    body = section.get("body") or {}
+    if not body.get("quiz") or not body.get("quiz_id"):
+        return
+    from services.quiz_service import register_section_quiz, shuffle_quiz
+    # Stored in the order the section serves it, so the Quiz tab and the
+    # Notes pane show the same options in the same places.
+    register_section_quiz(user_id, body["quiz_id"], note["title"], section["title"],
+                          section["index"], shuffle_quiz(body["quiz"]))
+
+
 @router.post("/api/notes/sections/{section_id}/write", status_code=201)
 async def write_section(section_id: int, user=Depends(current_user)):
     """
@@ -2568,8 +2842,9 @@ async def write_section(section_id: int, user=Depends(current_user)):
         raise HTTPException(status_code=404, detail="That section no longer exists.")
 
     if section["body"] is not None:
-        return {"section": _section_public(section), "note_id": note["id"],
-                "generated": False}
+        _register_quiz(user["id"], note, section)
+        return {"section": _section_public(section, _passed_quizzes(user["id"])),
+                "note_id": note["id"], "generated": False}
 
     if _gemini_client() is None:
         raise HTTPException(
@@ -2580,7 +2855,10 @@ async def write_section(section_id: int, user=Depends(current_user)):
     task = _WRITES_IN_FLIGHT.get(section_id)
     if task is None:
         others = [c for s in note["sections"] if s is not section for c in s["concepts"]]
-        task = asyncio.create_task(write_body(section, set(note["documents"]), others))
+        other_picks = [p for s in note["sections"] if s is not section
+                       for p in s.get("must_cover") or []]
+        task = asyncio.create_task(
+            write_body(section, section_sources(note, section), others, other_picks))
         _WRITES_IN_FLIGHT[section_id] = task
         task.add_done_callback(lambda _t: _WRITES_IN_FLIGHT.pop(section_id, None))
 
@@ -2601,8 +2879,9 @@ async def write_section(section_id: int, user=Depends(current_user)):
         raise HTTPException(status_code=503, detail=detail, headers=headers)
 
     section["body"] = body
-    return {"section": _section_public(section), "note_id": note["id"],
-            "generated": True}
+    _register_quiz(user["id"], note, section)
+    return {"section": _section_public(section, _passed_quizzes(user["id"])),
+            "note_id": note["id"], "generated": True}
 
 
 @router.get("/api/notes")

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Quiz landing illustration: an open set of notes, a question card with one
+  answer ticked, and a small concept map linking them.
+  Source: drawn by hand for StudyGraph (original work, no third-party art).
+  Licence: part of this project; no attribution required.
+  Colours are the app's tokens: accent #22503c, accent tint rgba(34,80,60,0.09),
+  cream #f1ead9 and line #e4dac2. (No double hyphens in this comment: XML
+  forbids them there, and the file would not load.)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 250" fill="none"
+     stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="">
+  <!-- ground line -->
+  <path d="M40 222h480" stroke="#e4dac2" stroke-width="2"/>
+
+  <!-- open notes, left -->
+  <g transform="translate(62 70)">
+    <path d="M0 14c34-10 68-10 102 0v132c-34-10-68-10-102 0z" fill="#f1ead9" stroke="#22503c" stroke-width="2.2"/>
+    <path d="M102 14c34-10 68-10 102 0v132c-34-10-68-10-102 0z" fill="#ffffff" stroke="#22503c" stroke-width="2.2"/>
+    <path d="M102 14v132" stroke="#22503c" stroke-width="2.2"/>
+    <g stroke="#22503c" stroke-width="2" opacity="0.55">
+      <path d="M18 40h66M18 58h58M18 76h66M18 94h46M18 112h62"/>
+      <path d="M120 40h62M120 58h66M120 76h40"/>
+    </g>
+    <path d="M120 98h64" stroke="#22503c" stroke-width="7" opacity="0.14"/>
+    <path d="M120 98h54" stroke="#22503c" stroke-width="2"/>
+    <path d="M120 116h60" stroke="#22503c" stroke-width="2" opacity="0.55"/>
+  </g>
+
+  <!-- concept map, top middle -->
+  <g stroke="#22503c" stroke-width="2">
+    <path d="M262 58l44 22M306 80l40-30M306 80l10 44" opacity="0.6"/>
+    <circle cx="262" cy="58" r="9" fill="#ffffff"/>
+    <circle cx="306" cy="80" r="11" fill="#22503c"/>
+    <circle cx="346" cy="50" r="7" fill="#ffffff"/>
+    <circle cx="316" cy="124" r="8" fill="#ffffff"/>
+  </g>
+
+  <!-- question card, right -->
+  <g transform="translate(338 92)">
+    <rect x="0" y="0" width="160" height="124" rx="14" fill="#ffffff" stroke="#22503c" stroke-width="2.2"/>
+    <path d="M18 24h92" stroke="#22503c" stroke-width="2.6"/>
+    <g stroke="#22503c" stroke-width="2">
+      <rect x="18" y="42" width="124" height="20" rx="6" fill="rgba(34,80,60,0.09)"/>
+      <circle cx="31" cy="52" r="5" fill="#22503c"/>
+      <path d="M28.6 52.2l1.7 1.7 3.2-3.4" stroke="#ffffff" stroke-width="1.6"/>
+      <path d="M44 52h58"/>
+      <rect x="18" y="68" width="124" height="20" rx="6" opacity="0.5"/>
+      <circle cx="31" cy="78" r="5" opacity="0.5"/>
+      <path d="M44 78h48" opacity="0.5"/>
+      <rect x="18" y="94" width="124" height="20" rx="6" opacity="0.5"/>
+      <circle cx="31" cy="104" r="5" opacity="0.5"/>
+      <path d="M44 104h64" opacity="0.5"/>
+    </g>
+  </g>
+
+  <!-- link from the notes to the card -->
+  <path d="M266 150c24 18 48 22 70 16" stroke="#22503c" stroke-width="2" stroke-dasharray="3 7" opacity="0.5"/>
+</svg>

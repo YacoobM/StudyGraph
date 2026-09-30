@@ -14,6 +14,7 @@ from repositories.documents import document_public
 from repositories.users import current_user
 from schemas.documents import DocumentPatch
 from api.routes.upload import start_upload_pipeline
+from services.quiz_service import document_title
 
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -31,7 +32,9 @@ async def list_documents(user: sqlite3.Row = Depends(current_user)):
 			(user["id"],),
 		).fetchall()
 
-	docs = [document_public(row) for row in rows]
+	# `title` is the same name the Quiz tab shows: the document's own title
+	# line from its stored text, else the cleaned filename.
+	docs = [{**document_public(row), "title": document_title(row["filename"])} for row in rows]
 	return {
 		"documents": docs,
 		"totals": {

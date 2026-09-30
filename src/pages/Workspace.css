@@ -235,6 +235,18 @@
   .node-card { display: none; }
 }
 
+/* Phone widths: the title and the five tabs no longer fit on one line, and
+   the row pushed every tab's content off the side of the screen. The header
+   wraps instead, and the tab bar scrolls within itself. Desktop is unchanged. */
+@media (max-width: 620px) {
+  .ws-top { flex-wrap: wrap; row-gap: 6px; }
+  .ws-top > div:first-child { min-width: 0; max-width: 100%; }
+  .ws-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .ws-tabs::-webkit-scrollbar { display: none; }
+  .ws-tab { flex: none; padding: 9px 11px; }
+}
+
 
 /* Week scrubber over the dark graph card. The range input itself uses the
    prototype's .scrub rule in studygraph.css; this is just the pill around it. */

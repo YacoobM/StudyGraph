@@ -19,8 +19,9 @@
  *   twenty to thirty seconds, so getSection is the slow call, not listNotes.
  *
  *   Notes live in the backend process, not a database. They disappear when it
- *   restarts, and section completion is not stored at all — setSectionDone
- *   stays local here until there is somewhere to put it.
+ *   restarts. A section comes back done when its quiz has a saved passing
+ *   attempt; anything else setSectionDone records, including unticking a
+ *   passed section, stays local here and is lost on reload.
  */
 
 import { planNote, fetchNotes, fetchNote, writeSection } from '../services/api.js'
@@ -167,6 +168,13 @@ function toSection(raw, noteId, index) {
     terms: body.terms?.length
       ? body.terms.map((t) => [t.term, t.definition])
       : null,
+
+    // The section quiz, written by the same call as the body. Null for a
+    // section written before quizzes existed, or whose quiz failed the checks.
+    quiz: body.quiz?.length ? body.quiz : null,
+    quizId: body.quiz_id || null,
+    // Correct answers that complete the section, from quiz_service.pass_mark.
+    passMark: body.quiz_pass_mark ?? null,
 
     // Nothing produces these yet; the components already skip them when null.
     evolution: null,
