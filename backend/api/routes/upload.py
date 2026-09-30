@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
-import traceback
+import mimetypes
+from repositories.database import connect
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -418,7 +418,7 @@ async def start_upload_pipeline(
         "error": None,
     }
     try:
-        pages = extract_text(file_bytes, safe_filename)
+        pages = await extract_text(file_bytes, safe_filename)
     except Exception as error:
         _update_document_status(document_id, "error", error=str(error))
         logger.exception("upload_document_read_failed filename=%s document_id=%s", safe_filename, document_id)
@@ -627,16 +627,38 @@ async def get_pipeline_status():
 
 @router.get("/api/files/{filename}")
 async def serve_uploaded_file(filename: str):
-    safe_name = Path(filename).name
-    upload_path = UPLOADS_DIR / safe_name
-    if not upload_path.exists():
+    requested_name = Path(filename).name
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT stored_name
+            FROM documents
+            WHERE filename = ?
+            ORDER BY uploaded_at DESC
+            LIMIT 1
+            """,
+            (requested_name,),
+        ).fetchone()
+
+    if not row:
         raise HTTPException(status_code=404, detail="File not found")
+
+    stored_name = row["stored_name"]
+    upload_path = UPLOADS_DIR / stored_name
+
+    if not upload_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type = mimetypes.guess_type(requested_name)[0] or "application/octet-stream"
+
     return FileResponse(
         upload_path,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{requested_name}"'
+        },
     )
-
 
 @router.get("/api/documents/file/{filename}")
 async def get_document_file(filename: str):

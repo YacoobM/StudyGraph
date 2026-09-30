@@ -108,33 +108,37 @@ class StudyGraphEngine:
         week_key=None,
     ):
         chunks = []
-        full_text = ""
-        position_to_page = []
 
         for p in pages:
-            full_text += p["text"] + " "
-            position_to_page.extend([p["page"]] * (len(p["text"]) + 1))
+            if not isinstance(p, dict):
+                continue
+            
+            page_num = p.get("page")
+            page_text = p.get("text", "")
+            
+            if page_num is None or not isinstance(page_text, str):
+                continue
+            
+            if not page_text.strip(): continue
+            
+            step = max(size - overlap, 1)
+            start = 0
+            while start < len(page_text):
+                end = min(start + size, len(page_text))
+                chunk_text = page_text[start:end]
+                chunk_index = len(chunks)
+                digest = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()[:12]
+                chunk_id = f"{source}:chunk:{chunk_index}:{digest}"
+                chunks.append({
+                    "chunk_id": chunk_id,
+                    "text": chunk_text,
+                    "pages": [page_num],
+                    "source": source,
+                    "index": chunk_index,
+                })
+                start += step
 
-        if not full_text.strip():
-            return []
-
-        step = max(size - overlap, 1)
-        start = 0
-        while start < len(full_text):
-            end = min(start + size, len(full_text))
-            chunk_text = full_text[start:end]
-            spanned_pages = sorted(set(position_to_page[start:end]))
-            chunk_index = len(chunks)
-            digest = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()[:12]
-            chunk_id = f"{source}:chunk:{chunk_index}:{digest}"
-            chunks.append({
-                "chunk_id": chunk_id,
-                "text": chunk_text,
-                "pages": spanned_pages,
-                "source": source,
-                "index": chunk_index,
-            })
-            start += step
+        
 
         self.index_chunks(chunks, week_key=week_key)
 
@@ -196,7 +200,13 @@ class StudyGraphEngine:
         raw_data = None  # so except blocks can always reference it
         known_concepts_by_chunk = known_concepts_by_chunk or {}
 
-        priority_line = "Extract academic concepts and relationships from the text.\n"
+        priority_line = (
+            "Extract specific academic concepts and direct relationships from the text.\n"
+            "CRITICAL RULES FOR ENTITY SELECTION:\n"
+            "1. Do NOT extract overly broad umbrella terms, document titles, chapter headers, or meta-categories "
+            "(e.g., 'introduction', 'overview', 'fundamentals', 'key concepts', 'main subjects', or the overall topic name of the document itself).\n"
+            "2. Extract ONLY specific, granular concepts (e.g., specific algorithms, mechanisms, core functions, formal theories, or distinct components).\n"
+        )
 
         known_lines = []
         for chunk in chunks:
@@ -504,6 +514,10 @@ Respond with ONLY this exact JSON structure:
         """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
         logger.info("graph_fusion_started concepts=%d edges=%d", len(self.concepts), len(self.edges))
         self.reactivate_similar_pruned_concepts()
+        
+        self.remove_document_title_nodes()
+        self.filter_dynamic_hubs(max_degree_ratio=0.15, absolute_max_degree=10)
+        
         logger.info("graph_fusion_using_active_graph concepts=%d edges=%d", len(self.concepts), len(self.edges))
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, self.client)
 
@@ -614,7 +628,64 @@ Respond with ONLY this exact JSON structure:
         if similarities[best_idx] > 0.7:
             return node_names[best_idx]
         return None
+    
 
+    def filter_dynamic_hubs(self, max_degree_ratio=0.15, absolute_max_degree=10):
+        """
+        Dynamically prunes super-hub nodes based on graph connectivity metrics,
+        regardless of the subject domain.
+        """
+        from collections import Counter
+
+        if not self.concepts or not self.edges:
+            return
+
+        # Count degree per concept
+        degrees = Counter()
+        for e in self.edges:
+            degrees[e["from"]] += 1
+            degrees[e["to"]] += 1
+
+        total_unique_concepts = len({c["name"] for c in self.concepts})
+        
+        #Determine degree threshold dynamically based on document size
+        # A node connecting to >15% of all concepts in the document is an umbrella term
+        dynamic_threshold = max(absolute_max_degree, int(total_unique_concepts * max_degree_ratio))
+
+        hub_nodes = {
+            node for node, count in degrees.items() 
+            if count >= dynamic_threshold
+        }
+
+        if hub_nodes:
+            logger.info(
+                "dynamic_hub_pruning removed_hubs=%s threshold=%d total_concepts=%d",
+                hub_nodes, dynamic_threshold, total_unique_concepts
+            )
+            self.concepts = [c for c in self.concepts if c["name"] not in hub_nodes]
+            self.edges = [
+                e for e in self.edges
+                if e["from"] not in hub_nodes and e["to"] not in hub_nodes
+            ]
+
+    def remove_document_title_nodes(self):
+        """Remove concept nodes that simply repeat the overarching graph/document name."""
+        if not self.graph_name:
+            return
+
+        title_words = set(self.graph_name.lower().split())
+        
+        # Filter out nodes that closely match the overall document title
+        self.concepts = [
+            c for c in self.concepts 
+            if c["name"].lower() != self.graph_name.lower()
+        ]
+        self.edges = [
+            e for e in self.edges
+            if e["from"].lower() != self.graph_name.lower() 
+            and e["to"].lower() != self.graph_name.lower()
+        ]
+    
     def get_relevant_subgraph(self, query, top_k_nodes=6, similarity_threshold=0.35):
         if not self.concepts:
             return {"nodes": [], "edges": [], "prompt_text": ""}
