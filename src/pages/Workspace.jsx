@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import ConceptGraph from '../components/ConceptGraph.jsx'
 import QuizPane from '../components/QuizPane.jsx'
+import { documentTitle } from '../utils/documentTitle.js'
 import Inspector from '../components/Inspector.jsx'
 import NotesPane from '../components/NotesPane.jsx'
 import {
@@ -335,7 +336,7 @@ export default function Workspace() {
         <header className="ws-top">
           <div>
             <div className="ws-title">
-              {docs.length ? docs[0].name || docs[0].filename : 'Untitled graph'}
+              {docs.length ? documentTitle(docs[0]) : 'Untitled graph'}
             </div>
             <div className="ws-sub">
               {graph.nodes.length

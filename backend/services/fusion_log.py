@@ -1,14 +1,11 @@
-"""Per-run record of what fusion actually did.
-
-The console line for each step says how many pairs it handled; this says which
-ones, and why each edge that disappeared disappeared. One file per run, named
-by timestamp, so a demo run is not buried under the development ones.
-
-Written by merge_graph at the end of every fusion. Nothing reads it back — it
-exists to be read by a person afterwards, which is why it is text and not JSON.
-"""
+"""Per-run text record of what fusion did and why each dropped edge was dropped. Written by
+merge_graph for a person to read; nothing reads it back."""
 
 from datetime import datetime
+from itertools import count
+
+# Distinguishes two runs started in the same millisecond of one process.
+_RUN_COUNTER = count(1)
 
 
 def _pair(a, b, sim=None):
@@ -17,8 +14,7 @@ def _pair(a, b, sim=None):
 
 
 class FusionLog:
-    """Collects one run's detail. Every field starts empty, so a step that did
-    not run reports that it did not rather than being left out."""
+    """One run's detail. Fields start empty, so a step that did not run says so."""
 
     def __init__(self, model, prompt_versions, settings, documents):
         self.started = datetime.now()
@@ -32,8 +28,9 @@ class FusionLog:
         self.variants = []           # (canonical, [raw variants])
         self.auto_merged = []        # (a, b, sim)
         self.blocked = []            # (a, b, sim)
+        self.modifier_held = []      # (a, b, sim) above auto-merge, asked instead
         self.candidates = []         # (a, b, sim)
-        self.already_linked = []     # (a, b, sim) — dropped before asking
+        self.already_linked = []     # (a, b, sim) dropped before asking
         self.verdicts = []           # (source, a, b, sim, verdict, detail)
         self.verdict_totals = {}
         self.step3_calls = 0
@@ -43,11 +40,13 @@ class FusionLog:
         self.edges_in_detail = ""
         self.edges_out = 0
         self.removals = []           # (kind, description)
+        self.kept_unclassified = []  # (edge, reverse edge) kept both ways, labels unclassified
         self.hubs = []
         self.bridge_candidates = []  # (a, b, [shared neighbours])
         self.bridge_verdicts = []    # (source, a, b, verdict, detail)
         self.bridge_edges = []       # (frm, to, relation)
         self.bridge_calls = 0
+        self.call_failures = {"step3": {}, "step3b": {}, "step5": {}}   # step -> {reason: count}
         self.result = {}
 
     # -- sections -----------------------------------------------------------
@@ -92,6 +91,9 @@ class FusionLog:
         out += [f"    {_pair(a, b, s)}" for a, b, s in self.auto_merged]
         out.append(f"  blocked as negation variants: {len(self.blocked)}")
         out += [f"    {_pair(a, b, s)}" for a, b, s in self.blocked]
+        if self.modifier_held:
+            out.append(f"  held back from auto-merge as modifier variants: {len(self.modifier_held)}")
+            out += [f"    {_pair(a, b, s)}" for a, b, s in self.modifier_held]
         if self.already_linked:
             out.append(f"  already grouped by an auto-merge, not asked: {len(self.already_linked)}")
             out += [f"    {_pair(a, b, s)}" for a, b, s in self.already_linked]
@@ -142,6 +144,11 @@ class FusionLog:
                 out.append(f"    {kind:<{width}}  {detail}")
         else:
             out.append("  nothing removed")
+        if self.kept_unclassified:
+            out.append(f"  {len(self.kept_unclassified)} pair(s) kept both ways only because "
+                       f"their labels are unclassified:")
+            for edge, reverse in self.kept_unclassified:
+                out.append(f"    {edge}   and   {reverse}")
         out += [f"  {self.edges_out} edges out", ""]
 
     def _step5(self, out):
@@ -172,18 +179,32 @@ class FusionLog:
         out.append("result")
         for key, value in self.result.items():
             out.append(f"  {key}: {value}")
+        failed = {step: counts.get("json_validate_failed", 0)
+                  for step, counts in self.call_failures.items()}
+        out.append(f"  json_validate_failed retries: {sum(failed.values())}  ("
+                   + ", ".join(f"{step} {n}" for step, n in failed.items()) + ")")
         out.append(f"  elapsed: {(datetime.now() - self.started).total_seconds():.1f}s")
         return "\n".join(out) + "\n"
 
     def write(self, directory):
-        """Write this run to its own file. Never raises — a log that cannot be
-        written must not fail the fusion that produced it."""
+        """Writes this run to its own file. Never raises: a logging failure must not fail the
+        fusion."""
+        try:
+            text = self.render()
+        except Exception as error:
+            text = ("StudyGraph fusion run\n"
+                    f"log could not be rendered: {type(error).__name__}: {error}\n")
         try:
             directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"fusion_{self.started.strftime('%Y%m%d_%H%M%S')}.log"
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(self.render())
-            return str(path)
-        except OSError as error:
+            stamp = self.started.strftime("%Y%m%d_%H%M%S_") + f"{self.started.microsecond // 1000:03d}"
+            while True:
+                path = directory / f"fusion_{stamp}_{next(_RUN_COUNTER)}.log"
+                try:
+                    with open(path, "x", encoding="utf-8") as handle:
+                        handle.write(text)
+                    return str(path)
+                except FileExistsError:
+                    continue
+        except Exception as error:
             print(f"Fusion log could not be written: {error}")
             return None

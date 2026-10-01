@@ -1,49 +1,109 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { fetchQuiz, saveQuizResult } from "../services/api.js";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchQuiz, fetchQuizResults, fetchSectionQuizzes, generateDocumentQuiz, saveQuizResult,
+} from "../services/api.js";
+import QuizRunner, { BackLink, QuizReview } from "./QuizRunner.jsx";
+import { displayName } from "../utils/documentTitle.js";
+// Drawn for this project in the app's accent colour; see the SVG's header.
+import landingArt from "../assets/quiz-landing.svg";
 
-const PTS = { easy: 10, medium: 20, hard: 30 };
-const MASTERY_THRESHOLD = 2 / 3;
-const LOAD_TIMEOUT_MS = 75000;
+// Pass marks come from the server (quiz_service.pass_mark), never computed here.
 const RING_RADIUS = 28;
 const RING_VIEWBOX = 66;
 const DIFFICULTIES = ["all", "easy", "medium", "hard"];
 
-const maxPointsFor = (questions = []) =>
-  questions.reduce((s, q) => s + (PTS[q.d] || 0), 0);
+/** The server's stored section quizzes in the shape the list renders. */
+const toNoteQuizzes = ({ notes = [] }) => notes.map((n) => ({
+  id: n.title,
+  title: n.title,
+  sections: (n.sections || [])
+    .filter((s) => s.questions?.length)
+    .map((s) => ({
+      quizId: s.quiz_id, title: s.title, quiz: s.questions,
+      passMark: s.pass_mark,
+    })),
+})).filter((n) => n.sections.length);
 
+/** "Sep 30". Fixed to English month names so it reads the same everywhere. */
+const shortDate = (seconds) => (seconds
+  ? new Date(seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  : "");
+
+/** "3 of 5 correct · Sep 30", plus the attempt count only when there is more than one. */
+export function scoreLine(r) {
+  if (!r) return "";
+  const parts = [`${r.best.correct} of ${r.best.total} correct`, shortDate(r.last_at)];
+  if (r.attempts > 1) parts.push(`${r.attempts} attempts`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+/**
+ * Quiz tab: document quizzes (generated only on request) and the quizzes written with note
+ * sections, listed from the server's stored copy. Attempts are saved on the server.
+ */
 export default function QuizPane({ onToast }) {
-  const [topics, setTopics] = useState([]);
+  const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reason, setReason] = useState(null);
-  const [picked, setPicked] = useState([]);
-  const [results, setResults] = useState({}); // topicId -> {correct,total,points,passed}
+  const [error, setError] = useState("");
+  const [results, setResults] = useState({}); // quizId -> server summary
+  const [noteQuizzes, setNoteQuizzes] = useState([]);
+  const [excluded, setExcluded] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [view, setView] = useState("home");   // home | documents | notes
   const [run, setRun] = useState(null);
+  const [review, setReview] = useState(null);
+  const [pollAfter, setPollAfter] = useState(4);
+  const alive = useRef(true);
+
+  const refreshDocs = useCallback(async () => {
+    const data = await fetchQuiz();
+    if (!alive.current) return;
+    setDocs(data.documents || []);
+    setReason(data.reason || null);
+    if (data.poll_after_seconds) setPollAfter(data.poll_after_seconds);
+  }, []);
 
   useEffect(() => {
-    let alive = true;
-    const deadline = setTimeout(() => {
-      if (alive) {
-        setLoading(false);
-        setReason("Question generation is taking longer than expected. Try again in a moment.");
-      }
-    }, LOAD_TIMEOUT_MS);
+    alive.current = true;
     (async () => {
-      try {
-        const data = await fetchQuiz();
-        if (!alive) return;
-        setTopics(data.topics || []);
-        setPicked((data.topics || []).map((t) => t.id));
-        setReason(data.reason || null);
-      } catch (e) {
-        if (alive) setReason(e.message);
-      } finally {
-        clearTimeout(deadline);
-        if (alive) setLoading(false);
-      }
+      const [quiz, res, notes] = await Promise.allSettled([
+        refreshDocs(), fetchQuizResults(), fetchSectionQuizzes(),
+      ]);
+      if (!alive.current) return;
+      if (quiz.status === "rejected") setReason(quiz.reason?.message || "Could not load quizzes.");
+      if (res.status === "fulfilled") setResults(res.value.results || {});
+      if (notes.status === "fulfilled") setNoteQuizzes(toNoteQuizzes(notes.value));
+      setLoading(false);
     })();
-    return () => { alive = false; clearTimeout(deadline); };
-  }, []);
+    return () => { alive.current = false; };
+  }, [refreshDocs]);
+
+  // Poll only while something is generating, and only as long as it is.
+  const generating = docs.some((d) => d.status === "generating");
+  useEffect(() => {
+    if (!generating) return undefined;
+    const t = setTimeout(() => { refreshDocs().catch(() => {}); }, pollAfter * 1000);
+    return () => clearTimeout(t);
+  }, [generating, docs, pollAfter, refreshDocs]);
+
+  async function generate(doc) {
+    setError("");
+    setDocs((rows) => rows.map((d) => (d.document_id === doc.document_id ? { ...d, status: "generating" } : d)));
+    try {
+      const { document } = await generateDocumentQuiz(doc.document_id);
+      setDocs((rows) => rows.map((d) => (d.document_id === doc.document_id ? document : d)));
+    } catch (e) {
+      setError(e.message);
+      refreshDocs().catch(() => {});
+    }
+  }
+
+  const topics = useMemo(
+    () => docs.filter((d) => d.status === "ready" && d.topic)
+      .map((d) => ({ ...d.topic, name: d.title || displayName(d.topic.name) })),
+    [docs],
+  );
 
   const questionsFor = useMemo(() => (topic) => {
     const qs = topic.questions || [];
@@ -53,271 +113,382 @@ export default function QuizPane({ onToast }) {
   const topicStats = useMemo(() => (topicId) => {
     const r = results[topicId];
     const topic = topics.find((t) => t.id === topicId);
-    const max = topic ? maxPointsFor(topic.questions) : 0;
     return {
       attempted: !!r,
-      correct: r?.correct || 0,
-      total: r?.total || topic?.questions.length || 0,
-      pts: r?.points || 0,
-      max,
+      correct: r?.best.correct || 0,
+      total: r?.best.total || topic?.questions.length || 0,
       mastered: !!r?.passed,
+      line: scoreLine(r),
     };
   }, [results, topics]);
 
+  const chosen = topics.filter((t) => !excluded.includes(t.id));
+
   const overall = useMemo(() => {
-    const chosen = topics.filter((t) => picked.includes(t.id));
     const mastered = chosen.filter((t) => topicStats(t.id).mastered).length;
-    const pts = chosen.reduce((s, t) => s + topicStats(t.id).pts, 0);
-    const max = chosen.reduce((s, t) => s + topicStats(t.id).max, 0);
     return {
-      topics: chosen.length, mastered, pts, max,
+      topics: chosen.length, mastered,
       pct: chosen.length ? Math.round((mastered / chosen.length) * 100) : 0,
     };
-  }, [picked, topics, topicStats]);
+  }, [chosen, topicStats]);
 
   const toggleTopic = (id) =>
-    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+    setExcluded((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
-  const startQuiz = (topic) => {
+  async function save(attempt, { quizId }) {
+    try {
+      const res = await saveQuizResult(attempt);
+      if (alive.current) setResults((r) => ({ ...r, [quizId]: res.result }));
+    } catch (e) {
+      // Shown, not swallowed: a lost score is something the reader should know.
+      if (alive.current) setError(`Your score was not saved: ${e.message}`);
+      onToast?.("Score not saved");
+    }
+  }
+
+  const startTopic = (topic) => {
     const questions = questionsFor(topic);
     if (!questions.length) return;
-    setRun({ topic, questions, i: 0, picked: null, checked: false, correct: 0, points: 0, done: false });
+    setReview(null);
+    setRun({ kind: "document", quizId: topic.id, title: topic.name, questions,
+             need: topic.pass_marks?.[filter], key: Date.now() });
   };
 
-  function pickChoice(i) {
-    setRun((r) => (r.checked ? r : { ...r, picked: i }));
+  const startSection = (note, s) => {
+    setReview(null);
+    setRun({ kind: "section", quizId: s.quizId, title: s.title, group: note.title, questions: s.quiz,
+             need: s.passMark, key: Date.now() });
+  };
+
+  function finish(r, { answers, correct, total }) {
+    save({ quizId: r.quizId, kind: r.kind, answers, correct, total, title: r.title, group: r.group || null },
+         { quizId: r.quizId });
+    // A passing section attempt is what ticks the section in Revision notes;
+    // the notes list reads it back from the saved results.
+    if (correct >= (r.need ?? total)) {
+      onToast?.(r.kind === "section" ? "Section complete" : "Topic passed");
+    }
   }
 
-  function checkAnswer() {
-    setRun((r) => {
-      if (r.picked === null) return r;
-      const q = r.questions[r.i];
-      const right = r.picked === q.a;
-      return { ...r, checked: true, correct: r.correct + (right ? 1 : 0), points: r.points + (right ? PTS[q.d] || 0 : 0) };
-    });
-  }
-
-  function nextQuestion() {
-    setRun((r) => {
-      if (r.i + 1 < r.questions.length) {
-        return { ...r, i: r.i + 1, picked: null, checked: false };
-      }
-      const total = r.questions.length;
-      const passed = r.correct / total >= MASTERY_THRESHOLD;
-      setResults((prevAll) => {
-        const prev = prevAll[r.topic.id];
-        if (prev && prev.points >= r.points) return prevAll;
-        return { ...prevAll, [r.topic.id]: { correct: r.correct, total, points: r.points, passed } };
-      });
-      saveQuizResult(r.topic.id, r.correct, total, r.points).catch(() => {});
-      if (passed && onToast) onToast("Topic passed");
-      return { ...r, done: true };
-    });
-  }
-
-  if (run && !run.done) {
-    const { topic, questions, i } = run;
-    const q = questions[i];
-    const pct = Math.round((i / questions.length) * 100);
-    const ok = run.picked === q.a;
-
+  if (run) {
+    const section = run.kind === "section";
     return (
-      <div className="study-wrap"><div className="study-col">
-        <div className="qz-run-top">
-          <button className="qz-back" onClick={() => setRun(null)}>← {topic.name}</button>
-          <span className="qz-run-prog">Question {i + 1} of {questions.length}</span>
-        </div>
-        <div className="qz-run-bar"><span style={{ width: `${pct}%` }} /></div>
-
-        <div className="qz-run-card">
-          <span className={`diff-tag ${q.d}`}>{q.d} · {PTS[q.d]} pts</span>
-          <div className="qz-run-q">{q.q}</div>
-
-          {q.o.map((text, idx) => {
-            let cls = "";
-            if (run.checked) {
-              if (idx === q.a) cls = "right";
-              else if (idx === run.picked) cls = "wrong";
-            } else if (idx === run.picked) cls = "sel";
-            return (
-              <button key={idx} className={`qz-choice ${cls}`} disabled={run.checked} onClick={() => pickChoice(idx)}>
-                <span className="radio">✓</span>{text}
-              </button>
-            );
-          })}
-
-          {run.checked && (
-            <div className={`qz-feedback ${ok ? "" : "miss"}`}>
-              <b>{ok ? "Correct." : "Not quite."}</b> {q.why}
-            </div>
-          )}
-
-          <div className="qz-run-foot">
-            {run.checked ? (
-              <button className="btn-primary2" onClick={nextQuestion}>
-                {i + 1 < questions.length ? "Next question" : "See results"}
-              </button>
-            ) : (
-              <button className="btn-primary2" onClick={checkAnswer} disabled={run.picked === null}
-                      style={run.picked === null ? { opacity: 0.45, cursor: "default" } : undefined}>
-                Check answer
-              </button>
-            )}
-          </div>
-        </div>
-      </div></div>
+      <QuizRunner
+        key={run.key}
+        title={run.title}
+        questions={run.questions}
+        onExit={() => setRun(null)}
+        onFinish={(res) => finish(run, res)}
+        need={run.need}
+        passTitle={section ? "Section complete" : "Topic passed"}
+        passText={section ? "The section is marked complete in your notes." : undefined}
+        failText={section
+          ? `Get ${run.need} of ${run.questions.length} right to complete the section. Another attempt keeps your best score.`
+          : undefined}
+        exitLabel={section ? "Back to quizzes" : "Back to topics"}
+      />
     );
   }
 
-  if (run && run.done) {
-    const total = run.questions.length;
-    const passed = run.correct / total >= MASTERY_THRESHOLD;
-
+  if (review) {
     return (
-      <div className="study-wrap"><div className="study-col">
-        <div className="qz-result">
-          <div className="medal">{passed ? "🏆" : "📚"}</div>
-          <h3>{passed ? "Topic passed" : "Not quite there"}</h3>
-          <p>{passed ? "That material is confirmed covered." : "You need two thirds correct to pass. Another attempt keeps your best score."}</p>
-          <div className="qz-result-stats">
-            <div><div className="n">{run.correct}/{total}</div><div className="l">Correct</div></div>
-            <div><div className="n">{run.points}</div><div className="l">Points</div></div>
-          </div>
-          <div className="qz-result-actions">
-            <button className="btn-primary2" onClick={() => setRun(null)}>Back to topics</button>
-            <button className="btn-secondary" onClick={() => startQuiz(run.topic)}>Try again</button>
-          </div>
-        </div>
-      </div></div>
+      <QuizReview
+        title={review.section.title}
+        questions={review.section.quiz}
+        lastAnswers={results[review.section.quizId]?.last?.answers}
+        onExit={() => setReview(null)}
+        onRetake={() => startSection(review.note, review.section)}
+      />
     );
   }
 
   if (loading) {
     return (
       <div className="study-wrap"><div className="study-col">
-        <div className="qz-empty">
-          Building questions from your documents…
-          <p style={{ marginTop: 6, fontSize: 12.5, opacity: 0.75 }}>First run can take up to a minute. Later visits are instant.</p>
-        </div>
+        <div className="qz-empty">Loading your quizzes…</div>
       </div></div>
     );
   }
 
-  if (!topics.length) {
+  if (view === "home") {
     return (
       <div className="study-wrap"><div className="study-col">
-        <div className="qz-empty">
-          <strong>No questions yet</strong>
-          <p style={{ marginTop: 6 }}>{reason || "Upload a document and StudyGraph will write questions from it."}</p>
+        {error && <div className="nt-error">{error}</div>}
+        <div className="qz-land">
+          <div className="qz-land-banner">
+            <div className="qz-land-copy">
+              <h2 className="qz-land-heading">Choose a quiz</h2>
+              <p className="qz-land-intro">Practise what you've studied, by document or by note section.</p>
+            </div>
+            <img className="qz-land-art" src={landingArt} alt="" aria-hidden="true" />
+          </div>
+          <LandingRow
+            icon={<DocumentIcon />}
+            title="By document"
+            desc="A quiz for each document you upload, written when you ask for it."
+            onClick={() => setView("documents")}
+          />
+          <LandingRow
+            icon={<NoteIcon />}
+            title="From notes"
+            desc="The short quiz that comes with each revision-note section."
+            onClick={() => setView("notes")}
+          />
         </div>
       </div></div>
     );
   }
 
   const ringCircumference = 2 * Math.PI * RING_RADIUS;
-  const chosen = topics.filter((t) => picked.includes(t.id));
+  const back = <div className="qz-list-top"><BackLink onClick={() => setView("home")}>Quizzes</BackLink></div>;
+
+  if (view === "notes") {
+    return (
+      <div className="study-wrap"><div className="study-col">
+        {back}
+        {error && <div className="nt-error">{error}</div>}
+        <div className="qz-section-title">From notes</div>
+        {noteQuizzes.length === 0 ? (
+          <div className="qz-empty">
+            <strong>No section quizzes yet</strong>
+            <p style={{ marginTop: 6 }}>
+              Each revision-note section comes with a short quiz once it has been written.
+              Open a section in Revision notes to get one.
+            </p>
+          </div>
+        ) : noteQuizzes.flatMap((note) => note.sections.map((s) => {
+          const r = results[s.quizId];
+          return (
+            <QuizCard
+              key={s.quizId}
+              title={s.title}
+              badge={r?.passed ? "Complete" : null}
+              meta={note.title}
+              progress={r ? Math.round((r.best.correct / r.best.total) * 100) : 0}
+              line={`${s.quiz.length} questions`}
+              sub={r ? scoreLine(r) : "Not attempted yet"}
+              actions={(
+                <>
+                  <button className="btn-secondary" onClick={() => setReview({ note, section: s })}>Review</button>
+                  <button className={`btn-start ${r ? "retry" : ""}`} onClick={() => startSection(note, s)}>
+                    {r ? "Retake" : "Start"}
+                  </button>
+                </>
+              )}
+            />
+          );
+        }))}
+      </div></div>
+    );
+  }
 
   return (
     <div className="study-wrap"><div className="study-col">
-      <div className="qz-head">
-        <div className="qz-score">
-          <div className="qz-ring">
-            <svg viewBox={`0 0 ${RING_VIEWBOX} ${RING_VIEWBOX}`}>
-              <circle cx={RING_VIEWBOX / 2} cy={RING_VIEWBOX / 2} r={RING_RADIUS} fill="none" stroke="#EFEDE5" strokeWidth="7" />
-              <circle cx={RING_VIEWBOX / 2} cy={RING_VIEWBOX / 2} r={RING_RADIUS} fill="none" stroke="var(--accent)" strokeWidth="7"
-                      strokeLinecap="round"
-                      strokeDasharray={`${(overall.pct / 100) * ringCircumference} ${ringCircumference}`} />
-            </svg>
-            <div className="val">{overall.pct}%</div>
-          </div>
-          <div className="qz-score-body">
-            <div className="lab">Progress</div>
-            <div className="big">{overall.mastered} of {overall.topics} topics passed</div>
-            <div className="sub">Two thirds correct on a topic marks it passed.</div>
-          </div>
-        </div>
-        <div className="qz-points">
-          <div className="lab">Points</div>
-          <div className="big">{overall.pts}</div>
-          <div className="sub">of {overall.max} pts</div>
-        </div>
-      </div>
+      {back}
+      {error && <div className="nt-error">{error}</div>}
+      <div className="qz-section-title">By document</div>
 
-      <div className="qz-block-label">Topics you are studying</div>
-      <div className="qz-topic-picker">
-        {topics.map((t) => (
-          <button key={t.id} className={`qz-pick ${picked.includes(t.id) ? "on" : ""}`} onClick={() => toggleTopic(t.id)}>
-            <span className="tick">✓</span>{t.name}
-          </button>
-        ))}
-      </div>
-
-      <div className="qz-block-label">
-        Filter by difficulty
-        <span className="hint">applies to study plan and topic quizzes</span>
-      </div>
-      <div className="study-toolbar-left">
-        {DIFFICULTIES.map((f) => (
-          <button key={f} className={`chip-btn ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
-            {f === "all" ? "All levels" : f}
-          </button>
-        ))}
-      </div>
-
-      <div className="qz-block-label">Study plan</div>
-      <div className="qz-plan">
-        {chosen.map((t, idx) => {
-          const s = topicStats(t.id);
-          return (
-            <button key={t.id} className={`qz-day ${s.mastered ? "done" : ""}`} onClick={() => startQuiz(t)}>
-              <div className="d"><span>DAY {idx + 1}</span><span>{s.correct}/{s.total}</span></div>
-              <div className="t">{t.name}</div>
-              <div className="s">
-                <span className="qz-check">✓</span>
-                {s.mastered ? "Checkpoint cleared" : "Checkpoint quiz"}
+      {topics.length > 0 && (
+        <>
+          <div className="qz-head">
+            <div className="qz-score">
+              <div className="qz-ring">
+                <svg viewBox={`0 0 ${RING_VIEWBOX} ${RING_VIEWBOX}`}>
+                  <circle cx={RING_VIEWBOX / 2} cy={RING_VIEWBOX / 2} r={RING_RADIUS} fill="none" stroke="#EFEDE5" strokeWidth="7" />
+                  <circle cx={RING_VIEWBOX / 2} cy={RING_VIEWBOX / 2} r={RING_RADIUS} fill="none" stroke="var(--accent)" strokeWidth="7"
+                          strokeLinecap="round"
+                          strokeDasharray={`${(overall.pct / 100) * ringCircumference} ${ringCircumference}`} />
+                </svg>
+                <div className="val">{overall.pct}%</div>
               </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {chosen.length === 0 && <div className="qz-empty">Pick at least one topic to see its quiz.</div>}
-
-      {chosen.map((t) => {
-        const s = topicStats(t.id);
-        const barPct = s.max ? Math.round((s.pts / s.max) * 100) : 0;
-        const questions = questionsFor(t);
-        return (
-          <div className="qz-topic" key={t.id}>
-            <div className="qz-topic-head">
-              <div className="grow">
-                <div className="qz-topic-name">
-                  {t.name}
-                  {s.mastered && <span className="qz-mastered">Mastered</span>}
-                </div>
-                <div className="qz-topic-desc">{t.desc}</div>
-              </div>
-              <div className="qz-topic-meta">
-                <div className="pts">{s.pts}</div>
-                <div className="of">of {s.max} pts</div>
+              <div className="qz-score-body">
+                <div className="lab">Progress</div>
+                <div className="big">{overall.mastered} of {overall.topics} topics passed</div>
+                <div className="sub">Two thirds correct on a topic marks it passed.</div>
               </div>
             </div>
-            <div className="qz-bar"><span style={{ width: `${barPct}%` }} /></div>
-            <div className="qz-list">
-              <div className="qz-row">
-                <div className="qname">
-                  {questions.length} questions
-                  <div className="sub">{filter === "all" ? "mixed difficulty" : filter}</div>
-                </div>
-                {s.attempted && <div className="score">{s.correct}/{s.total}</div>}
-                <button className={`btn-start ${s.attempted ? "retry" : ""}`} onClick={() => startQuiz(t)} disabled={!questions.length}>
-                  {s.mastered ? "Retry" : s.attempted ? "Try again" : "Start"}
+          </div>
+
+          <div className="qz-block-label">Topics you are studying</div>
+          <div className="qz-topic-picker">
+            {topics.map((t) => (
+              <button key={t.id} className={`qz-pick ${excluded.includes(t.id) ? "" : "on"}`} onClick={() => toggleTopic(t.id)}>
+                <span className="tick">✓</span>{t.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="qz-block-label">
+            Filter by difficulty
+            <span className="hint">applies to study plan and topic quizzes</span>
+          </div>
+          <div className="study-toolbar-left">
+            {DIFFICULTIES.map((f) => (
+              <button key={f} className={`chip-btn ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
+                {f === "all" ? "All levels" : f}
+              </button>
+            ))}
+          </div>
+
+          <div className="qz-block-label">Study plan</div>
+          <div className="qz-plan">
+            {chosen.map((t, idx) => {
+              const s = topicStats(t.id);
+              return (
+                <button key={t.id} className={`qz-day ${s.mastered ? "done" : ""}`} onClick={() => startTopic(t)}>
+                  <div className="d"><span>DAY {idx + 1}</span><span>{s.correct}/{s.total}</span></div>
+                  <div className="t">{t.name}</div>
+                  <div className="s">
+                    <span className="qz-check">✓</span>
+                    {s.mastered ? "Checkpoint cleared" : "Checkpoint quiz"}
+                  </div>
                 </button>
-              </div>
-            </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </>
+      )}
+
+      {docs.length === 0 ? (
+        <div className="qz-empty">
+          <strong>No documents yet</strong>
+          <p style={{ marginTop: 6 }}>{reason || "Upload a document and it will be listed here."}</p>
+        </div>
+      ) : docs.map((d) => (
+        <DocumentCard
+          key={d.document_id}
+          doc={d}
+          stats={topicStats(d.quiz_id)}
+          questions={d.topic ? questionsFor(d.topic) : []}
+          filter={filter}
+          onGenerate={() => generate(d)}
+          onStart={() => startTopic(topics.find((t) => t.id === d.quiz_id))}
+        />
+      ))}
     </div></div>
+  );
+}
+
+function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
+  const ready = doc.status === "ready" && doc.topic;
+  const failed = doc.status === "failed";
+  const barPct = ready && stats.total ? Math.round((stats.correct / stats.total) * 100) : 0;
+  const meta = [doc.week, `${doc.concepts} concepts`].filter(Boolean).join(" · ");
+
+  let action;
+  if (doc.status === "too_small") {
+    action = <div className="sub">Too few concepts for a quiz</div>;
+  } else if (doc.status === "generating") {
+    action = <button className="btn-start" disabled>Generating…</button>;
+  } else if (ready) {
+    action = (
+      <button className={`btn-start ${stats.attempted ? "retry" : ""}`} onClick={onStart} disabled={!questions.length}>
+        {stats.mastered ? "Retry" : stats.attempted ? "Try again" : "Start"}
+      </button>
+    );
+  } else if (failed) {
+    action = <button className="btn-primary2" onClick={onGenerate}>Try again</button>;
+  } else {
+    action = <button className="btn-primary2" onClick={onGenerate}>Generate quiz</button>;
+  }
+
+  let line;
+  let sub;
+  if (ready) {
+    line = `${questions.length} questions`;
+    sub = stats.attempted ? stats.line : (filter === "all" ? "mixed difficulty" : filter);
+  } else if (failed) {
+    line = "Couldn't create this quiz right now. Try again in a minute.";
+    sub = null;
+  } else if (doc.status === "generating") {
+    line = "Writing questions";
+    sub = "This can take up to a minute.";
+  } else {
+    line = "Not generated yet";
+    sub = "Generated only when you ask for it.";
+  }
+
+  return (
+    <QuizCard
+      title={doc.title || displayName(doc.filename)}
+      badge={stats.mastered ? "Mastered" : null}
+      meta={meta}
+      progress={ready ? barPct : null}
+      line={line}
+      sub={sub}
+      actions={action}
+      tone={failed ? "failed" : ""}
+    />
+  );
+}
+
+/** One quiz in a list; document and section quizzes share it. */
+function QuizCard({ title, badge, meta, progress, line, sub, actions, tone = "" }) {
+  return (
+    <div className={`qz-topic qz-card${tone ? ` ${tone}` : ""}`}>
+      <div className="qz-topic-head">
+        <div className="grow">
+          <div className="qz-topic-name">
+            {title}
+            {badge && <span className="qz-mastered">{badge}</span>}
+          </div>
+          {meta && <div className="qz-topic-desc">{meta}</div>}
+        </div>
+      </div>
+      {progress !== null && progress !== undefined && (
+        <div className="qz-bar"><span style={{ width: `${progress}%` }} /></div>
+      )}
+      <div className="qz-list">
+        <div className="qz-row">
+          <div className="qname">
+            {line}
+            {sub && <div className="sub">{sub}</div>}
+          </div>
+          <div className="qz-card-actions">{actions}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A landing row: icon tile, title and one line, and a round arrow. The whole row is the button. */
+function LandingRow({ icon, title, desc, onClick }) {
+  return (
+    <button className="qz-land-row" onClick={onClick}>
+      <span className="qz-land-icon" aria-hidden="true">{icon}</span>
+      <span className="qz-land-text">
+        <span className="qz-land-title">{title}</span>
+        <span className="qz-land-desc">{desc}</span>
+      </span>
+      <span className="qz-land-go" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h13M13 6l6 6-6 6" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
+const iconProps = {
+  width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+  strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round",
+};
+
+function DocumentIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5M9 13h6M9 17h6" />
+    </svg>
+  );
+}
+
+function NoteIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" />
+      <path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z" />
+    </svg>
   );
 }

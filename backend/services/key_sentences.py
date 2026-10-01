@@ -1,18 +1,5 @@
-"""
-Key-sentence extraction: the sentences a document's revision note must cover,
-picked without an LLM.
-
-Candidates are sentence-like units cut from the extracted text. They are ranked
-by centrality — TextRank over sentence embeddings — with small boosts for
-definitions, numbered steps and figures, then picked with a per-region quota so
-a derivation on page 3 is not crowded out by the sentences everything else
-resembles. Nothing here is subject-specific: every rule is about layout
-(headings, bullets, captions, running heads, reference lists) or about the
-shape of a sentence, not about what it says.
-
-Embedding is done by whatever `encode` the caller hands in. notes_service
-passes the engine's own SentenceTransformer, so no second model is loaded.
-"""
+"""Picks a document's must-cover sentences without an LLM: TextRank over embeddings with a
+per-region quota, and rules about layout only, so it works for any subject."""
 
 from __future__ import annotations
 
@@ -22,8 +9,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-# Bump when anything below changes what gets picked; cached picks are keyed on
-# it together with the document text.
+# Bump when picking changes; cached picks are keyed on it and the document text.
 VERSION = "keysent-v2"
 
 # About one pick per this many characters of text, within these bounds.
@@ -31,9 +17,7 @@ CHARS_PER_PICK = 400
 MIN_PICKS = 5
 MAX_PICKS = 20
 
-# The document is cut into this many equal slices. Each slice with candidates
-# gets a share of the picks in proportion to how many it holds, at least one,
-# before the rest are filled by score.
+# Picks are first shared across this many equal slices, at least one per slice with candidates.
 REGIONS = 10
 
 # A candidate this similar to one already picked says the same thing.
@@ -42,9 +26,8 @@ REDUNDANT = 0.80
 BOOST_DEFINITION = 0.30
 BOOST_STEP = 0.15
 BOOST_NUMBER = 0.10
-# A result or conclusion ("⇒ max h ≈ 1.440 lg n", "therefore", "as a result")
-# is short and symbol-heavy, so centrality alone ranks it below the prose
-# around it.
+# Results and conclusions are short and symbol-heavy, so centrality alone ranks them below nearby
+# prose.
 BOOST_CONCLUSION = 0.20
 
 _BULLET = re.compile(r"^\s*(?:[•●▪◦‣∙\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s+")
@@ -53,8 +36,7 @@ _CAPTION = re.compile(
     r"^\s*(?:fig(?:ure)?|table|diagram|chart|exhibit|plate)\.?\s*\d+[a-z]?\s*[:.—–-]", re.I)
 # Relations make a line a statement even without a verb: "h < 2 lg Nh".
 _RELATION = re.compile(r"[=<>≤≥≈≠⇒→⇔∝]")
-# Formula lines continue the statement above them rather than breaking it, so
-# a derivation laid out one term per line stays one unit.
+# Formula lines continue the statement above, so a derivation set one term per line stays one unit.
 _FORMULA = re.compile(r"[=<>≤≥≈≠⇒→⇔∝+×·÷√∑∫^/−]|[A-Za-zΘΩΟθωο]\(")
 _AUX = frozenset(
     "is are was were be been being am has have had do does did "
@@ -81,8 +63,8 @@ _CONCLUSION = re.compile(
     r"[⇒∴]|\b(?:therefore|thus|hence|consequently|as a result|it follows)\b", re.I)
 _WORD = re.compile(r"[^\W\d_][\w'’-]*")
 
-# Front matter sits in the opening stretch of a document; title and
-# affiliation rules only apply there, the overview rule a little further.
+# Title and affiliation rules apply only in the opening stretch, the overview rule a little
+# further.
 _FRONT = 0.12
 _OVERVIEW_ZONE = 0.25
 # A reference heading is only believed in the second half.
@@ -95,9 +77,8 @@ def _letters(s: str) -> float:
 
 
 def _is_label(line: str) -> bool:
-    """A figure value or page number: very short, or mostly digits and
-    symbols. A formula line is never one, however short: a derivation laid
-    out one term per line has lines holding only "=" or ">"."""
+    """A figure value or page number: very short, or mostly digits and symbols. Formula lines
+    never count."""
     if _FORMULA.search(line):
         return False
     return len(line.replace(" ", "")) <= 3 or _letters(line) < 0.5
@@ -109,11 +90,8 @@ def _capitalised(line: str) -> float:
 
 
 def _is_heading(line: str) -> bool:
-    """A title-case line with no closing punctuation: a heading or a slide
-    title, which breaks units and is not a key point itself. Numbered
-    headings ("1. Introduction to the Classical Framework") count too. A line
-    stating a relation is a formula, not a heading, however capitalised:
-    "Nh > Fh (nth Fibonacci number)"."""
+    """A title-case line without closing punctuation (a heading or slide title). A line stating
+    a relation is a formula, not a heading."""
     words = _WORD.findall(line)
     if not words or len(words) > 8 or _TERMINAL.search(line) or _RELATION.search(line):
         return False
@@ -121,14 +99,8 @@ def _is_heading(line: str) -> bool:
 
 
 def _is_clause(s: str) -> bool:
-    """
-    Whether a unit reads as a statement rather than a heading or a label.
-
-    No part-of-speech tagger is installed, so this is a heuristic: a relation
-    symbol, an auxiliary or modal verb, or five or more words most of which
-    are lower case — which is what separates prose and imperative bullets
-    ("insert each item into AVL tree") from title-case headings.
-    """
+    """Whether a unit reads as a statement, not a heading. Heuristic (no POS tagger): a relation
+    symbol, an auxiliary verb, or 5+ mostly lower-case words."""
     if _RELATION.search(s):
         return True
     words = _WORD.findall(s)
@@ -141,16 +113,8 @@ def _is_clause(s: str) -> bool:
 
 
 def content_lines(text: str) -> list[tuple[int, Optional[str]]]:
-    """
-    (offset, line) for every non-blank line of the text, with the line set to
-    None where it is not the document's own content: running heads, the title
-    and author/affiliation lines at the front, an overview or outline list,
-    and everything from a References-type heading on.
-
-    Shared by the picker and by notes_service's concept positions, so a
-    concept named in a lecture's overview list is placed where the lecture
-    teaches it, not at 2%.
-    """
+    """(offset, line) for every non-blank line, line None where it is not content: running
+    heads, front matter, overview list, references. Shared with notes_service."""
     n = max(len(text), 1)
     lines, pos = [], 0
     for raw in text.split("\n"):
@@ -167,17 +131,15 @@ def content_lines(text: str) -> list[tuple[int, Optional[str]]]:
 
     out: list[tuple[int, Optional[str]]] = []
     in_overview = False
-    # The title is the block of heading-shaped lines the document opens with;
-    # the first bullet, overview or line of content closes it, so a section
-    # heading further down the first page is kept.
+    # The title is the opening run of heading-shaped lines; the first bullet or content line ends
+    # it.
     in_title = True
     for off, line in lines:
         if off >= end:
             out.append((off, None))
             continue
         formula = bool(_FORMULA.search(line))
-        # Running heads repeat on every page. Formula lines are exempt: a
-        # derivation repeats "=" and ">" legitimately.
+        # Running heads repeat on every page; formula lines may repeat legitimately.
         running_head = counts[line] >= 3 and not formula
         if running_head:
             out.append((off, None))
@@ -198,8 +160,7 @@ def content_lines(text: str) -> list[tuple[int, Optional[str]]]:
             out.append((off, None))
             continue
         in_title = False
-        # The overview is its bullet list; the first line that is not a
-        # bullet is content again.
+        # The overview is its bullet list; the first non-bullet line is content again.
         if in_overview and _BULLET.match(line):
             out.append((off, None))
             continue
@@ -214,18 +175,8 @@ def content_text(text: str) -> str:
 
 
 def candidate_units(text: str) -> list[tuple[int, str]]:
-    """
-    (offset, unit) pairs: the sentence-like units a pick is chosen from.
-
-    Lines are merged into statements, since PDFs and slide decks break text
-    into short lines with no full stops. A line starts a new unit when it is a
-    bullet or the previous unit has ended; it breaks the current unit when it
-    is a caption, a figure label, a heading or not content at all (see
-    content_lines). A short "Label:" line is carried onto the unit after it,
-    so bullets under "AVL sort:" keep the name of what they describe, and
-    consecutive bullets under one label are one unit: a labelled list makes
-    one point.
-    """
+    """(offset, unit) pairs to pick from. Short PDF and slide lines are merged into statements;
+    a 'Label:' line is carried onto the bullets under it."""
     units: list[tuple[int, list[str]]] = []
     current: list | None = None
     prefix: str | None = None
@@ -314,12 +265,8 @@ def _boost(s: str) -> float:
 
 
 def pick(text: str, encode: Callable) -> list[dict]:
-    """
-    The must-cover sentences of one document, in document order:
-    [{"text", "offset", "fraction", "score"}].
-
-    `encode(list[str])` must return L2-normalised embeddings.
-    """
+    """A document's must-cover sentences in document order, [{text, offset, fraction, score}].
+    encode must return L2-normalised embeddings."""
     units = candidate_units(text)
     if not units:
         return []
