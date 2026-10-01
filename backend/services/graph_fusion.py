@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from itertools import combinations
 from pathlib import Path
 
@@ -19,42 +20,34 @@ LLM_LOW_SIM = 0.55
 NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "mis")
 
 _VERDICT_PAIR_BATCH = 4
-# Resends of an identical request after a malformed or json_validate_failed
-# answer. At temperature 0 a resend mostly repeats the same answer, so one is
-# enough; splitting into single pairs (below) is what changes the request.
-# 429s are counted separately (_RATE_LIMIT_RETRIES).
+# Resends of the same request after malformed JSON. At temperature 0 a resend mostly repeats
+# itself, so one is enough; 429s count separately.
 _VERDICT_MAX_RETRIES = 1
-# Cap on how many pairs a failed batch may be re-asked one at a time. Without
-# it, splitting a batch costs 2 + 2 per pair — being rate limited would make
-# fusion call more, not less. See _verdict_call.
+# Cap on pairs a failed batch may re-ask one at a time; each single costs a call.
 _VERDICT_MAX_SINGLES = 4
 _NEIGHBOURS_PER_NODE = 5
 _EVIDENCE_CHUNKS_PER_NODE = 1
 _EVIDENCE_SNIPPET_CHARS = 200
-# Steps 3 and 5 send sentences rather than chunk openings: the chunks nearest
-# the pair, split up, and only the few sentences closest to both names.
+# Steps 3 and 5 send the few sentences nearest both names, not chunk openings.
 _EVIDENCE_CHUNKS_PER_SIDE = 2
 _EVIDENCE_SENTENCES_PER_PAIR = 3
 _EVIDENCE_SENTENCE_CHARS = 240
 _SUMMARY_SENTENCE_CHARS = 200
 
-# Output cap per verdict call. A step-3 batch of four pairs measured 195-350
-# completion tokens; a truncated answer fails json_object validation and
-# costs a single-pair split, so the cap keeps headroom above that. Two calls
-# at 450 fit the 1,000-token-per-minute output budget, so fusion is not held
-# to one call a minute. Step 3b grows with the clusters in the batch.
+# Output cap per verdict call: a 4-pair batch measured 195-350 tokens, and two calls at 450 fit the
+# 1,000-a-minute output limit.
 _VERDICT_MAX_TOKENS = 450
 # Characters of a response body logged when it parses but has the wrong shape.
 _RAW_LOG_CHARS = 500
 _CLUSTER_MAX_TOKENS_BASE = 150
 _CLUSTER_MAX_TOKENS_PER = 60
 _CLUSTER_BATCH = 4
-# Retries after a 429, waiting what the server asks for. Fusion runs in the
-# background, so waiting costs nothing; resending too early costs a call.
+# Retries after a 429, waiting what the server asks; fusion runs in the background, so waiting is
+# free.
 _RATE_LIMIT_RETRIES = 2
 
-# v6 / v5 / v2: temperature 0 and an output cap. Verdicts cached under the
-# earlier versions were sampled at the API's default temperature.
+# Bumped for temperature 0 and an output cap; older verdicts were sampled at the default
+# temperature.
 _STEP3_PROMPT_VERSION = "step3-evidence-v6"
 _STEP5_PROMPT_VERSION = "step5-evidence-v5"
 _CLUSTER_PROMPT_VERSION = "cluster-verify-v2"
@@ -94,12 +87,8 @@ def _is_negation_variant(a, b):
 
 
 def _is_modifier_variant(a, b):
-    """True when one name's words are a strict subset of the other's ('tree' /
-    'binary tree', 'revolution' / 'french revolution'). The extra words usually
-    narrow the concept, so such a pair is never auto-merged and step 3 is told
-    to hold it to a stricter bar for SAME. Some are true synonyms ('dna' /
-    'dna molecule'), so SAME stays allowed. Words match with the same plain
-    plural as sentence name matching: 'tree' / 'binary trees' is flagged."""
+    """True when one name's words are a strict subset of the other's ('tree' / 'binary tree'):
+    never auto-merged, and step 3 holds SAME to a stricter bar."""
     ta = list(dict.fromkeys(normalize_concept(a).split()))
     tb = list(dict.fromkeys(normalize_concept(b).split()))
     if not ta or not tb or len(ta) == len(tb):
@@ -135,8 +124,7 @@ def _is_vague_relation(rel):
     return _clean_relation(rel).lower() in _VAGUE_RELATIONS
 
 
-# Labels that say two concepts touch without saying how. They rank below every
-# specific label in step 4; no specific label ('causes' included) is demoted.
+# Labels that say two concepts touch without saying how; they rank below every specific label.
 _GENERIC_RELATIONS = _VAGUE_RELATIONS | {"involves", "linked to", "is linked to"}
 
 
@@ -257,9 +245,8 @@ def _third_person(stem):
 
 
 def _active_from_participle(word):
-    """Present-tense active form of a regular '-ed' participle, e.g.
-    'regulated' -> 'regulates', 'controlled' -> 'controls'. None when the word
-    is not a regular participle."""
+    """Present-tense active form of a regular '-ed' participle ('regulated' -> 'regulates'), or
+    None."""
     if word.endswith("ied") and len(word) > 4:
         return word[:-3] + "ies"                    # applied, classified
     if not word.endswith("ed") or len(word) < 5:
@@ -275,9 +262,8 @@ def _active_from_participle(word):
 
 
 def _passive_to_active(rel):
-    """'<participle> by' -> the active verb, to be read with the ends swapped:
-    'A regulated by B' is 'B regulates A'. The list above is looked up first:
-    it covers irregular verbs and pins forms the '-ed' rule would misspell."""
+    """'<participle> by' -> the active verb, read with the ends swapped: 'A regulated by B' is
+    'B regulates A'."""
     r = _clean_relation(rel).lower()
     core = None
     m = _PASSIVE_RE.match(r)
@@ -295,11 +281,8 @@ def _passive_to_active(rel):
 
 
 def _orient(a, b, relation, direction, broader):
-    """(from, to, relation, broader_conflict). The broader field, when given
-    for a taxonomy label (_taxonomy_kind), decides the direction;
-    broader_conflict says it pointed the other way from `direction`. For any
-    other label broader is ignored — the model fills it in for labels like
-    "is a cause of" too — so it can neither turn the edge nor cause a drop."""
+    """(from, to, relation, broader_conflict). broader sets the direction only for taxonomy
+    labels; the conflict flag means it disagreed with `direction`."""
     relation = _clean_relation(relation)
     active = _passive_to_active(relation)
     swap_passive = active is not None
@@ -338,9 +321,8 @@ def _name_pattern(name):
 
 
 def _name_positions(a, b, text):
-    """Where names a and b first appear in text, or None for one that does
-    not. When one name contains the other ('dna' / 'dna molecule'), the longer
-    is found first and blanked out, so the shorter cannot match inside it."""
+    """Where names a and b first appear in text, or None. A containing name is blanked first so
+    the shorter cannot match inside it."""
     text = normalize_concept(text)
     na, nb = normalize_concept(a), normalize_concept(b)
     if not text or not na or not nb or na == nb:
@@ -364,6 +346,107 @@ def _sentence_direction(a, b, sentence):
     return "A_to_B" if pa < pb else "B_to_A"
 
 
+# A 'related' verdict's own sentence must name both concepts, by name (singular or plural) or by an
+# abbreviation the documents define; otherwise the edge is dropped.
+
+_ABBREVIATION = re.compile(r"\(\s*([A-Za-z][A-Za-z0-9]{1,9})\s*\)")
+# Characters of text before "(ABBR)" searched for the name it abbreviates.
+_ABBREVIATION_WINDOW = 160
+
+
+def _plural_pattern(word):
+    """Regex for a word in its singular or regular plural form, whichever was given."""
+    if len(word) <= 2 or not word.isalpha():
+        return re.escape(word)
+    if word.endswith("ies") and len(word) > 4:
+        return re.escape(word[:-3]) + "(?:y|ies)"
+    if word.endswith("y") and word[-2] not in "aeiou":
+        return re.escape(word[:-1]) + "(?:y|ies)"
+    if word.endswith("es") and word[:-2].endswith(("s", "x", "z", "ch", "sh")):
+        return re.escape(word[:-2]) + "(?:es)?"
+    if word.endswith("s") and not word.endswith("ss") and len(word) > 3:
+        return re.escape(word[:-1]) + "(?:e?s)?"
+    return re.escape(word) + "(?:e?s)?"
+
+
+def _phrase_pattern(name):
+    """A normalised name as whole words, its last word singular or plural."""
+    words = normalize_concept(name).split()
+    if not words:
+        return None
+    body = r"\s+".join([re.escape(w) for w in words[:-1]] + [_plural_pattern(words[-1])])
+    return re.compile(r"(?<!\w)" + body + r"(?!\w)")
+
+
+def _abbreviates(abbr, name):
+    """Whether abbr can abbreviate name: its letters occur in order, the first at a word start
+    (Schwartz and Hearst)."""
+    short, long_ = abbr.lower(), normalize_concept(name)
+    si, li = len(short) - 1, len(long_) - 1
+    while si >= 0:
+        c = short[si]
+        if not c.isalnum():
+            si -= 1
+            continue
+        while li >= 0 and (long_[li] != c or (si == 0 and li > 0 and long_[li - 1].isalnum())):
+            li -= 1
+        if li < 0:
+            return False
+        li -= 1
+        si -= 1
+    return True
+
+
+def _engine_texts(engine):
+    return [ch.get("text") or "" for chunks in getattr(engine, "chunks_by_week", {}).values()
+            for ch in chunks]
+
+
+def _source_aliases(texts, names):
+    """{name: {abbreviation}} for every name the texts define as '<name> (ABBR)'. Nothing is
+    assumed from outside the documents."""
+    patterns = {n: _phrase_pattern(n) for n in names}
+    out = {}
+    for text in texts:
+        text = re.sub("­\\s*", "", unicodedata.normalize("NFKC", text))
+        for m in _ABBREVIATION.finditer(text):
+            abbr = m.group(1)
+            before = normalize_concept(text[max(0, m.start() - _ABBREVIATION_WINDOW):m.start()])
+            for name, pattern in patterns.items():
+                if pattern is None or normalize_concept(abbr) == normalize_concept(name):
+                    continue
+                last = None
+                for last in pattern.finditer(before):
+                    pass
+                if last is not None and last.end() == len(before) and _abbreviates(abbr, name):
+                    out.setdefault(name, set()).add(abbr.lower())
+    return out
+
+
+def _named_both(a, b, sentence, aliases=None):
+    """Whether a sentence names both concepts, by name or defined abbreviation. A containing
+    name is blanked first."""
+    aliases = aliases or {}
+    text = normalize_concept(sentence)
+    if not text:
+        return False
+
+    def patterns(name):
+        found = [p for p in [_phrase_pattern(name)] if p is not None]
+        found += [re.compile(r"(?<!\w)" + re.escape(al) + r"s?(?!\w)") for al in sorted(aliases.get(name, ()))]
+        return found
+
+    na, nb = normalize_concept(a), normalize_concept(b)
+    longer, shorter = (a, b) if len(na) >= len(nb) else (b, a)
+    long_patterns = patterns(longer)
+    if not any(p.search(text) for p in long_patterns):
+        return False
+    masked = text
+    for p in long_patterns:
+        masked = p.sub(lambda m: " " * len(m.group()), masked)
+    return any(p.search(masked) for p in patterns(shorter))
+
+
 def _verdict_direction(a, b, r):
     """Direction for a 'related' verdict and whether the sentence gave it.
     The sentence is read first; the direction field is the fallback."""
@@ -383,9 +466,7 @@ def _load_verdict_cache():
 
 
 def _save_verdict_cache(cache):
-    # Written to a temporary file and swapped in, so a reader never sees a
-    # half-written file (and treats it as empty), and an interrupted write
-    # leaves the previous cache intact.
+    # Temporary file swapped in, so a reader never loads a half-written cache.
     tmp = VERDICT_CACHE_FILE.with_suffix(".tmp")
     try:
         VERDICT_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -428,12 +509,8 @@ def _from_cache_record(a, b, rec):
     return {**rec, "direction": direction, "canonical": canonical, "broader": broader}
 
 
-# The schema line asks for "same" | "related" | "unrelated", but the prompt's
-# own prose says "SAME, DIFFERENT BUT RELATED, or UNRELATED" and the model
-# sometimes answers in that wording. An unrecognised verdict used to fall
-# through to the unrelated branch and drop the edge without a word, so the
-# variants the prompt itself uses are accepted here and anything still
-# unmatched is logged rather than lost.
+# The prompt's prose says 'DIFFERENT BUT RELATED' and the model sometimes echoes it, so those
+# variants are accepted; anything else is logged.
 _VERDICT_SYNONYMS = {
     "same": "same",
     "related": "related",
@@ -450,8 +527,8 @@ def _normalise_verdict(raw):
 
 
 def _verdict_or_unrelated(raw, log, tag, a, b):
-    """Canonical verdict, defaulting to unrelated but never silently: an
-    answer we cannot map is reported with the pair it came from."""
+    """Canonical verdict, defaulting to unrelated; an unmappable answer is reported with its
+    pair."""
     verdict = _normalise_verdict(raw)
     if verdict is None:
         if str(raw or "").strip():
@@ -470,9 +547,7 @@ def _is_json_validate_failed(e):
 
 
 def retry_after_seconds(error):
-    """The wait a 429 asks for, in seconds, or None. Groq sends retry-after-ms
-    as well as retry-after; the millisecond one is preferred. The headers are
-    on the error whatever the client's max_retries is."""
+    """The wait a 429 asks for in seconds, or None; retry-after-ms is preferred."""
     headers = getattr(getattr(error, "response", None), "headers", None) or {}
     for name, scale in (("retry-after-ms", 1000.0), ("retry-after", 1.0)):
         try:
@@ -496,9 +571,8 @@ def _raw_excerpt(raw):
 
 
 def _results_list(data):
-    """The verdicts in a parsed answer: its "results" list, or a bare verdict
-    object carrying an "id" as a list of one (the model answers a one-pair
-    payload that way). None when the answer is neither."""
+    """The verdicts in a parsed answer: its 'results' list, or a bare verdict object with an
+    'id' (one-pair answers). None otherwise."""
     if not isinstance(data, dict):
         return None
     if isinstance(data.get("results"), list):
@@ -586,10 +660,8 @@ def _verdict_call(client, system, payload, log, tag, failures=None, max_tokens=_
         log(f"{tag} defaults to unrelated (not cached)")
         return []
 
-    # Splitting isolates one malformed pair out of a batch. It cannot help a
-    # rate limit or a rejection — those fail again per single, so the response
-    # to being throttled would be to make several times as many calls. Split
-    # only for malformed output, and only for the first _VERDICT_MAX_SINGLES.
+    # Splitting isolates a malformed pair; it cannot help a rate limit, so only malformed output is
+    # split, up to _VERDICT_MAX_SINGLES.
     if reason is None or not str(reason).startswith(("malformed", "json_validate_failed")):
         log(f"{tag} not splitting after {reason} — {len(payload)} pair(s) default to unrelated")
         return []
@@ -713,9 +785,8 @@ class _EvidencePool:
         return cached
 
     def pair_sentences(self, a_sources, b_sources, a, b, k=_EVIDENCE_SENTENCES_PER_PAIR):
-        """The k sentences closest to both names, drawn from the chunks nearest
-        the pair in either concept's documents. A sentence naming a concept
-        outright ranks above one that is only near it in embedding space."""
+        """The k sentences closest to both names from the chunks nearest the pair; a sentence
+        naming a concept ranks above a merely similar one."""
         a_vec, b_vec = self._name_vecs.get(a), self._name_vecs.get(b)
         if a_vec is None or b_vec is None:
             return []
@@ -1036,12 +1107,8 @@ def _summary_order(rec):
 
 
 def _edge_rank(rec):
-    """Order for edges competing over one pair, best highest. Generic labels
-    always lose; then an LLM verdict backed by a sentence naming both
-    concepts beats a bare extraction label; then an edge whose own summary
-    reads in its direction beats one whose summary reads against it;
-    evidence count only breaks ties. No specific label is demoted for what
-    it says."""
+    """Order for edges over one pair, best highest: generic labels lose, then sentence-backed
+    verdicts win, then summary order, then evidence count."""
     return (0 if _is_generic_relation(rec["relation"]) else 1,
             1 if rec.get("llm_sentence") else 0,
             _summary_order(rec),
@@ -1055,10 +1122,8 @@ def _label_key(rel):
     return _WS.sub(" ", _clean_relation(rel).lower().replace("_", " ").replace("-", " ")).strip()
 
 
-# Taxonomy labels, for orienting by `broader` and for reconciling edges both
-# ways. "is a/an ... of" counts only when the noun is on this list, with at
-# most one word before it ("is a specific type of"): a bare "is a ..." prefix
-# would also take "is a cause of" and "is a determinant of".
+# Taxonomy labels. 'is a/an ... of' counts only with a noun on this list, so 'is a cause of' is not
+# taxonomy.
 _TAXONOMY_NOUNS = r"(?:type|kind|form|subtype|special case|instance|example|part|member|component|subset)s?"
 _TAXONOMY_OF = re.compile(r"^(?:(?:is|are|was|were) )?(?:(?:an?|the) )?(?:\w+ )?" + _TAXONOMY_NOUNS + r" of\b")
 _BROADER_VERB = re.compile(r"^(?:generali|subsum|underl|encompass|includ|contain|compris)")
@@ -1083,10 +1148,8 @@ _DIRECTED = re.compile(r"\b(?:caus|lead|led\b|result|produc|enabl|allow|prevent|
 
 
 def _taxonomy_kind(key):
-    """'broader_first' when the label puts the broader concept first ("A
-    includes B"), 'narrower_first' when it puts the narrower one first ("A is
-    a type of B"), None for a label that is not taxonomy. `key` is a
-    _label_key."""
+    """'broader_first' ('A includes B'), 'narrower_first' ('A is a type of B'), or None for a
+    non-taxonomy label."""
     if key in _HIER_BROADER_FIRST or _BROADER_VERB.search(key) or _WHOLE_FIRST.search(key):
         return "broader_first"
     if (key in _HIER_NARROWER_FIRST or _NARROWER_VERB.search(key)
@@ -1115,13 +1178,8 @@ def _label_class(rel):
 
 
 def _reconcile_opposite(records, run=None):
-    """One edge each way between two concepts can be a contradiction or a
-    loop. With a taxonomy label on either side it is a contradiction (A part
-    of B and B part of A), and the best-ranked edge is kept. Two labels that
-    read the same both ways are a duplicate, also kept once. Anything else is
-    kept both ways: 'price affects demand' and 'demand affects price' is a
-    feedback loop, not an error. Labels no class recognises count as that
-    last case and are logged, so a missed taxonomy word can be spotted."""
+    """One edge each way: with a taxonomy label it is a contradiction (best-ranked kept);
+    symmetric labels are kept once; anything else is a loop and both stay."""
     by_pair = {}
     for rec in records:
         by_pair.setdefault(tuple(sorted((rec["from"], rec["to"]))), []).append(rec)
@@ -1244,7 +1302,8 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
         _save_verdict_cache(cache)
 
     merges, new_edges, canonical_votes = [], [], {}
-    n_same = n_related = n_unrelated = 0
+    n_same = n_related = n_unrelated = n_not_named = 0
+    aliases = _source_aliases(_engine_texts(engine), sorted({n for (a, b, _s) in candidates for n in (a, b)}))
     for (a, b, sim) in candidates:
         r = resolved.get((a, b), {})
         verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b)
@@ -1278,6 +1337,11 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
                                     detail + "   [broader contradicts sentence]")
                 n_unrelated += 1
                 continue
+            if not _named_both(a, b, r.get("sentence") or "", aliases):
+                run.verdicts[-1] = (source, a, b, sim, "dropped",
+                                    (detail + "   [sentence does not name both]").strip())
+                n_not_named += 1
+                continue
             if (not relation or _is_vague_relation(relation)
                     or _label_names_concept(relation, a) or _label_names_concept(relation, b)):
                 n_unrelated += 1
@@ -1289,8 +1353,10 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
         else:
             n_unrelated += 1
 
-    run.verdict_totals = {"same": n_same, "related": n_related, "unrelated": n_unrelated}
-    log(f"Fusion step 3: {len(candidates)} -> same {n_same} / related {n_related} / unrelated {n_unrelated}")
+    run.verdict_totals = {"same": n_same, "related": n_related, "unrelated": n_unrelated,
+                          "dropped (sentence does not name both)": n_not_named}
+    log(f"Fusion step 3: {len(candidates)} -> same {n_same} / related {n_related} / unrelated {n_unrelated}"
+        f" / not named {n_not_named}")
     return merges, new_edges, canonical_votes
 
 
@@ -1474,6 +1540,7 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log, run):
         _save_verdict_cache(cache)
 
     fusion_edges = []
+    aliases = _source_aliases(_engine_texts(engine), sorted({n for (a, b, _c) in candidates for n in (a, b)}))
     for (a, b, common) in candidates:
         r = resolved.get((a, b), {})
         verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 5:", a, b)
@@ -1486,6 +1553,10 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log, run):
             a, b, r.get("relation") or "", direction, r.get("broader") or "")
         if conflict and from_sentence:
             run.bridge_verdicts.append((source, a, b, "dropped", "broader contradicts sentence"))
+            continue
+        if not _named_both(a, b, r.get("sentence") or "", aliases):
+            run.bridge_verdicts.append((source, a, b, "dropped",
+                                        f'sentence does not name both: "{r.get("sentence") or ""}"'))
             continue
         if (relation and not _is_vague_relation(relation)
                 and not _label_names_concept(relation, a) and not _label_names_concept(relation, b)):

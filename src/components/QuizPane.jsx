@@ -7,9 +7,7 @@ import { displayName } from "../utils/documentTitle.js";
 // Drawn for this project in the app's accent colour; see the SVG's header.
 import landingArt from "../assets/quiz-landing.svg";
 
-// Pass marks are never computed here. A section quiz carries pass_mark and a
-// document topic carries pass_marks for each difficulty filter, both from
-// quiz_service.pass_mark, so the screen and the saved result always agree.
+// Pass marks come from the server (quiz_service.pass_mark), never computed here.
 const RING_RADIUS = 28;
 const RING_VIEWBOX = 66;
 const DIFFICULTIES = ["all", "easy", "medium", "hard"];
@@ -40,17 +38,8 @@ export function scoreLine(r) {
 }
 
 /**
- * Quiz tab. Opens on two cards, one per source, each opening its own list:
- *
- *   By document — one quiz per uploaded document, generated only when its
- *   "Generate quiz" button is pressed. Opening the tab generates nothing.
- *
- *   From notes — the quiz each written revision-note section came with.
- *   These are written by the notes write call, never here, and listed from
- *   the server's stored copy, so they outlast the in-memory notes.
- *
- * Every finished attempt is saved on the server with the answers picked on
- * each first try; the scores shown are the server's summaries of those.
+ * Quiz tab: document quizzes (generated only on request) and the quizzes written with note
+ * sections, listed from the server's stored copy. Attempts are saved on the server.
  */
 export default function QuizPane({ onToast }) {
   const [docs, setDocs] = useState([]);
@@ -433,10 +422,7 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
   );
 }
 
-/**
- * One quiz in a list. Both lists use it, so a document quiz and a section
- * quiz look the same and differ only in what they say and offer.
- */
+/** One quiz in a list; document and section quizzes share it. */
 function QuizCard({ title, badge, meta, progress, line, sub, actions, tone = "" }) {
   return (
     <div className={`qz-topic qz-card${tone ? ` ${tone}` : ""}`}>

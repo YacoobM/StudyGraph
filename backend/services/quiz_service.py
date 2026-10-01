@@ -1,30 +1,5 @@
-"""
-Quiz generation from the extracted concept graph.
-
-    GET  /api/quiz                                 one entry per document, no generation
-    POST /api/quiz/documents/{doc_id}/generate     generate that document's quiz
-    POST /api/quiz/results                         record an attempt (document or section quiz)
-    GET  /api/quiz/results                         attempts summarised per quiz
-
-An LLM (Groq) writes the questions. When the call fails or returns too few
-usable questions the quiz is marked "failed" and the reader can retry. There
-is no template fallback: it turned raw edge labels into questions ("what
-does microeconomics part_of?"), often with the direction wrong.
-
-A document's quiz is generated only when asked for — opening the Quiz tab
-used to start one LLM call per week on every visit. Each is cached keyed by
-a fingerprint of the document's concepts, generates in the background, and
-reports status "generating" until ready.
-
-Section quizzes are not generated here: the notes write call returns them
-with the section body (notes_service.validate_quiz). This module only stores
-their attempts, alongside the document quizzes', in RESULTS_FILE.
-
-Mount:
-    from services.quiz_service import router as quiz_router, set_graph_source
-    app.include_router(quiz_router)
-    set_graph_source(lambda: engine)
-"""
+"""Quiz routes: document quizzes written by Groq from each document's text, and attempt records
+for document and section quizzes (those come from the notes write call)."""
 
 from __future__ import annotations
 
@@ -54,16 +29,19 @@ logger = logging.getLogger(__name__)
 
 
 class QuizConfig:
-    # Six, not twelve: at max_tokens 900 six questions measured 583 tokens,
-    # and the model's per-minute output limit is 1,000.
+    # Six questions measured 583 output tokens; the model's output limit is 1,000 a minute.
     POOL_SIZE_PER_TOPIC = 6
     LLM_MAX_TOKENS = 900
     MIN_CONCEPTS_PER_TOPIC = 4
     MIN_POOL_TO_SHOW_TOPIC = 2
     LLM_TIMEOUT_SECONDS = 45
     LLM_MODEL = EXTRACTION_MODEL
-    LLM_MAX_CONCEPTS = 40
-    LLM_MAX_RELATIONS = 40
+    # Input cap in tokens: under the limiter's 7,000-a-minute input budget, with room for the
+    # prompt and extraction.
+    LLM_INPUT_TOKENS = 4000
+    # Share of an evidence sentence's content words that must occur in one sentence or short run of
+    # lines.
+    EVIDENCE_OVERLAP = 0.8
     POLL_HINT_SECONDS = 4
 
 
@@ -91,27 +69,13 @@ def _week_num(week: str) -> int:
     return int(digits) if digits else 1
 
 
-def _question_id(topic_id: str, question: str) -> str:
-    digest = hashlib.sha1(f"{topic_id}:{question}".encode()).hexdigest()[:10]
-    return f"{topic_id}-{digest}"
-
-
 def _topic_fingerprint(names: list[str]) -> str:
     return hashlib.sha1("|".join(sorted(names)).encode()).hexdigest()
 
 
 def shuffle_quiz(questions: list[dict]) -> list[dict]:
-    """
-    The questions with each one's options in a fixed random order and `a`
-    pointing at the same text.
-
-    Models put the answer first far more often than chance (12 of 12 on two
-    document quizzes), so the order they write cannot be the order shown.
-    Quizzes are stored as the model wrote them and shuffled here, on every
-    path out of the backend. The order is seeded by the question's id, so the
-    same question comes out the same way every time — a stored attempt's
-    answer indices keep meaning the same options.
-    """
+    """Each question's options in a fixed random order seeded by its id. Models put the answer
+    first far more often than chance (12 of 12)."""
     out = []
     for q in questions or []:
         options = list(q.get("o") or [])
@@ -127,13 +91,8 @@ def shuffle_quiz(questions: list[dict]) -> list[dict]:
 
 
 def pass_mark(total: int, kind: str = "section") -> int:
-    """
-    Correct answers needed to pass a quiz of `total` questions.
-
-    A section quiz allows one miss: 2 of 3, 3 of 4, 4 of 5. A fixed 4/5 share
-    asked for every question on a three- or four-question quiz. A document
-    quiz keeps its two-thirds mastery rule, as a count.
-    """
+    """Correct answers needed to pass: a section quiz allows one miss, a document quiz needs two
+    thirds."""
     if total <= 0:
         return 1
     if kind == "section":
@@ -141,79 +100,122 @@ def pass_mark(total: int, kind: str = "section") -> int:
     return -(-2 * total // 3)
 
 
-def topic_edges(edges: list[dict], names) -> list[dict]:
-    """
-    The edges a topic's questions may use: those between its own concepts, or,
-    when there are none, those touching at least one of them. Never the whole
-    graph — that fallback put other lectures' relations into a document's
-    quiz. Empty when nothing touches the topic; the questions then come from
-    the concepts alone.
-    """
-    names = set(names)
-    inside = [e for e in edges if e["from"] in names and e["to"] in names]
-    return inside or [e for e in edges if e["from"] in names or e["to"] in names]
+# ---------------------------------------------------------------------------
+# document quiz, from the document's text: graph labels turned reversed edges into facts
+# ---------------------------------------------------------------------------
+
+_QUIZ_SYSTEM = (
+    "You write multiple-choice revision questions for a student from the SOURCE TEXT only.\n"
+    "Rules:\n"
+    "- Every question tests a fact the text states. Do not use outside knowledge.\n"
+    "- 4 options. Exactly one is correct according to the text. Each wrong option must be "
+    "false according to the text, not merely unmentioned, and must not also be a correct answer.\n"
+    "- Options have similar length and grammatical form. No 'all of the above' or 'none of the "
+    "above'. Do not repeat the answer's wording in the question.\n"
+    "- Never ask two questions about the same fact.\n"
+    "- d is the difficulty: easy, medium or hard. why: one sentence saying why the answer is right.\n"
+    "- evidence: copy the one sentence from the text that proves the answer.\n"
+    'Return only JSON: {"questions": [{"q": "...", "o": ["...", "...", "...", "..."], "a": 0, '
+    '"why": "...", "d": "easy", "evidence": "..."}]}'
+)
+
+_URL_OR_MAIL = re.compile(r"https?://|www\.|\b[\w.+-]+@[\w-]+\.[\w.-]+\b|\u00a9")
 
 
-LLM_PROMPT = """You are writing revision questions for a student, using ONLY the
-concepts and relationships extracted from their own lecture material below.
-
-Concepts: {concepts}
-
-Relationships:
-{relations}
-
-Write {n} multiple-choice questions. Rules:
-- Ask only about the concepts and relationships given. Invent nothing.
-- Exactly 4 options each, one correct.
-- Wrong options must be other concepts from the list, so they are plausible.
-- "d" is the difficulty: "easy", "medium" or "hard".
-- "why" explains the answer in one sentence.
-
-Return ONLY a JSON array, no prose and no markdown fences:
-[{{"q":"...","o":["...","...","...","..."],"a":0,"why":"...","d":"easy"}}]
-"""
+def quiz_source_text(text: str) -> str:
+    """Content lines a quiz may ask about, minus lines with a URL, email or copyright sign and a
+    heading just above one. content_text keeps a footer printed once."""
+    from services import key_sentences
+    lines = key_sentences.content_text(text).splitlines()
+    drop = {i for i, line in enumerate(lines) if _URL_OR_MAIL.search(line)}
+    for i in sorted(drop):
+        if i > 0 and i - 1 not in drop and key_sentences._is_heading(lines[i - 1]):
+            drop.add(i - 1)
+    return "\n".join(line for i, line in enumerate(lines) if i not in drop)
 
 
-def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[dict]:
+def sample_text(text: str, cap_chars: int, windows: int = 8) -> str:
+    """Up to cap_chars of text: all of it, or `windows` equal stretches from evenly spaced
+    points."""
+    if len(text) <= cap_chars:
+        return text
+    lines = text.splitlines()
+    per = cap_chars // windows
+    parts = []
+    for w in range(windows):
+        taken, size = [], 0
+        for line in lines[w * len(lines) // windows:]:
+            if size + len(line) + 1 > per and taken:
+                break
+            taken.append(line[:per])
+            size += len(line) + 1
+        parts.append("\n".join(taken))
+    return "\n...\n".join(p for p in parts if p)
+
+
+def _evidence_units(text: str) -> list[set]:
+    """Content-word sets of each sentence and of each run of up to 3 lines, since slides split
+    sentences across bullets."""
+    from services import notes_service as ns
+    lines = [ln.strip() for ln in ns._prepare_text(text).splitlines() if ln.strip()]
+    units = []
+    for i in range(len(lines)):
+        for span in range(1, 4):
+            if i + span <= len(lines):
+                units.append(" ".join(lines[i:i + span]))
+    units += [s for ln in lines for s in re.split(r"(?<=[.!?;])\s+", ln)]
+    return [w for w in (ns._content_words(u) for u in units) if w]
+
+
+def evidence_supported(evidence: str, units: list[set]) -> bool:
+    """Whether quoted evidence is in the text: EVIDENCE_OVERLAP of its content words in one
+    unit. Not verbatim, since the model fixes broken ligatures when quoting."""
+    from services import notes_service as ns
+    words = ns._content_words(ns._prepare_text(evidence or ""))
+    if not words:
+        return False
+    return any(len(words & unit) / len(words) >= QuizConfig.EVIDENCE_OVERLAP for unit in units)
+
+
+_QUIZ_FIELDS = ("id", "q", "o", "a", "why", "d")
+
+
+def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
+    """One Groq call for a document's quiz from its text. Questions whose evidence is not in the
+    text, or that fail validate_quiz, are dropped."""
     key = os.getenv("GROQ_API_KEY")
     if not key:
         return []
     try:
-        from groq import Groq
+        from groq import Groq, RateLimitError
     except ImportError:
         return []
-
-    relations = "\n".join(
-        f"- {e['from']} {e.get('relation', 'relates to')} {e['to']}"
-        for e in edges[:QuizConfig.LLM_MAX_RELATIONS]
-    ) or "(none recorded — write the questions from the concepts alone)"
-    prompt = LLM_PROMPT.format(
-        concepts=", ".join(concepts[:QuizConfig.LLM_MAX_CONCEPTS]), relations=relations, n=n,
-    )
-
-    # Minimum fix until the chunk-grounded quiz replaces this call. Reasoning
-    # "low" spent up to 1,468 tokens thinking and was cut off at 2,048 before
-    # the JSON closed, which came back as a quiz with no questions. The SDK's
-    # own retry is off so a 429 is handled once, here, with the server's wait.
-    from groq import RateLimitError
+    from services import notes_service as ns
     from services.graph_fusion import is_request_too_large, retry_after_seconds
 
+    source = quiz_source_text(ns.document_texts({filename}).get(filename, ""))
+    if not source.strip():
+        logger.warning("document_quiz_failed reason=no_document_text file=%s", filename)
+        return []
+    excerpt = sample_text(source, QuizConfig.LLM_INPUT_TOKENS * 4)
+    user = f"Write {n} questions.\n\nSOURCE TEXT:\n{excerpt}"
+
     client = Groq(api_key=key, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0)
-    finish = None
+    finish, text = None, ""
     for attempt in range(2):
         try:
-            limiter.acquire_sync(estimate_tokens(prompt), QuizConfig.LLM_MAX_TOKENS)
+            limiter.acquire_sync(estimate_tokens(_QUIZ_SYSTEM) + estimate_tokens(user), QuizConfig.LLM_MAX_TOKENS)
             resp = client.chat.completions.create(
                 model=QuizConfig.LLM_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.4,
+                messages=[{"role": "system", "content": _QUIZ_SYSTEM}, {"role": "user", "content": user}],
+                temperature=0.3,
                 reasoning_effort="none",
+                response_format={"type": "json_object"},
                 max_tokens=QuizConfig.LLM_MAX_TOKENS,
             )
             finish = resp.choices[0].finish_reason
             text = (resp.choices[0].message.content or "").strip()
-            text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
-            items = json.loads(text)
+            data = json.loads(text)
             break
         except RateLimitError as e:
             if is_request_too_large(e) or attempt == 1:
@@ -233,44 +235,39 @@ def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[
             logger.warning("document_quiz_failed reason=%s error=%s", type(e).__name__, e)
             return []
 
-    good = []
-    for it in items if isinstance(items, list) else []:
-        if (
-            isinstance(it, dict)
-            and isinstance(it.get("o"), list) and len(it["o"]) >= 3
-            and isinstance(it.get("a"), int) and 0 <= it["a"] < len(it["o"])
-            and it.get("q") and it.get("why")
-        ):
-            it["d"] = it.get("d") if it.get("d") in DIFFICULTIES else "medium"
-            good.append(it)
-    if not isinstance(items, list) or len(good) < len(items):
-        # Valid JSON in the wrong shape: log what the model sent, so a run's
-        # log shows the actual shape rather than just a count.
+    items = data.get("questions") if isinstance(data, dict) else None
+    if not isinstance(items, list):
         body = re.sub(r"\s+", " ", text)
-        logger.warning("document_quiz_unexpected_shape step=document_quiz kept=%d of=%s finish_reason=%s body=%s",
-                       len(good), len(items) if isinstance(items, list) else type(items).__name__,
-                       finish, body[:500] + ("…" if len(body) > 500 else ""))
-    if not good:
-        logger.warning("document_quiz_failed reason=no_usable_questions finish_reason=%s", finish)
-    return good
+        logger.warning("document_quiz_unexpected_shape step=document_quiz finish_reason=%s body=%s",
+                       finish, body[:500] + ("\u2026" if len(body) > 500 else ""))
+        return []
+
+    units = _evidence_units(excerpt)
+    grounded = [it for it in items if isinstance(it, dict) and evidence_supported(it.get("evidence"), units)]
+    if len(grounded) < len(items):
+        logger.warning("document_quiz_evidence_dropped kept=%d of=%d", len(grounded), len(items))
+    kept, dropped, flags = ns.validate_quiz(grounded, quiz_id, 0, 0, max_questions=n)
+    logger.info("document_quiz file=%s asked=%d grounded=%d kept=%d flags=%s", filename, len(items),
+                len(grounded), len(kept or []), {k: v for k, v in flags.items() if v})
+    if not kept:
+        logger.warning("document_quiz_failed reason=too_few_valid_questions finish_reason=%s", finish)
+        return []
+    return [{k: q[k] for k in _QUIZ_FIELDS} for q in kept]
 
 
-# topic_id -> {"fingerprint": str, "topic": dict}. Keyed per topic, not per
-# whole-graph size, so uploading new material only invalidates the topics
-# whose own concepts changed.
+# topic_id -> {fingerprint, topic}. Keyed per topic, so new uploads only invalidate topics whose
+# concepts changed.
 _TOPIC_CACHE: dict[str, dict] = {}
 _GENERATING: set[str] = set()
 _TASKS: set[asyncio.Task] = set()   # keeps background tasks alive until done
 
 
 async def _generate_topic(topic_id: str, week: str, members: list[dict],
-                           edges: list[dict], names: list[str], fingerprint: str,
+                           names: list[str], fingerprint: str, filename: str,
                            title: Optional[str] = None) -> None:
     try:
-        week_edges = topic_edges(edges, names)
-        pool = await asyncio.to_thread(_questions_from_llm, names, week_edges, QuizConfig.POOL_SIZE_PER_TOPIC)
-        for q in pool:
-            q["id"] = _question_id(topic_id, q["q"])
+        pool = await asyncio.to_thread(_questions_from_document, filename, topic_id,
+                                       QuizConfig.POOL_SIZE_PER_TOPIC)
 
         sources = sorted({c.get("source", "") for c in members if c.get("source")})
         topic = {
@@ -278,8 +275,7 @@ async def _generate_topic(topic_id: str, week: str, members: list[dict],
             "day": _week_num(week),
             "name": title or (f"{week} — {names[0]}" if names else week),
             "desc": f"{len(names)} concepts from {', '.join(sources) or 'your uploads'}.",
-            # Too few usable questions is a failed call, not a quiz: the reader
-            # is offered a retry rather than two or three stray questions.
+            # Too few usable questions counts as a failed call, so the reader is offered a retry.
             "status": "ready" if len(pool) >= QuizConfig.MIN_POOL_TO_SHOW_TOPIC else "failed",
             "questions": pool,
         }
@@ -289,8 +285,7 @@ async def _generate_topic(topic_id: str, week: str, members: list[dict],
 
 
 def _user_documents(user_id) -> list:
-    """The user's document rows, oldest week first. A seam, so tests can
-    supply rows without a database."""
+    """The user's document rows, oldest week first. A seam for tests."""
     with connect() as conn:
         rows = conn.execute(
             "SELECT id, filename, week, status FROM documents WHERE user_id = ? "
@@ -299,8 +294,7 @@ def _user_documents(user_id) -> list:
     return [dict(r) for r in rows]
 
 
-# A title line: a short run of words, not a page number, URL, date or
-# copyright notice. Checked against the first lines of the document's text.
+# A title line: a short run of words, not a page number, URL, date or copyright notice.
 _TITLE_MAX_CHARS = 90
 _TITLE_SKIP = re.compile(
     r"^(?:page\s*\d+|\d+(?:\s*/\s*\d+)?|https?://\S+|www\.\S+|©.*|copyright\b.*|"
@@ -316,15 +310,8 @@ def clean_filename(filename: str) -> str:
 
 
 def _title_from_text(text: str) -> Optional[str]:
-    """
-    The document's own title, read cheaply from the start of its stored text.
-
-    Only the first dozen non-empty lines are looked at. A line opening with
-    Lecture / Chapter / Week and similar wins, joined with the next line when
-    it is only a label ("Lecture 1" then "Introduction to ..."). Otherwise the
-    first line that reads like a title: two to fourteen words, mostly letters,
-    not a page number, URL, date or notice. None when nothing qualifies.
-    """
+    """The document's title from its first dozen lines: a Lecture/Chapter/Week line (joined to
+    the next if only a label), else the first title-like line."""
     lines = [re.sub(r"\s+", " ", ln).strip() for ln in str(text or "").splitlines()]
     lines = [ln for ln in lines if ln][:12]
 
@@ -347,8 +334,8 @@ def _title_from_text(text: str) -> Optional[str]:
 
 
 def document_title(filename: str) -> str:
-    """What the Quiz tab calls a document: its own title line when the stored
-    text has one, else the cleaned filename. Never the raw filename."""
+    """What the Quiz tab calls a document: its title line if the text has one, else the cleaned
+    filename."""
     engine = _graph_source() if _graph_source else None
     chunks = getattr(engine, "chunks_by_id", None) or {}
     first = None
@@ -365,14 +352,8 @@ def document_title(filename: str) -> str:
 
 
 def _document_quiz(doc: dict, concepts: list[dict]) -> dict:
-    """
-    One document's quiz entry: what it would be generated from and how far
-    it has got. Generates nothing.
-
-    Members are the engine's concept records for this file. The engine keeps
-    one record per mention per document, so a concept taught in two lectures
-    is in both documents' quizzes.
-    """
+    """One document's quiz entry and state; generates nothing. A concept taught in two documents
+    is in both quizzes."""
     members = [c for c in concepts if c.get("source") == doc["filename"]]
     names = sorted({c["name"] for c in members})
     topic_id = f"doc-{doc['id']}"
@@ -393,9 +374,8 @@ def _document_quiz(doc: dict, concepts: list[dict]) -> dict:
     if cached and cached["fingerprint"] == _topic_fingerprint(names):
         topic = cached["topic"]
         entry["status"] = topic["status"]
-        # Stored as generated; shuffled on the way out, the same way each time.
-        # pass_marks covers every set the Quiz tab's difficulty filter can
-        # show, so the client never computes a pass mark itself.
+        # Stored as generated, shuffled on the way out. pass_marks covers every difficulty filter,
+        # so the client never computes one.
         questions = topic["questions"]
         pass_marks = {"all": pass_mark(len(questions), "document")}
         for d in DIFFICULTIES:
@@ -408,8 +388,8 @@ def _document_quiz(doc: dict, concepts: list[dict]) -> dict:
 
 @router.get("/api/quiz")
 async def get_quiz(user=Depends(current_user)):
-    """Every document with the state of its quiz. Nothing is generated here —
-    that waits for POST /api/quiz/documents/{id}/generate."""
+    """Every document with its quiz state. Generation waits for POST
+    /api/quiz/documents/{id}/generate."""
     concepts, _edges = _graph()
     documents = [_document_quiz(d, concepts) for d in _user_documents(user["id"])]
     reason = None
@@ -426,14 +406,13 @@ async def get_quiz(user=Depends(current_user)):
 
 @router.post("/api/quiz/documents/{doc_id}/generate")
 async def generate_document_quiz(doc_id: int, user=Depends(current_user)):
-    """Starts one document's quiz in the background, unless it is already
-    cached for the current concepts or already running. Returns its entry;
-    poll GET /api/quiz until the status leaves "generating"."""
+    """Starts a document's quiz in the background unless cached or running. Poll GET /api/quiz
+    until status leaves 'generating'."""
     doc = next((d for d in _user_documents(user["id"]) if d["id"] == doc_id), None)
     if doc is None:
         raise HTTPException(status_code=404, detail="That document is not in your library.")
 
-    concepts, edges = _graph()
+    concepts, _edges = _graph()
     entry = _document_quiz(doc, concepts)
     if entry["status"] == "too_small":
         raise HTTPException(status_code=422,
@@ -445,8 +424,8 @@ async def generate_document_quiz(doc_id: int, user=Depends(current_user)):
         _TOPIC_CACHE.pop(topic_id, None)
         _GENERATING.add(topic_id)
         task = asyncio.create_task(_generate_topic(
-            topic_id, members[0].get("week") or "Week 1", members, edges, names,
-            _topic_fingerprint(names), title=entry["title"],
+            topic_id, members[0].get("week") or "Week 1", members, names,
+            _topic_fingerprint(names), doc["filename"], title=entry["title"],
         ))
         _TASKS.add(task)
         task.add_done_callback(_TASKS.discard)
@@ -477,12 +456,7 @@ async def document_stats(user=Depends(current_user)):
 
 
 # ---------------------------------------------------------------------------
-# results
-#
-# Every attempt is kept, per user, in one JSON file: which quiz, the option
-# picked for each question, the score and when. Summaries (best score,
-# attempt count, last attempt) are computed from the list on read, so nothing
-# stored has to be kept in step with anything else.
+# results: every attempt per user in one JSON file; summaries are computed on read
 # ---------------------------------------------------------------------------
 
 RESULTS_FILE = OUTPUT_DIR / "quiz_results.json"
@@ -499,8 +473,8 @@ def _load_results() -> dict:
 
 
 def _append_attempt(user_id, attempt: dict) -> list[dict]:
-    """Adds one attempt and returns the user's attempts at that quiz. The file
-    is re-read under the lock, so two saves landing together both survive."""
+    """Adds an attempt and returns the user's attempts at that quiz. Re-read under the lock so
+    concurrent saves both survive."""
     with _RESULTS_LOCK:
         data = _load_results()
         attempts = data.setdefault(str(user_id), [])
@@ -514,10 +488,8 @@ def _append_attempt(user_id, attempt: dict) -> list[dict]:
 
 
 def summarise_attempts(attempts: list[dict]) -> dict:
-    """One quiz's attempts as the Quiz tab lists them. Best is the highest
-    share correct, the later attempt breaking ties; last is the most recent.
-    Quizzes carry no points: attempts saved before they were removed may
-    still hold a "points" field, and it is ignored."""
+    """One quiz's attempts as the Quiz tab lists them: best share correct (later wins ties) and
+    the latest. Old 'points' fields are ignored."""
     best = max(attempts, key=lambda a: (a["correct"] / a["total"], a["at"]))
     last = max(attempts, key=lambda a: a["at"])
     return {
@@ -560,20 +532,13 @@ async def list_results(user=Depends(current_user)):
 
 
 def passed_quiz_ids(user_id, kind: str = "section") -> set[str]:
-    """Quiz ids of that kind the user has passed at least once. Notes read this
-    to tick sections, so completion survives a reload and a restart."""
+    """Quiz ids of that kind the user has passed; notes tick sections from it across restarts."""
     return {a["quiz_id"] for a in _load_results().get(str(user_id), [])
             if a.get("kind") == kind and a.get("passed")}
 
 
 # ---------------------------------------------------------------------------
-# section quizzes
-#
-# Notes live in memory and are gone after a restart; their quizzes must not
-# be. Each section quiz a user has been shown is recorded here with its note
-# and section titles, keyed by quiz id, and the Quiz tab's "From notes" list
-# is built from this file alone. Per user, because the write cache it comes
-# from is shared by everyone.
+# section quizzes: kept per user so the Quiz tab lists them after the in-memory notes are gone
 # ---------------------------------------------------------------------------
 
 SECTION_QUIZ_FILE = OUTPUT_DIR / "section_quizzes.json"
@@ -591,9 +556,8 @@ def _load_section_quizzes() -> dict:
 
 def register_section_quiz(user_id, quiz_id: str, note_title: str, section_title: str,
                           index: int, questions: list[dict]) -> None:
-    """Records one section quiz for a user. Skips the write when nothing
-    changed, since this runs every time a section is opened. Never raises —
-    a quiz that cannot be recorded must not fail the section."""
+    """Records a section quiz for a user, skipping unchanged writes. Never raises: a failed
+    record must not fail the section."""
     entry = {"quiz_id": quiz_id, "note_title": note_title, "section_title": section_title,
              "index": index, "questions": questions}
     try:
@@ -615,9 +579,8 @@ def register_section_quiz(user_id, quiz_id: str, note_title: str, section_title:
 
 @router.get("/api/quiz/sections")
 async def list_section_quizzes(user=Depends(current_user)):
-    """Every section quiz the user has been given, grouped by note title and
-    in section order. Built from SECTION_QUIZ_FILE, not from the notes in
-    memory, so it is the same before and after a restart."""
+    """The user's section quizzes by note title in section order, from SECTION_QUIZ_FILE so they
+    survive a restart."""
     by_note: dict[str, list[dict]] = defaultdict(list)
     for entry in _load_section_quizzes().get(str(user["id"]), {}).values():
         by_note[entry.get("note_title") or "Revision notes"].append(entry)

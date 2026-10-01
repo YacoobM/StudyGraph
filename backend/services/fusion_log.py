@@ -1,12 +1,5 @@
-"""Per-run record of what fusion actually did.
-
-The console line for each step says how many pairs it handled; this says which
-ones, and why each edge that disappeared disappeared. One file per run, named
-by timestamp, so a demo run is not buried under the development ones.
-
-Written by merge_graph at the end of every fusion. Nothing reads it back — it
-exists to be read by a person afterwards, which is why it is text and not JSON.
-"""
+"""Per-run text record of what fusion did and why each dropped edge was dropped. Written by
+merge_graph for a person to read; nothing reads it back."""
 
 from datetime import datetime
 from itertools import count
@@ -21,8 +14,7 @@ def _pair(a, b, sim=None):
 
 
 class FusionLog:
-    """Collects one run's detail. Every field starts empty, so a step that did
-    not run reports that it did not rather than being left out."""
+    """One run's detail. Fields start empty, so a step that did not run says so."""
 
     def __init__(self, model, prompt_versions, settings, documents):
         self.started = datetime.now()
@@ -36,9 +28,9 @@ class FusionLog:
         self.variants = []           # (canonical, [raw variants])
         self.auto_merged = []        # (a, b, sim)
         self.blocked = []            # (a, b, sim)
-        self.modifier_held = []      # (a, b, sim) — above auto-merge, asked instead
+        self.modifier_held = []      # (a, b, sim) above auto-merge, asked instead
         self.candidates = []         # (a, b, sim)
-        self.already_linked = []     # (a, b, sim) — dropped before asking
+        self.already_linked = []     # (a, b, sim) dropped before asking
         self.verdicts = []           # (source, a, b, sim, verdict, detail)
         self.verdict_totals = {}
         self.step3_calls = 0
@@ -195,10 +187,8 @@ class FusionLog:
         return "\n".join(out) + "\n"
 
     def write(self, directory):
-        """Write this run to its own file. Never raises — a log that cannot be
-        written, or a bug in rendering it, must not fail the fusion that
-        produced it. The name carries milliseconds and a per-process counter,
-        and the file is opened exclusively, so two runs never share a file."""
+        """Writes this run to its own file. Never raises: a logging failure must not fail the
+        fusion."""
         try:
             text = self.render()
         except Exception as error:

@@ -1,58 +1,21 @@
 /**
- * Notes data for the Notes tab.
- *
- * The four functions at the bottom are the whole surface the components use:
- * listNotes, createNote, getSection, setSectionDone. They were mock data; they
- * are now real calls against /api/notes. Everything between here and there is
- * the adapter that turns what the backend returns into the shape the
- * components already render, so swapping the source did not mean rewriting
- * NotesPane's markup.
- *
- * They are async now, which the mock versions were not. That is the one thing
- * the swap could not hide: a network call cannot be read during render, so
- * NotesPane loads notes in an effect and shows a busy state while a section
- * is being written.
- *
- * Two backend facts the UI has to live with:
- *
- *   Sections are planned empty. A body is written on first open and takes
- *   twenty to thirty seconds, so getSection is the slow call, not listNotes.
- *
- *   Notes live in the backend process, not a database. They disappear when it
- *   restarts. A section comes back done when its quiz has a saved passing
- *   attempt; anything else setSectionDone records, including unticking a
- *   passed section, stays local here and is lost on reload.
+ * Notes tab data: adapts /api/notes responses to the shapes NotesPane renders. Notes live in
+ * the backend process; a section body is written on first open, which is the slow call.
  */
 
 import { planNote, fetchNotes, fetchNote, writeSection } from '../services/api.js'
 
-/**
- * Completion, held client-side because the backend does not record it.
- * Keyed on note id and section index rather than section id, since that is
- * what setSectionDone is handed, and it survives a refetch of the note.
- */
+/** Completion held client-side, keyed on note id and section index so it survives a refetch. */
 const completion = new Map()
 
 const doneKey = (noteId, index) => `${noteId}:${index}`
 
-/**
- * The last note list seen, so getSection can turn a section index into the
- * section id the write endpoint wants without a second round trip.
- */
+/** The last note list seen, so getSection maps an index to a section id without a refetch. */
 const seen = new Map()
 
 /**
- * Writes running right now, and sections that just refused.
- *
- * The backend holds its own in-flight guard and that is what protects the
- * quota — a request the browser abandons keeps generating there, so nothing
- * here can be relied on to stop a call. These two exist so the UI does not
- * ask for work it already knows is running or refused, and so a reader who
- * clicks again is told why rather than watching another spinner.
- *
- * The cooldown length comes from the 503's Retry-After when the model server
- * named one; WRITE_COOLDOWN_MS is only the fallback for a refusal that did
- * not say.
+ * Writes in flight and sections that just refused, so the UI does not re-ask. The backend's own
+ * guard protects the quota; Retry-After sets the cooldown, WRITE_COOLDOWN_MS is the fallback.
  */
 const inFlight = new Map()    // sectionId -> promise
 const coolUntil = new Map()   // sectionId -> epoch ms
@@ -94,28 +57,13 @@ function toNote(raw) {
 const isDone = (noteId, index, section) =>
   completion.get(doneKey(noteId, index)) ?? Boolean(section.done)
 
-/**
- * A body paragraph: a heading plus the marked spans that make up its prose.
- *
- * The spans arrive as {text, bold, key}, which is what Rich already renders —
- * bold for the first mention of a concept or a figure that matters, key for
- * the one sentence worth keeping. A paragraph written before spans existed
- * comes through as a plain string, so it is wrapped rather than dropped.
- */
+/** A body paragraph: a heading plus {text, bold, key} spans; an old plain string is wrapped. */
 function toParagraph(p) {
   if (typeof p === 'string') return { heading: '', parts: [{ text: p }] }
   return { heading: p?.heading || '', parts: spacedSpans(p?.parts || []) }
 }
 
-/**
- * Puts back the spaces the model drops between spans.
- *
- * The spans are meant to concatenate into the paragraph, and mostly they carry
- * their own leading space — but not always, which reads as "either way.
- * Initially" losing its gap and running together. A space goes in only where
- * neither side already has one and the next span does not open with
- * punctuation, so a comma or full stop still hugs the word before it.
- */
+/** Puts back spaces the model drops between spans; none goes before punctuation. */
 const OPENS_WITH_PUNCTUATION = /^[\s,.;:!?)\]}%'’"”…-]/
 
 function spacedSpans(parts) {
@@ -132,13 +80,8 @@ function spacedSpans(parts) {
 }
 
 /**
- * A written section, flattened into the blocks SectionBody renders.
- *
- * The renames are real differences, not noise: the backend calls a table's
- * headers `columns` and returns terms and relations as objects, while the
- * components read `cols` and take both as tuples. Any block the model left
- * null stays null and simply is not rendered — an unwritten table and a
- * section whose concepts have no links between them are both ordinary.
+ * A written section as the blocks SectionBody renders: columns become cols, terms and
+ * relations become tuples, and blocks the model left null stay null.
  */
 function toSection(raw, noteId, index) {
   const body = raw.body || {}
@@ -150,9 +93,7 @@ function toSection(raw, noteId, index) {
     done: isDone(noteId, index, raw),
     concepts: raw.concepts || [],
     sources: (raw.sources || []).map((file) => ({ file })),
-    // Only links with a summary are shown. A bare label from extraction or
-    // fusion is often wrong ("abstract data type is a type of data
-    // structure"), and the summary is the only part that says what the link is.
+    // Only links with a summary are shown: a bare extracted label is often wrong.
     relations: (raw.relations || [])
       .filter((e) => (e.summary || '').trim())
       .map((e) => [e.from, e.to, e.summary.trim()]),
@@ -169,8 +110,7 @@ function toSection(raw, noteId, index) {
       ? body.terms.map((t) => [t.term, t.definition])
       : null,
 
-    // The section quiz, written by the same call as the body. Null for a
-    // section written before quizzes existed, or whose quiz failed the checks.
+    // The section quiz from the same call as the body; null when absent or it failed the checks.
     quiz: body.quiz?.length ? body.quiz : null,
     quizId: body.quiz_id || null,
     // Correct answers that complete the section, from quiz_service.pass_mark.
@@ -180,10 +120,7 @@ function toSection(raw, noteId, index) {
     evolution: null,
     bridge: null,
 
-    // Carried through for anyone who wants to see how the body was made.
-    // A populated label_violations means the writer used a relation label as
-    // a word and the one rewrite did not clear it — worth knowing, not worth
-    // refusing to show the section over.
+    // Carried through for inspection; label_violations lists relation labels used as words.
     meta: {
       chunksUsed: body.chunks_used ?? 0,
       labelViolations: body.label_violations || [],
@@ -194,11 +131,7 @@ function toSection(raw, noteId, index) {
 
 /* -------------------------------------------------------------------- api */
 
-/**
- * Every note, newest first, with just enough of each section to draw the list
- * cards and the contents rail. Bodies are not included — the detail view asks
- * for one section at a time through getSection.
- */
+/** Every note, newest first, with enough of each section for the list cards; no bodies. */
 export async function listNotes() {
   const { notes = [] } = await fetchNotes()
   const adapted = notes.map(toNote)
@@ -206,13 +139,7 @@ export async function listNotes() {
   return adapted
 }
 
-/**
- * One section, with its body written if it has not been already.
- *
- * This is the slow call. The write endpoint generates on first open and
- * serves what it stored on every open after, so this is safe to call again
- * whenever the reader moves between sections.
- */
+/** One section, written on first open (the slow call) and stored after, so safe to call again. */
 export async function getSection(noteId, index, { signal } = {}) {
   let note = seen.get(noteId)
   if (!note) {
@@ -257,13 +184,7 @@ export async function getSection(noteId, index, { signal } = {}) {
   return toSection(section, noteId, index)
 }
 
-/**
- * Marks one section complete or incomplete.
- *
- * Local, and deliberately still synchronous: the backend has nowhere to put
- * this yet, so it is held in `completion` and applied over whatever the
- * server returns. It is lost on reload, like the notes themselves.
- */
+/** Marks a section complete or not; held locally over server data and lost on reload. */
 export function setSectionDone(noteId, index, done) {
   completion.set(doneKey(noteId, index), Boolean(done))
   const note = seen.get(noteId)
@@ -273,12 +194,7 @@ export function setSectionDone(noteId, index, done) {
   }
 }
 
-/**
- * Plans a note over the picked documents and returns its id.
- *
- * `docs` are rows as the Documents tab holds them; only the id is sent. The
- * sections come back empty — each body is written when it is first opened.
- */
+/** Plans a note over the picked documents and returns its id; sections come back empty. */
 export async function createNote({ docs, split, days }) {
   const ids = (docs || []).map((d) => d?.id).filter((id) => id != null)
   if (!ids.length) return null

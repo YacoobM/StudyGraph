@@ -4,38 +4,20 @@ import { saveQuizResult } from '../services/api.js'
 import QuizRunner from './QuizRunner.jsx'
 
 /**
- * Notes tab — list, create and detail, switched on local state.
- *
- * Both note types are the same structure: a note is a list of sections. A day
- * plan gives each section a `day` and the rail groups by that; full notes
- * leave it null and the rail lists them in order, ungrouped. There is one
- * rendering path, and `groupsFor` is the only place the two differ.
- *
- * The rail used to group full notes by document. It cannot: fusion merges
- * the two graphs, so a section's concepts routinely come from both files and
- * there is no one document to file it under. Provenance is per section now,
- * shown as badges on the item itself.
- *
- * Where the data comes from is entirely the business of ../data/notes.js.
- * Nothing here knows which endpoint a note came from.
+ * Notes tab: list, create and detail views on local state. A day plan groups the rail by day;
+ * a full note lists its sections in order. Data comes from ../data/notes.js.
  */
 
 /* --------------------------------------------------------------- helpers */
 
-/**
- * Renders a paragraph. Plain strings pass through; arrays may mix strings
- * with the bold and key marks the data module emits, which keeps the writing
- * emphasised without any component rendering HTML out of data.
- */
+/** Renders a paragraph: a plain string, or strings mixed with bold and key marks (no HTML). */
 function Rich({ parts }) {
   const list = typeof parts === 'string' ? [parts] : (parts || [])
   return (
     <>
       {list.map((p, i) => {
         if (typeof p === 'string') return <React.Fragment key={i}>{p}</React.Fragment>
-        // A span can be both. The highlight is the outer element so it runs
-        // unbroken across a sentence that happens to contain a bold term —
-        // checking bold first used to end the highlight at that word.
+        // The highlight is the outer element, so it runs unbroken across a bold term.
         if (p.key) {
           return (
             <span className="nt-key" key={i}>
@@ -80,14 +62,9 @@ const pctOf = (done, total) => (total ? Math.round((done / total) * 100) : 0)
 
 const kindLabel = (n) => (n.kind === 'plan' ? `${n.days}-day plan` : 'Full notes')
 
-// Badge text. The rail is 252px wide and these names run to forty characters,
-// so the extension goes and CSS truncates the rest; the full name is on the
-// title attribute.
+// Badge text: extension dropped and CSS truncates the rest; the full name is in the title.
 
-/**
- * The rail's contents. A plan groups by day number; a full note is one run
- * with no heading. Sections already arrive in order, so runs stay contiguous.
- */
+/** The rail's contents: a plan grouped by day, a full note as one run. */
 function groupsFor(note) {
   const numbered = note.sections.map((s, index) => ({ ...s, index }))
   if (note.kind !== 'plan') return [{ label: null, items: numbered }]
@@ -261,9 +238,7 @@ function CreateView({ readyDocs, planning, error, onCancel, onGenerate }) {
             <button className="btn-start" onClick={onCancel} disabled={planning}>
               Cancel
             </button>
-            {/* Planning runs an LLM call, so this is the one button that has
-                to say it is working. Generate stays clickable when nothing is
-                picked — that flags the block instead. */}
+            {/* Planning runs an LLM call, so this button says it is working. */}
             <button className="btn-primary2" onClick={generate} disabled={planning}>
               {planning ? 'Planning…' : 'Generate'}
             </button>
@@ -287,9 +262,7 @@ function CreateView({ readyDocs, planning, error, onCancel, onGenerate }) {
 function SectionBody({ section }) {
   return (
     <div className="nt-body">
-      {/* Each paragraph carries its own heading so the section can be scanned
-          rather than read start to finish, and its text arrives as marked
-          spans rather than a plain string. */}
+      {/* Each paragraph has its own heading so the section can be scanned. */}
       {section.body?.map((p, i) => (
         <div className="nt-para" key={i}>
           {p.heading && <h4 className="nt-para-head">{p.heading}</h4>}
@@ -351,10 +324,8 @@ function SectionBody({ section }) {
 }
 
 /**
- * The section's quiz, taken inline below the section's footer row. Opened
- * and closed by the "Quiz this section" button on that row. Passing marks
- * the section complete; the reader can still untick it. The pass mark is the
- * server's (quiz_service.pass_mark), so this and the saved result agree.
+ * The section's quiz, taken inline below the footer row. Passing marks the section
+ * complete; the pass mark is the server's.
  */
 function SectionQuiz({ section, noteTitle, onPassed, onClose }) {
   const [saveError, setSaveError] = useState('')
@@ -394,13 +365,8 @@ function ContextPanel({ section: loaded, open, onClose }) {
   // its concepts and sources are fetched, so every block below is optional.
   const section = loaded || {}
 
-  // File names only. /api/graph does return a pageLabel alongside each file,
-  // but at the current 2000-character chunk size it spans nearly the whole
-  // document, so printing it would point the reader nowhere.
-  //
-  // A closed pane stays in the DOM so it can animate shut, so it is also made
-  // inert — otherwise its buttons keep their place in the tab order while
-  // being invisible.
+  // File names only: pageLabel spans nearly the whole document at the current chunk size.
+  // A closed pane stays in the DOM to animate shut, so it is made inert to leave the tab order.
   return (
     <aside className={`inspector nt-ctx${open ? '' : ' off'}`} inert={open ? undefined : ''}>
       <div className="nt-ctx-inner">
@@ -563,9 +529,7 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
               {section && <div className="nt-lead"><Rich parts={section.lead} /></div>}
             </div>
 
-            {/* A section is planned empty and written the first time it is
-                opened, which is a real wait rather than a flicker — so this
-                says what is happening instead of showing a bare spinner. */}
+            {/* Writing a section is a real wait, so say what is happening. */}
             {writing && (
               <div className="nt-writing">
                 <span className="nt-writing-dot" />
@@ -647,17 +611,13 @@ export default function NotesPane({ readyDocs = [] }) {
   const [openId, setOpenId] = useState(null)
   const [index, setIndex] = useState(0)
 
-  // The body of the open section, loaded rather than derived: fetching it
-  // writes it, which takes twenty to thirty seconds the first time.
+  // Loaded, not derived: fetching the body writes it, slowly the first time.
   const [section, setSection] = useState(null)
   const [writing, setWriting] = useState(false)
   const [writeError, setWriteError] = useState('')
   const [planning, setPlanning] = useState(false)
 
-  // `Try again` re-requests the section already on screen, so it cannot work
-  // by setting the index it is already on — React skips the render and the
-  // effect never re-runs. Bumping a counter the effect depends on is what
-  // makes it fire.
+  // Bumped by Try again: setting the same index again would not re-run the effect.
   const [retryTick, setRetryTick] = useState(0)
   // Epoch ms until which this section refuses to be asked again.
   const [coolUntil, setCoolUntil] = useState(0)
@@ -674,9 +634,7 @@ export default function NotesPane({ readyDocs = [] }) {
     return () => { live = false }
   }, [])
 
-  // One fetch per section opened. `live` guards a reader who moves on while a
-  // slow write is still in flight — the answer to the section they left must
-  // not overwrite the one they are looking at now.
+  // One fetch per section opened; `live` stops a late answer landing on another section.
   useEffect(() => {
     if (view !== 'detail' || !note) return undefined
     const ac = new AbortController()
@@ -693,11 +651,8 @@ export default function NotesPane({ readyDocs = [] }) {
         if (e.cooldownSeconds) setCoolUntil(Date.now() + e.cooldownSeconds * 1000)
       })
       .finally(() => live && setWriting(false))
-    // `live` stops a late answer landing on the section the reader moved to.
-    // The abort is separate and does less than it looks: this backend does not
-    // cancel a handler when the browser goes (measured), so the generation runs
-    // on regardless — it frees the connection, and the server's own in-flight
-    // guard is what stops a second one starting.
+    // The abort only frees the connection: the backend keeps generating, and its own
+    // in-flight guard stops a second start.
     return () => { live = false; ac.abort() }
   }, [view, openId, index, retryTick])   // eslint-disable-line react-hooks/exhaustive-deps
 

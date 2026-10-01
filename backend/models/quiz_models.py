@@ -3,11 +3,7 @@ from pydantic import AliasChoices, BaseModel, Field
 
 
 class QuizSubmission(BaseModel):
-    """
-    Request body for POST /api/quiz/{quiz_id}/submit.
-
-    answers maps question_id -> the selected option index.
-    """
+    """Request body for POST /api/quiz/{quiz_id}/submit: question id to chosen option index."""
     answers: Dict[str, int]
 
 
@@ -33,13 +29,8 @@ class QuizResponse(BaseModel):
 
 
 class QuizAttempt(BaseModel):
-    """
-    One finished quiz attempt, as POST /api/quiz/results receives it.
-
-    The frontend always sent `quiz_id` while this model required `topic_id`,
-    so every save was a 422 the client swallowed. `quiz_id` is the name now;
-    `topic_id` is still accepted.
-    """
+    """One finished attempt for POST /api/quiz/results. The frontend sends quiz_id; topic_id is
+    still accepted."""
     quiz_id: str = Field(validation_alias=AliasChoices("quiz_id", "topic_id"), min_length=1)
     kind: Literal["document", "section"] = "document"
     answers: list[Optional[int]] = Field(default_factory=list)

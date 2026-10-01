@@ -1,25 +1,8 @@
 import React, { useState } from "react";
 
 /**
- * Takes one quiz, question by question, then shows the score.
- *
- * Shared by the Quiz tab and the Notes pane. Questions are {q, o, a, why, d}.
- * After a miss, Show answer reveals the correct option and the explanation;
- * there is no per-question link back into the notes.
- *
- * A wrong answer marks only the option just chosen, with an ✕; there is no
- * banner. The options stay clickable: picking another clears the mark and
- * the button goes back to Check answer. The correct option and the
- * explanation stay hidden until the reader gets it right or asks for both at
- * once with Show answer. Only the first try at each question counts toward
- * the score, so retrying until right does not inflate it.
- *
- * `onFinish({answers, correct, total})` fires once per completed run, with
- * the option picked on the first try at each question.
- *
- * `need` is how many first-try answers pass, as a count, always from the
- * server (quiz_service.pass_mark) so the screen and the saved result agree.
- * Without one, every question has to be right; no rule is computed here.
+ * Takes one quiz question by question, then shows the score. Only the first try at each
+ * question counts; `need` is the server's pass mark (every question without one).
  */
 
 /** The back link used across the quiz views: arrow plus label, easy to hit. */
@@ -56,11 +39,7 @@ function ResultIcon({ passed }) {
   );
 }
 
-/**
- * An option's marker: empty until picked, a filled dot while picked but not
- * yet checked, and a tick or a cross only once an answer has been checked.
- * A tick on a mere selection read as "correct" before anything was checked.
- */
+/** An option's marker: a dot while picked, a tick or cross only once checked. */
 function Marker({ cls }) {
   let mark = null;
   if (cls === "right") mark = "✓";
@@ -133,8 +112,7 @@ export default function QuizRunner({
 
     return wrap(
       <>
-        {/* Inline, the host's own button closes the quiz, so a second close
-            control here would only repeat it. */}
+        {/* Inline, the host's button closes the quiz, so there is no second close control. */}
         <div className="qz-run-top">
           {inline ? <span /> : <BackLink onClick={onExit}>{backLabel || title}</BackLink>}
           <span className="qz-run-prog">Question {run.i + 1} of {questions.length}</span>
@@ -201,10 +179,7 @@ export default function QuizRunner({
   );
 }
 
-/**
- * A finished quiz laid out for reading: each question with the correct
- * answer, the explanation and, when known, what was picked last time.
- */
+/** A finished quiz for reading: each question with its answer, explanation and last pick. */
 export function QuizReview({ title, questions, lastAnswers, onExit, onRetake }) {
   return (
     <div className="study-wrap"><div className="study-col">
