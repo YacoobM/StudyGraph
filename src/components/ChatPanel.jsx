@@ -60,12 +60,63 @@ const getDocumentUrl = (source, pageNumber) => {
   return fileUrl;
 };
 
-export default function ChatPanel({ onClose, embedded = false }) {
+function TaggedAnswer({ answer, concepts_mentioned, onConceptClick }) {
+
+  if (!concepts_mentioned || !Array.isArray(concepts_mentioned)){
+    console.log(answer)
+    return <p>{answer}</p>
+  }
+
+  //split the answer into parts, and tag
+  //concepts as they're found
+  let parts = [answer];
+  
+  concepts_mentioned.forEach((concept) => {
+    
+    parts = parts.flatMap((part) => {
+      if (typeof part !== "string") return [part];
+
+      //case insensitive regex to find concept
+      const regex = new RegExp(
+        `\\b${concept.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+        "gi",
+      );
+
+      const matches = part.split(regex);
+
+      if (matches.length == 1) return [part];
+
+      return matches.reduce((acc, match, i) => {
+        console.log(concept);
+        acc.push(match); //push the plain text
+        if (i < matches.length - 1) {
+          //if not the last part
+          acc.push(
+            //matched concept name
+            <button
+              key={`${concept}-${i}`}
+              className="concept-tag"
+              onClick={() => onConceptClick(concept)}
+            >
+              {part.match(regex)[i]}
+            </button>,
+          );
+        }
+        return acc;
+      }, []);
+    });
+  });
+
+  return <p>{parts}</p>
+}
+
+export default function ChatPanel({ onClose, embedded = false, onConceptClick}) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
       content:
         "Hi! I'm StudyGraph. Upload your documents and generate a graph, then ask me anything about the content — I'll pull answers straight from your sources.",
+        concepts_mentioned:[],
     },
   ]);
   const [input, setInput] = useState("");
@@ -85,6 +136,14 @@ export default function ChatPanel({ onClose, embedded = false }) {
     window.addEventListener("keydown", handleExit);
     return () => window.removeEventListener("keydown", handleExit);
   }, [onClose]);
+
+  useEffect(() => {
+    console.log('All messages:', messages)
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1]
+      console.log('Last message:', lastMessage)
+    }
+  }, [messages])
 
   const openCitation = (source) => {
     const filename = source?.fileName || source?.file || "";
@@ -118,6 +177,8 @@ export default function ChatPanel({ onClose, embedded = false }) {
           role: "assistant",
           content: data.answer,
           sources: data.sources || [],
+          concepts_mentioned: data.concepts_mentioned || [],
+          subgraph: data.subgraph || null,
         },
       ]);
     } catch (e) {
@@ -127,12 +188,14 @@ export default function ChatPanel({ onClose, embedded = false }) {
           role: "assistant",
           content:
             "Sorry — I couldn't get an answer just now. Make sure you've generated a graph from your documents.",
+          concepts_mentioned:[],
         },
       ]);
     } finally {
       setBusy(false);
     }
   };
+
 
   const onKey = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -142,9 +205,7 @@ export default function ChatPanel({ onClose, embedded = false }) {
   };
 
   return (
-    <div
-      className={embedded ? "chat-drawer chat-panel-embedded" : "chat-drawer"}
-    >
+    <aside className="chat-panel" role="complementary" aria-label="StudyGraph chat">
       <div className="chat-head">
         <div className="chat-head-title">
           <svg
@@ -170,7 +231,17 @@ export default function ChatPanel({ onClose, embedded = false }) {
         {messages.map((m, i) => (
           <div key={i} className={`bubble bubble-${m.role}`}>
             <div className="bubble-content">
-              {renderMarkdown(m.content, m.sources || [], openCitation)}
+              {m.concepts_mentioned && m.concepts_mentioned.length > 0 ? (
+                <TaggedAnswer
+                  answer={m.content}
+                  concepts_mentioned={
+                    m.concepts_mentioned
+                  }
+                  onConceptClick={onConceptClick}
+                />
+              ) : (
+                renderMarkdown(m.content, m.sources || [], openCitation)
+              )}
             </div>
             {m.sources && m.sources.length > 0 && (
               <div className="bubble-sources">
@@ -228,7 +299,7 @@ export default function ChatPanel({ onClose, embedded = false }) {
           <ArrowUp size={20} />
         </button>
       </div>
-    </div>
+    </aside>
   );
 }
 
