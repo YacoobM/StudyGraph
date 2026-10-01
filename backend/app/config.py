@@ -46,7 +46,7 @@ EXTRACTION_MODEL = _model_setting(
 )
 RAG_MODEL = _model_setting(f"{LLM_PROVIDER.upper()}_RAG_MODEL", _defaults["rag"])
 NON_RAG_REASONING_EFFORT = "none"
-RAG_REASONING_EFFORT = "medium" if LLM_PROVIDER == "openai" else "none"
+RAG_REASONING_EFFORT = "medium" if LLM_PROVIDER == "openai" else "medium"
 EXTRACTION_MAX_COMPLETION_TOKENS = int(
     os.getenv(f"{LLM_PROVIDER.upper()}_EXTRACTION_MAX_COMPLETION_TOKENS", _defaults["budget"])
 )

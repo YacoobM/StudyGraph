@@ -55,11 +55,13 @@ export async function regenerateConcept(conceptName) {
 }
 
 export async function askQuestion(question) {
-  return safeFetchJson(`${API_BASE_URL}/api/query`, {
+  const response = await safeFetchJson(`${API_BASE_URL}/api/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: question }),
   })
+  console.log(response)
+  return response
 }
 
 // Cheap tier: one grounded summary from the concept's earliest-appearance
