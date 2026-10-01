@@ -17,10 +17,10 @@
   /* Section palette. Each band below the hero gets its own colour so the page
      reads as distinct sections; the "How it works" band reuses the graph
      canvas brown so it sits in the same family as the demo above it. */
-  --lp-yellow: #f2c14e; /* headings, icons, numbers on brown */
-  --lp-yellow-soft: #eadba8; /* body text on brown */
+  --lp-yellow: #f2c14e;          /* headings, icons, numbers on brown */
+  --lp-yellow-soft: #eadba8;     /* body text on brown */
   --lp-yellow-line: rgba(242, 193, 78, 0.32);
-  --lp-cta-bg: #4a2e1c; /* final CTA band (espresso brown) */
+  --lp-cta-bg: #4a2e1c;          /* final CTA band (espresso brown) */
 
   background: var(--bg-0);
   color: var(--text-0);
@@ -365,43 +365,31 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* "How StudyGraph works" — full-width band in the graph canvas brown, with
-   every piece of content inside it in yellow. */
-.lp-section-night {
-  background: var(--lp-night);
-  color: var(--lp-yellow);
+/* "How StudyGraph works" — the four steps sit inside one rounded black card
+   in the same palette as the final CTA: graph canvas black, cream titles,
+   muted body text and node-orange icons. The section around it keeps the
+   page colour. */
+.lp-process-box {
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding: 36px 34px 34px;
+  background: var(--lp-night);          /* #171309 */
+  border-radius: 20px;
+  color: var(--lp-night-text);
 }
-.lp-section-night :focus-visible {
-  outline-color: var(--lp-yellow);
-}
-.lp-section-night .lp-eyebrow {
-  color: var(--lp-yellow);
-  opacity: 0.8;
-}
-.lp-section-night .lp-section-head h2 {
-  color: var(--lp-yellow);
-}
-.lp-section-night .lp-section-head p {
-  color: var(--lp-yellow-soft);
-}
-.lp-section-night .lp-step h3 {
-  color: var(--lp-yellow);
-}
-.lp-section-night .lp-step p {
-  color: var(--lp-yellow-soft);
-}
-.lp-section-night .lp-step-num {
-  color: var(--lp-yellow);
-  opacity: 0.7;
-}
+.lp-section-night :focus-visible { outline-color: var(--lp-yellow); }
+.lp-section-night .lp-eyebrow { color: var(--lp-yellow); opacity: 0.8; }
+.lp-section-night .lp-section-head h2 { color: var(--lp-yellow); }
+.lp-section-night .lp-section-head p { color: var(--lp-yellow-soft); }
+.lp-section-night .lp-step h3 { color: var(--lp-yellow); }
+.lp-section-night .lp-step p { color: var(--lp-yellow-soft); }
+.lp-section-night .lp-step-num { color: var(--lp-yellow); opacity: 0.7; }
 .lp-section-night .lp-step-icon {
   background: rgba(242, 193, 78, 0.06);
   border-color: var(--lp-yellow-line);
   color: var(--lp-yellow);
 }
-.lp-section-night .lp-step:hover .lp-step-icon {
-  border-color: var(--lp-yellow);
-}
+.lp-section-night .lp-step:hover .lp-step-icon { border-color: var(--lp-yellow); }
 
 .lp-section-head {
   max-width: var(--lp-max);
@@ -560,36 +548,36 @@
 
 /* ---------------- final CTA ---------------- */
 
+/* Final CTA: a rounded black card inset from the page edges — the graph
+   canvas black, cream heading, muted subtitle and the node-orange button. */
 .lp-cta {
-  padding: 88px var(--lp-gutter);
+  margin: 16px;
+  padding: 100px var(--lp-gutter);
   text-align: center;
-  background: var(--lp-cta-bg);
-  color: var(--lp-yellow);
+  background: var(--lp-night);          /* #171309, same black as the graph canvas */
+  border-radius: 20px;
+  color: var(--lp-night-text);
 }
-.lp-cta :focus-visible {
-  outline-color: var(--lp-yellow);
-}
+.lp-cta :focus-visible { outline-color: var(--lp-yellow); }
 
 .lp-cta h2 {
-  margin: 0;
+  margin: 0 auto;
+  max-width: 22ch;
   font-family: var(--font-display);
-  font-size: clamp(24px, 2.6vw, 34px);
+  font-size: clamp(28px, 3vw, 44px);
   font-weight: 800;
   letter-spacing: -0.025em;
+  line-height: 1.12;
+  color: var(--lp-night-text);          /* #f3eedd cream */
 }
 
 .lp-cta p {
-  margin: 12px 0 26px;
+  margin: 14px 0 28px;
   font-size: 15px;
-  color: var(--lp-yellow-soft);
+  color: var(--lp-night-dim);           /* #96897a muted */
 }
-.lp-cta .lp-btn-solid {
-  background: var(--lp-yellow);
-  color: #2a1a0e;
-}
-.lp-cta .lp-btn-solid:hover {
-  background: #f7d27a;
-}
+.lp-cta .lp-btn-solid { background: var(--lp-yellow); color: #2a1a0e; }
+.lp-cta .lp-btn-solid:hover { background: #f7d27a; }
 
 /* ---------------- footer ---------------- */
 
@@ -674,15 +662,9 @@
     transition: transform 560ms ease;
     transition-delay: calc(var(--i) * 110ms + 180ms);
   }
-  .lp-process.is-in .lp-step::after {
-    transform: scaleY(1);
-  }
-  .lp-section-night .lp-step::after {
-    background: var(--lp-yellow-line);
-  }
-  .lp-step:last-child::after {
-    display: none;
-  }
+  .lp-process.is-in .lp-step::after { transform: scaleY(1); }
+  .lp-section-night .lp-step::after { background: var(--lp-yellow-line); }
+  .lp-step:last-child::after { display: none; }
   .lp-step-marker {
     position: static;
     margin-bottom: 8px;
@@ -696,44 +678,20 @@
     padding-right: 0;
   }
 
-  .lp-benefits {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .lp-benefits { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 560px) {
-  .lp {
-    --lp-gutter: 16px;
-  }
-  .lp-nav-inner {
-    gap: 12px;
-  }
-  .lp-nav-actions .lp-btn {
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-  .lp-hero {
-    padding-top: 40px;
-  }
-  .lp-hero-actions .lp-btn {
-    flex: 1 1 auto;
-  }
-  .lp-demo-bar {
-    font-size: 11px;
-  }
-  .lp-demo-stats {
-    gap: 10px;
-  }
-  .lp-demo-canvas {
-    height: 280px;
-  }
-  .lp-demo-timeline {
-    padding: 12px 14px 4px;
-  }
-  .lp-cta {
-    padding-top: 60px;
-    padding-bottom: 64px;
-  }
+  .lp { --lp-gutter: 16px; }
+  .lp-nav-inner { gap: 12px; }
+  .lp-nav-actions .lp-btn { padding: 8px 12px; font-size: 13px; }
+  .lp-hero { padding-top: 40px; }
+  .lp-hero-actions .lp-btn { flex: 1 1 auto; }
+  .lp-demo-bar { font-size: 11px; }
+  .lp-demo-stats { gap: 10px; }
+  .lp-demo-canvas { height: 280px; }
+  .lp-demo-timeline { padding: 12px 14px 4px; }
+  .lp-cta { padding-top: 60px; padding-bottom: 64px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

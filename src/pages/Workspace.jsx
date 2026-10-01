@@ -16,7 +16,6 @@ import SubjectSidebar from "../components/SubjectSidebar.jsx";
 import UploadDialog, {
   UploadDrop,
   UploadQueue,
-  TopicSelect,
 } from "../components/UploadPanel.jsx";
 import { useLibrary } from "../lib/library.js";
 
@@ -82,7 +81,7 @@ function prettyName(filename) {
 
 /**
  * Degree, "core" vs "support" and the week range for whatever set of nodes is
- * on screen. Recomputed per view, so a topic's graph ranks its concepts
+ * on screen. Recomputed per view, so a graph ranks its concepts
  * against each other rather than against the whole library.
  */
 function shapeGraph(nodes, edges) {
@@ -145,33 +144,44 @@ export default function Workspace() {
     setTimeout(() => setBusy(""), 1800);
   };
 
-  // --- current view: All documents, or one topic --------------------------
+  // --- current view: All documents, or one graph --------------------------
 
-  const found = library.activeTopicId
-    ? library.findTopic(library.activeTopicId)
+  const found = library.activeGraphId
+    ? library.findGraph(library.activeGraphId)
     : null;
-  const activeTopicId = found ? found.topic.id : null;
-  const topicDocIds = found ? found.topic.docIds.map(String) : null;
+  const activeGraphId = found ? found.graph.id : null;
+  const graphDocIds = found ? found.graph.docIds.map(String) : null;
 
   const viewDocs = useMemo(
     () =>
-      topicDocIds
-        ? docs.filter((d) => topicDocIds.includes(String(d.id)))
+      graphDocIds
+        ? docs.filter((d) => graphDocIds.includes(String(d.id)))
         : docs,
-    [docs, topicDocIds?.join("|")], // eslint-disable-line react-hooks/exhaustive-deps
+    [docs, graphDocIds?.join("|")], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // A topic's graph is the concepts whose source files belong to the topic,
+  // A graph is the concepts whose source files belong to its documents,
   // and the relationships between them. The data is the same /api/graph
   // response — it is only filtered here.
   const view = useMemo(() => {
-    if (!topicDocIds) return shapeGraph(graph.nodes, graph.edges);
+    if (!graphDocIds) return shapeGraph(graph.nodes, graph.edges);
     const files = new Set(viewDocs.map((d) => d.name || d.filename));
     const nodes = graph.nodes.filter((n) =>
       (n.sources || []).some((f) => files.has(f)),
     );
     return shapeGraph(nodes, graph.edges);
-  }, [graph, viewDocs, topicDocIds?.join("|")]);
+  }, [graph, viewDocs, graphDocIds?.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const maxWeek = view.maxWeek;
+  const viewKey = activeGraphId || "all";
+
+  // Land on the newest week whenever the view or its range changes.
+  useEffect(() => {
+    setWeek(view.maxWeek);
+  }, [viewKey, view.maxWeek]);
+  useEffect(() => {
+    setSelected(null);
+  }, [viewKey]);
 
   const handleConceptClick = (conceptName) => {
     const normalize = (str) =>
@@ -191,24 +201,6 @@ export default function Workspace() {
       console.warn(`Concept "${conceptName}" not found in graph`);
     }
   };
-
-  // Notes are written from documents the engine has finished reading, so the
-  // picker there only offers rows that have settled.
-  const readyDocs = useMemo(
-    () => docs.filter((d) => statusClass(d.status) === "ready"),
-    [docs],
-  );
-
-  const maxWeek = view.maxWeek;
-  const viewKey = activeTopicId || "all";
-
-  // Land on the newest week whenever the view or its range changes.
-  useEffect(() => {
-    setWeek(view.maxWeek);
-  }, [viewKey, view.maxWeek]);
-  useEffect(() => {
-    setSelected(null);
-  }, [viewKey]);
 
   // --- data ---------------------------------------------------------------
 
@@ -389,7 +381,7 @@ export default function Workspace() {
   const patchItem = (key, patch) =>
     setQueue((q) => q.map((i) => (i.key === key ? { ...i, ...patch } : i)));
 
-  async function processItem({ key, file, name, topicId }) {
+  async function processItem({ key, file, name, graphId }) {
     patchItem(key, { status: "uploading", message: "" });
     let docId = null;
     try {
@@ -432,7 +424,7 @@ export default function Workspace() {
     // one; the newest row with this filename is it (the list is newest first).
     if (docId == null && rows)
       docId = rows.find((d) => (d.name || d.filename) === name)?.id ?? null;
-    if (docId != null && topicId) library.assignDocs([docId], topicId);
+    if (docId != null && graphId) library.assignDocs([docId], graphId);
     await loadGraph();
   }
 
@@ -446,7 +438,7 @@ export default function Workspace() {
     }
   }
 
-  function enqueue(files, topicId) {
+  function enqueue(files, graphId) {
     const stamp = Date.now();
     const items = files.map((file, i) => {
       const ext = extOf(file.name);
@@ -455,7 +447,7 @@ export default function Workspace() {
         key: `${stamp}-${i}-${file.name}`,
         file,
         name: file.name,
-        topicId: topicId || null,
+        graphId: graphId || null,
         status: ok ? "queued" : "failed",
         message: ok
           ? ""
@@ -470,11 +462,16 @@ export default function Workspace() {
   }
 
   function openUpload() {
-    setUploadDest(activeTopicId);
+    setUploadDest(activeGraphId);
     setUploadOpen(true);
   }
 
   const activeUploads = queue.filter((i) => ACTIVE.includes(i.status)).length;
+  // The drop zones on the graph page and in the Documents tab only list what
+  // was sent to the graph on screen; the dialog lists everything.
+  const viewQueue = activeGraphId
+    ? queue.filter((i) => i.graphId === activeGraphId)
+    : queue;
 
   async function retryFailed() {
     setCanRetry(false);
@@ -514,12 +511,12 @@ export default function Workspace() {
 
   const t = totals || { count: docs.length, concepts: 0, relationships: 0 };
 
-  // Header: a topic names itself (with its subject above). "All documents"
+  // Header: a graph names itself (with Subject › Topic above). "All documents"
   // keeps the old rule — one document names the graph, several are counted.
   const rawTitle =
     !found && docs.length === 1 ? docs[0].name || docs[0].filename || "" : "";
   const title = found
-    ? found.topic.name
+    ? found.graph.name
     : docs.length === 0
       ? "Untitled graph"
       : docs.length === 1
@@ -548,7 +545,7 @@ export default function Workspace() {
             <button
               type="button"
               className="ws-menu"
-              aria-label="Show subjects and topics"
+              aria-label="Show subjects, topics and graphs"
               onClick={() => setSideOpen(true)}
             >
               <svg
@@ -571,7 +568,7 @@ export default function Workspace() {
                 <div className="ws-crumb">
                   <span title={found.subject.name}>{found.subject.name}</span>
                   <span aria-hidden="true">›</span>
-                  <span>Graph</span>
+                  <span title={found.topic.name}>{found.topic.name}</span>
                 </div>
               )}
               <div className="ws-title" title={rawTitle || title}>
@@ -682,8 +679,8 @@ export default function Workspace() {
                 setDropOver(false);
                 const files = Array.from(e.dataTransfer.files || []);
                 if (files.length) {
-                  enqueue(files, activeTopicId);
-                  setUploadDest(activeTopicId);
+                  enqueue(files, activeGraphId);
+                  setUploadDest(activeGraphId);
                   setUploadOpen(true);
                 }
               }}
@@ -701,7 +698,7 @@ export default function Workspace() {
                     <>
                       <h3>
                         {found
-                          ? `Nothing in ${found.topic.name} yet`
+                          ? `Nothing in ${found.graph.name} yet`
                           : "Nothing here yet"}
                       </h3>
                       <p>
@@ -714,12 +711,12 @@ export default function Workspace() {
                     tone="dark"
                     title={
                       found
-                        ? `Add documents to ${found.topic.name}`
+                        ? `Add documents to ${found.graph.name}`
                         : "Drop your documents here"
                     }
-                    onFiles={(files) => enqueue(files, activeTopicId)}
+                    onFiles={(files) => enqueue(files, activeGraphId)}
                   />
-                  <UploadQueue items={queue} />
+                  <UploadQueue items={viewQueue} />
                 </div>
               ) : (
                 <ConceptGraph
@@ -735,7 +732,7 @@ export default function Workspace() {
               )}
               {dropOver && view.nodes.length > 0 && (
                 <div className="graph-drop-hint" aria-hidden="true">
-                  Drop to add to {found ? found.topic.name : "All documents"}
+                  Drop to add to {found ? found.graph.name : "All documents"}
                 </div>
               )}
             </div>
@@ -754,10 +751,10 @@ export default function Workspace() {
             <DocumentsTab
               docs={viewDocs}
               totals={t}
-              topic={found?.topic || null}
+              graph={found?.graph || null}
               library={library}
-              queue={queue}
-              onFiles={(files) => enqueue(files, activeTopicId)}
+              queue={viewQueue}
+              onFiles={(files) => enqueue(files, activeGraphId)}
               onRemove={remove}
             />
           )}
@@ -788,7 +785,7 @@ export default function Workspace() {
 function DocumentsTab({
   docs,
   totals,
-  topic,
+  graph,
   library,
   queue,
   onFiles,
@@ -798,21 +795,21 @@ function DocumentsTab({
     <div className="pane pane-scroll">
       <div className="pane-head">
         <div>
-          <h2>{topic ? `Documents in ${topic.name}` : "All documents"}</h2>
+          <h2>{graph ? `Documents in ${graph.name}` : "All documents"}</h2>
           <p>
-            {topic
-              ? "The sources this topic’s graph is built from. Use the Topic column to move a document somewhere else."
+            {graph
+              ? "The sources this graph is built from. Use the Graph column to move a document somewhere else."
               : "Everything you have uploaded. Removing a source takes its concepts out of the graph."}
           </p>
         </div>
         <div className="stat-row">
           <div className="stat">
-            <div className="n mono">{topic ? docs.length : totals.count}</div>
+            <div className="n mono">{graph ? docs.length : totals.count}</div>
             <div className="l">Documents</div>
           </div>
           <div className="stat">
             <div className="n mono">
-              {topic
+              {graph
                 ? docs.reduce((a, d) => a + (d.nodes ?? d.concepts ?? 0), 0)
                 : totals.concepts}
             </div>
@@ -820,7 +817,7 @@ function DocumentsTab({
           </div>
           <div className="stat">
             <div className="n mono">
-              {topic
+              {graph
                 ? docs.reduce((a, d) => a + (d.relationships ?? 0), 0)
                 : totals.relationships}
             </div>
@@ -830,7 +827,7 @@ function DocumentsTab({
       </div>
 
       <UploadDrop
-        title={topic ? `Add documents to ${topic.name}` : "Add documents"}
+        title={graph ? `Add documents to ${graph.name}` : "Add documents"}
         onFiles={onFiles}
       />
       <UploadQueue items={queue} />
@@ -840,7 +837,7 @@ function DocumentsTab({
           <tr>
             <th>File</th>
             <th>Status</th>
-            <th>Topic</th>
+            <th>Graph</th>
             <th>Week</th>
             <th className="r">Concepts</th>
             <th className="r">Links</th>
@@ -852,8 +849,8 @@ function DocumentsTab({
             <tr>
               <td colSpan={7}>
                 <div className="empty">
-                  {topic
-                    ? "No documents in this topic yet. Add some above, or move one here from All documents."
+                  {graph
+                    ? "No documents in this graph yet. Add some above, or move one here from All documents."
                     : "No documents yet. Add some above and StudyGraph will start reading them."}
                 </div>
               </td>
@@ -881,16 +878,16 @@ function DocumentsTab({
                   </span>
                 </td>
                 <td>
-                  <TopicSelect
-                    id={`doc-topic-${d.id}`}
+                  <GraphSelect
+                    id={`doc-graph-${d.id}`}
                     label={
                       <span className="sr-only">
-                        Topic for {d.name || d.filename}
+                        Graph for {d.name || d.filename}
                       </span>
                     }
                     subjects={library.subjects}
-                    value={library.topicOfDoc(d.id)}
-                    onChange={(topicId) => library.assignDocs([d.id], topicId)}
+                    value={library.graphOfDoc(d.id)}
+                    onChange={(graphId) => library.assignDocs([d.id], graphId)}
                   />
                 </td>
                 <td className="mono">{d.week || "—"}</td>
