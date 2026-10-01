@@ -25,6 +25,10 @@ def _model_setting(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
 
 
+# Single provider switch. Set LLM_PROVIDER=groq in backend/.env to move the
+# extraction, fusion, RAG, quiz, and evolution calls to Groq. The provider
+# controls the matching API key, model defaults, request parameters, and
+# token-budget defaults below.
 LLM_PROVIDER = _model_setting("LLM_PROVIDER", "openai").lower()
 if LLM_PROVIDER not in {"openai", "groq"}:
     raise RuntimeError("LLM_PROVIDER must be either 'openai' or 'groq'")
@@ -32,7 +36,7 @@ if LLM_PROVIDER not in {"openai", "groq"}:
 LLM_API_KEY_ENV = "OPENAI_API_KEY" if LLM_PROVIDER == "openai" else "GROQ_API_KEY"
 _PROVIDER_DEFAULTS = {
     "openai": {"extraction": "gpt-5.6-luna", "rag": "gpt-5.6-luna", "budget": "2000"},
-    "groq": {"extraction": "qwen/qwen3.8-27b", "rag": "openai/gpt-oss-20b", "budget": "700"},
+    "groq": {"extraction": "qwen/qwen3.8-27b", "rag": "openai/gpt-oss-20b", "budget": "2000"},
 }
 _defaults = _PROVIDER_DEFAULTS[LLM_PROVIDER]
 
