@@ -253,6 +253,15 @@ async def _run_upload_pipeline(
             for index, ((batch, _known), data) in enumerate(zip(batch_contexts, batch_results))
             if isinstance(data, Exception)
         ]
+        for failure in failed_batches:
+            error = batch_results[failure["batch_id"] - 1]
+            logger.error(
+                "extraction_batch_failed batch=%s/%s chunks=%d error_type=%s status_code=%s error=%s headers=%s",
+                failure["batch_id"], len(extraction_batches), len(failure["chunk_ids"]),
+                type(error).__name__, getattr(error, "status_code", None), str(error),
+                getattr(getattr(error, "response", None), "headers", None),
+                exc_info=error,
+            )
         engine.failed_upload_batches = {
             item["batch_id"]: {
                 "batch": batch_contexts[item["batch_id"] - 1][0],

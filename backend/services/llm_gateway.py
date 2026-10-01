@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import os
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 from app.config import LLM_PROVIDER
 
 class SharedTokenLimiter:
@@ -40,6 +43,10 @@ class SharedTokenLimiter:
         with self._sync_lock:
             wait_time = self._available_wait(input_tokens, output_tokens)
         if wait_time > 0:
+            logger.warning(
+                "llm_local_rate_limit_wait input_tokens=%d output_tokens=%d wait_seconds=%.1f",
+                input_tokens, output_tokens, wait_time,
+            )
             time.sleep(wait_time)
 
     async def acquire(self, input_tokens: int, output_tokens: int) -> None:
@@ -47,6 +54,10 @@ class SharedTokenLimiter:
         with self._sync_lock:
             wait_time = self._available_wait(input_tokens, output_tokens)
         if wait_time > 0:
+            logger.warning(
+                "llm_local_rate_limit_wait_async input_tokens=%d output_tokens=%d wait_seconds=%.1f",
+                input_tokens, output_tokens, wait_time,
+            )
             await asyncio.sleep(wait_time)
 
 # The generic LLM_* settings override provider defaults. Groq preserves the
