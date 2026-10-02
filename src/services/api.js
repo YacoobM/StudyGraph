@@ -57,36 +57,6 @@ async function pollUntilDone(
   }
 }
 
-// Backend hardcodes the model server-side and has no /api/models route.
-export async function listModels() {
-  return {
-    providers: [
-      {
-        id: "groq",
-        name: "Groq",
-        available: true,
-        env_var: "GROQ_API_KEY",
-        models: [
-          {
-            id: "llama-3.3-70b-versatile",
-            label: "Llama 3.3 70B (server-fixed)",
-          },
-        ],
-      },
-    ],
-    default: { provider: "groq", model: "llama-3.3-70b-versatile" },
-    note: "Backend ignores the selected model — picker is currently cosmetic.",
-  };
-}
-
-export async function generateGraph(_docIds, _provider, _model) {
-  await safeFetchJson(`${API_BASE_URL}/api/fuse`, { method: "POST" });
-  return fetchGraph();
-}
-
-// Raw GET /api/graph, with no /api/fuse call — used to restore whatever
-// graph the backend already has (e.g. on mount) without re-triggering
-// fusion. Same response shape generateGraph() resolves to.
 export async function fetchGraph() {
   return safeFetchJson(`${API_BASE_URL}/api/graph`, { method: "GET" });
 }
@@ -197,10 +167,6 @@ export function getDocumentFileUrl(filename) {
   return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`;
 }
 
-// Clears cached summaries/comparisons for a concept so the next description/
-// evolution fetch regenerates them from Groq — the way to recover a concept
-// whose cached summary is the raw-excerpt fallback (see is_fallback on
-// fetchConceptDescription/fetchConcept) or is just wrong for any reason.
 export async function regenerateConcept(conceptName) {
   return safeFetchJson(
     `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`,
@@ -288,11 +254,13 @@ export async function getGraph() {
 }
 
 export async function askQuestion(question) {
-  return safeFetchJson(`${API_BASE_URL}/api/query`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const response = await safeFetchJson(`${API_BASE_URL}/api/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: question }),
-  });
+  })
+  console.log(response)
+  return response
 }
 
 // Cheap tier: one grounded summary from the concept's earliest-appearance
@@ -402,12 +370,7 @@ export async function me() {
 // row shape
 // ---------------------------------------------------------------------------
 
-/**
- * The backend returns filename/concepts/size_kb; Builder's table renders
- * name/nodes/type/upload_status. Map between them here rather than editing
- * Builder, so the existing table keeps working untouched. Backend names are
- * preserved alongside, so newer components can use either.
- */
+
 function toRow(doc) {
   const ext = (doc.filename?.split(".").pop() || "").toUpperCase();
   const label =
@@ -550,6 +513,16 @@ export async function fetchQuiz(graphId) {
   return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz`, { headers: await authHeaders() });
 }
 
+// Compatibility endpoint for the older per-document quiz view. The current
+// Supabase graph flow uses fetchQuiz(graphId), which loads or creates the
+// persisted quiz for the latest graph version.
+export async function generateDocumentQuiz(_graphId, documentId) {
+  return apiFetch(`${API_BASE_URL}/api/quiz/documents/${encodeURIComponent(documentId)}/generate`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}
+
 export async function saveQuizResult(graphId, quizId, correct, total, points) {
   return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/results`, {
     method: "POST",
@@ -564,6 +537,20 @@ export async function saveQuizProgress(graphId, quizId, currentIndex, answers, c
     headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ quiz_id: quizId, current_index: currentIndex, answers, correct, total, points, completed }),
   });
+}
+
+/**
+ * Every section quiz the user has been given, grouped by note title. Read
+ * from the server's stored copy, so it is there after a restart even though
+ * the notes themselves are not.
+ */
+export async function fetchSectionQuizzes() {
+  return apiFetch(`${API_BASE_URL}/api/quiz/sections`, { headers: await authHeaders() })
+}
+
+/** Every stored attempt, summarised per quiz id. */
+export async function fetchQuizResults() {
+  return apiFetch(`${API_BASE_URL}/api/quiz/results`, { headers: await authHeaders() })
 }
 
 /** Per-document concept/edge counts, used to reconcile stuck rows. */

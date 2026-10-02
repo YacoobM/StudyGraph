@@ -1,11 +1,13 @@
 import json
 import logging
+import time
 from datetime import datetime
 
-from app.config import OUTPUT_DIR
+from app.config import COMPLETION_TOKEN_PARAMETER, NON_RAG_REASONING_EFFORT, OUTPUT_DIR
 from services.llm_gateway import estimate_tokens, limiter
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def save_seed_entities(seed_entities):
@@ -46,11 +48,12 @@ def save_extraction_result(timings, nodes, edges):
         return None
 
 
-def save_graph_json(nodes, edges, fusion_stats=None):
+def save_graph_json(nodes, edges, fusion_stats=None, graph_name=""):
     try:
         output_file = OUTPUT_DIR / "graph_json.json"
         data = {
             "timestamp": datetime.now().isoformat(),
+            "name": graph_name,
             "nodes": nodes,
             "edges": edges,
             "stats": {
@@ -71,22 +74,45 @@ def get_collection(chroma, project_id, user_id="default"):
     return chroma.get_or_create_collection(name=f"user_{user_id}_project_{project_id}")
 
 
-def call_llm(client, model, prompt, text_batch, max_tokens=1000):
+async def call_llm(client, model, prompt, text_batch, max_tokens=1000):
+    request_started = time.perf_counter()
+    estimated_input = estimate_tokens(prompt) + estimate_tokens(text_batch)
+    logger.info(
+        "llm_request_started model=%s estimated_input_tokens=%d max_output_tokens=%d",
+        model, estimated_input, max_tokens,
+    )
     try:
-        limiter.acquire_sync(
-            estimate_tokens(prompt) + estimate_tokens(text_batch),
+        await limiter.acquire(
+            estimated_input,
             max_tokens,
         )
-        return client.chat.completions.create(
-            messages=[
+        request = {
+            "messages": [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": text_batch},
             ],
-            model=model,
-            reasoning_effort="none",
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
+            "model": model,
+            "reasoning_effort": NON_RAG_REASONING_EFFORT,
+            COMPLETION_TOKEN_PARAMETER: max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        response = client.chat.completions.create(**request)
+        usage = getattr(response, "usage", None)
+        choice = response.choices[0] if getattr(response, "choices", None) else None
+        logger.info(
+            "llm_request_succeeded model=%s duration_ms=%.1f prompt_tokens=%s completion_tokens=%s total_tokens=%s finish_reason=%s",
+            model, (time.perf_counter() - request_started) * 1000,
+            getattr(usage, "prompt_tokens", None),
+            getattr(usage, "completion_tokens", None),
+            getattr(usage, "total_tokens", None),
+            getattr(choice, "finish_reason", None),
         )
+        return response
     except Exception as error:
-        logger.exception("llm_call_failed model=%s", model)
+        logger.exception(
+            "llm_call_failed model=%s duration_ms=%.1f error_type=%s status_code=%s error=%s headers=%s",
+            model, (time.perf_counter() - request_started) * 1000,
+            type(error).__name__, getattr(error, "status_code", None), str(error),
+            getattr(getattr(error, "response", None), "headers", None),
+        )
         raise

@@ -5,6 +5,14 @@ from fastapi import HTTPException
 from repositories.supabase_graphs import list_graph_versions, load_graph_version
 from repositories.supabase_search import search_graph_chunks
 from repositories.users import SupabaseIdentity
+from app.config import RAG_MODEL
+from utils.rag_utils import (
+	build_rag_system_prompt,
+	build_rag_user_prompt,
+	call_rag_llm,
+	filter_sources_by_chunks_used,
+	prioritize_graph,
+)
 
 
 def _format_pages(pages: list[int]) -> str:
@@ -28,7 +36,7 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
 	if client is None:
 		raise HTTPException(status_code=503, detail="The AI Service is temporarily down.")
 
-	chunks = search_graph_chunks(identity, graph_id, query, top_k=3)
+	chunks = search_graph_chunks(identity, graph_id, query, top_k=5)
 	if not chunks:
 		return {
 			"answer": "No relevant text chunks found in this graph. Try a different query.",
@@ -54,33 +62,25 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
 	for chunk in chunks:
 		pages = chunk["pages"]
 		citation = _format_pages(pages)
-		context_blocks.append(f"[{citation or 'unknown page'}]\n{chunk['text'][:400]}")
+		header = f"[Chunk {len(context_blocks) + 1}: {citation}]" if citation else f"[Chunk {len(context_blocks) + 1}]"
+		context_blocks.append(f"{header}\n{chunk['text']}")
 		citations.extend(pages)
 		sources.append({
 			"fileName": chunk["source"],
 			"page_number": pages[0] if pages else 1,
-			"snippet": chunk["text"][:120],
+			"snippet": chunk["text"][:120] + ("..." if len(chunk["text"]) > 120 else ""),
 		})
 
-	system_prompt = """You are a concise study assistant. Answer questions directly and briefly.
-Always cite page numbers for facts from the text using [p. N] or [pp. N-M].
-Answer in 2-3 sentences maximum and do not use information outside the supplied graph."""
-	user_prompt = (
-		"TEXT FROM THIS GRAPH:\n"
-		+ "\n\n".join(context_blocks)
-		+ "\n\nGRAPH CONNECTIONS:\n"
-		+ ("\n".join(graph_lines) if graph_lines else "(none)")
-		+ f"\n\nQUESTION: {query}\n\nAnswer directly and cite page numbers."
-	)
+	context_text = "\n\n".join(context_blocks)
+	graph_section = "Related concepts and connections:\n" + "\n".join(
+		f"  • {line.strip()}" for line in graph_lines
+	) if graph_lines else ""
+	system_prompt = build_rag_system_prompt(prioritize_graph(chunks))
+	user_prompt = build_rag_user_prompt(context_text, query, graph_section)
 	try:
-		response = client.chat.completions.create(
-			messages=[
-				{"role": "system", "content": system_prompt},
-				{"role": "user", "content": user_prompt},
-			],
-			model="openai/gpt-oss-20b",
-		)
-		answer = response.choices[0].message.content
+		result = call_rag_llm(client, RAG_MODEL, system_prompt, user_prompt)
+		answer = result["answer"]
+		used_sources = filter_sources_by_chunks_used(sources, set(result["chunks_used"]))
 	except Exception as error:
 		raise HTTPException(status_code=502, detail="The AI Service failed to answer this query.") from error
 
@@ -89,8 +89,8 @@ Answer in 2-3 sentences maximum and do not use information outside the supplied 
 		"answer": answer,
 		"citations": unique_pages,
 		"citation_label": _format_pages(unique_pages),
-		"sources": sources,
-		"chunks_used": len(chunks),
+		"sources": used_sources,
+		"chunks_used": len(used_sources),
 		"chunks": [
 			{
 				"text": chunk["text"][:200] + ("..." if len(chunk["text"]) > 200 else ""),

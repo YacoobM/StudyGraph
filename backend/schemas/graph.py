@@ -20,6 +20,7 @@ class GraphVersionCreateRequest(BaseModel):
 
 
 class GraphResponse(BaseModel):
+	name: str = ""
 	nodes: list[dict]
 	edges: list[dict]
 	status: str = "active"

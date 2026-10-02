@@ -1,4 +1,4 @@
-from models.quiz_models import TopicResult
+from models.quiz_models import QuizAttempt, TopicResult
 
 
-__all__ = ["TopicResult"]
+__all__ = ["QuizAttempt", "TopicResult"]

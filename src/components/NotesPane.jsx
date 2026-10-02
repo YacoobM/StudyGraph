@@ -1,45 +1,23 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  listNotes,
-  createNote,
-  getSection,
-  setSectionDone,
-} from "../data/notes.js";
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { listNotes, createNote, getSection, setSectionDone } from '../data/notes.js'
+import { saveQuizResult } from '../services/api.js'
+import QuizRunner from './QuizRunner.jsx'
 
 /**
- * Notes tab — list, create and detail, switched on local state.
- *
- * Both note types are the same structure: a note is a list of sections. A day
- * plan gives each section a `day` and the rail groups by that; full notes
- * leave it null and the rail lists them in order, ungrouped. There is one
- * rendering path, and `groupsFor` is the only place the two differ.
- *
- * The rail used to group full notes by document. It cannot: fusion merges
- * the two graphs, so a section's concepts routinely come from both files and
- * there is no one document to file it under. Provenance is per section now,
- * shown as badges on the item itself.
- *
- * Where the data comes from is entirely the business of ../data/notes.js.
- * Nothing here knows which endpoint a note came from.
+ * Notes tab: list, create and detail views on local state. A day plan groups the rail by day;
+ * a full note lists its sections in order. Data comes from ../data/notes.js.
  */
 
 /* --------------------------------------------------------------- helpers */
 
-/**
- * Renders a paragraph. Plain strings pass through; arrays may mix strings
- * with the bold and key marks the data module emits, which keeps the writing
- * emphasised without any component rendering HTML out of data.
- */
+/** Renders a paragraph: a plain string, or strings mixed with bold and key marks (no HTML). */
 function Rich({ parts }) {
   const list = typeof parts === "string" ? [parts] : parts || [];
   return (
     <>
       {list.map((p, i) => {
-        if (typeof p === "string")
-          return <React.Fragment key={i}>{p}</React.Fragment>;
-        // A span can be both. The highlight is the outer element so it runs
-        // unbroken across a sentence that happens to contain a bold term —
-        // checking bold first used to end the highlight at that word.
+        if (typeof p === 'string') return <React.Fragment key={i}>{p}</React.Fragment>
+        // The highlight is the outer element, so it runs unbroken across a bold term.
         if (p.key) {
           return (
             <span className="nt-key" key={i}>
@@ -98,14 +76,9 @@ const pctOf = (done, total) => (total ? Math.round((done / total) * 100) : 0);
 const kindLabel = (n) =>
   n.kind === "plan" ? `${n.days}-day plan` : "Full notes";
 
-// Badge text. The rail is 252px wide and these names run to forty characters,
-// so the extension goes and CSS truncates the rest; the full name is on the
-// title attribute.
+// Badge text: extension dropped and CSS truncates the rest; the full name is in the title.
 
-/**
- * The rail's contents. A plan groups by day number; a full note is one run
- * with no heading. Sections already arrive in order, so runs stay contiguous.
- */
+/** The rail's contents: a plan grouped by day, a full note as one run. */
 function groupsFor(note) {
   const numbered = note.sections.map((s, index) => ({ ...s, index }));
   if (note.kind !== "plan") return [{ label: null, items: numbered }];
@@ -322,15 +295,9 @@ function CreateView({ readyDocs, planning, error, onCancel, onGenerate }) {
             >
               Cancel
             </button>
-            {/* Planning runs an LLM call, so this is the one button that has
-                to say it is working. Generate stays clickable when nothing is
-                picked — that flags the block instead. */}
-            <button
-              className="btn-primary2"
-              onClick={generate}
-              disabled={planning}
-            >
-              {planning ? "Planning…" : "Generate"}
+            {/* Planning runs an LLM call, so this button says it is working. */}
+            <button className="btn-primary2" onClick={generate} disabled={planning}>
+              {planning ? 'Planning…' : 'Generate'}
             </button>
           </div>
         </div>
@@ -352,9 +319,7 @@ function CreateView({ readyDocs, planning, error, onCancel, onGenerate }) {
 function SectionBody({ section }) {
   return (
     <div className="nt-body">
-      {/* Each paragraph carries its own heading so the section can be scanned
-          rather than read start to finish, and its text arrives as marked
-          spans rather than a plain string. */}
+      {/* Each paragraph has its own heading so the section can be scanned. */}
       {section.body?.map((p, i) => (
         <div className="nt-para" key={i}>
           {p.heading && <h4 className="nt-para-head">{p.heading}</h4>}
@@ -429,18 +394,50 @@ function SectionBody({ section }) {
   );
 }
 
+/**
+ * The section's quiz, taken inline below the footer row. Passing marks the section
+ * complete; the pass mark is the server's.
+ */
+function SectionQuiz({ section, noteTitle, onPassed, onClose }) {
+  const [saveError, setSaveError] = useState('')
+  const total = section.quiz.length
+  const need = section.passMark ?? total
+
+  function finish({ answers, correct, total }) {
+    setSaveError('')
+    saveQuizResult({
+      quizId: section.quizId, kind: 'section', answers, correct, total,
+      title: section.title, group: noteTitle,
+    }).catch((e) => setSaveError(`Your score was not saved: ${e.message}`))
+    if (correct >= need) onPassed()
+  }
+
+  return (
+    <div className="nt-quiz">
+      <QuizRunner
+        inline
+        title="Close quiz"
+        questions={section.quiz}
+        onExit={onClose}
+        onFinish={finish}
+        need={need}
+        passTitle="Section complete"
+        passText="The section is marked complete in the contents."
+        failText={`Get ${need} of ${total} right to complete the section. Reread the section and try again.`}
+        exitLabel="Close quiz"
+      />
+      {saveError && <div className="nt-error">{saveError}</div>}
+    </div>
+  )
+}
+
 function ContextPanel({ section: loaded, open, onClose }) {
   // Empty until the section arrives: the rail knows a section exists before
   // its concepts and sources are fetched, so every block below is optional.
   const section = loaded || {};
 
-  // File names only. /api/graph does return a pageLabel alongside each file,
-  // but at the current 2000-character chunk size it spans nearly the whole
-  // document, so printing it would point the reader nowhere.
-  //
-  // A closed pane stays in the DOM so it can animate shut, so it is also made
-  // inert — otherwise its buttons keep their place in the tab order while
-  // being invisible.
+  // File names only: pageLabel spans nearly the whole document at the current chunk size.
+  // A closed pane stays in the DOM to animate shut, so it is made inert to leave the tab order.
   return (
     <aside
       className={`inspector nt-ctx${open ? "" : " off"}`}
@@ -518,41 +515,40 @@ function ContextPanel({ section: loaded, open, onClose }) {
   );
 }
 
-function DetailView({
-  note,
-  index,
-  section,
-  writing,
-  writeError,
-  coolLeft,
-  onRetry,
-  onBack,
-  onOpenSection,
-  onToggleDone,
-}) {
-  const [railOn, setRailOn] = useState(true);
-  const [ctxOn, setCtxOn] = useState(true);
-  const center = useRef(null);
+function DetailView({ note, index, section, writing, writeError, coolLeft, onRetry,
+                      onBack, onOpenSection, onToggleDone }) {
+  const [railOn, setRailOn] = useState(true)
+  const [ctxOn, setCtxOn] = useState(true)
+  const center = useRef(null)
+  const quizBox = useRef(null)
+  const [quizOpen, setQuizOpen] = useState(false)
 
-  // Moving to another section starts at the top. Marking one done does not
-  // touch this, so the reader keeps their place.
+  // Moving to another section starts at the top, with its quiz closed.
+  // Marking one done does not touch this, so the reader keeps their place.
   useEffect(() => {
-    if (center.current) center.current.scrollTop = 0;
-  }, [note.id, index]);
+    if (center.current) center.current.scrollTop = 0
+    setQuizOpen(false)
+  }, [note.id, index])
 
-  const groups = useMemo(() => groupsFor(note), [note]);
+  // Opening the quiz brings it into view: it opens below the footer row,
+  // which can sit at the very bottom of the scroll area.
+  useEffect(() => {
+    if (quizOpen) quizBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [quizOpen])
+
+  const groups = useMemo(() => groupsFor(note), [note])
   // With one document every badge would read the same, so they earn their
   // place only once a note spans more than one.
   const pct = pctOf(note.done, note.total);
   // The rail knows every section from the note, so it stays usable while the
   // body of the open one is still being written.
-  const stub = note.sections[index];
-  const day = section?.day ?? stub?.day;
-  const eyebrow =
-    note.kind === "plan"
-      ? `DAY ${day} OF ${note.days}`
-      : `SECTION ${index + 1} OF ${note.total}`;
-  const hasNext = index < note.total - 1;
+  const stub = note.sections[index]
+  const day = section?.day ?? stub?.day
+  const eyebrow = note.kind === 'plan'
+    ? `DAY ${day} OF ${note.days}`
+    : `SECTION ${index + 1} OF ${note.total}`
+  const hasNext = index < note.total - 1
+  const hasQuiz = Boolean(section?.quiz && section.quizId)
 
   return (
     <div className="pane nt-detail">
@@ -653,9 +649,7 @@ function DetailView({
               )}
             </div>
 
-            {/* A section is planned empty and written the first time it is
-                opened, which is a real wait rather than a flicker — so this
-                says what is happening instead of showing a bare spinner. */}
+            {/* Writing a section is a real wait, so say what is happening. */}
             {writing && (
               <div className="nt-writing">
                 <span className="nt-writing-dot" />
@@ -699,15 +693,30 @@ function DetailView({
                 <span className="qz-check">✓</span>
                 {section?.done ? "Done" : "Mark done"}
               </button>
-              {hasNext && (
-                <button
-                  className="btn-start"
-                  onClick={() => onOpenSection(index + 1)}
-                >
-                  Next
-                </button>
-              )}
+              <div className="nt-foot-right">
+                {hasQuiz && (
+                  <button className={quizOpen ? 'btn-secondary' : 'btn-primary2'}
+                          onClick={() => setQuizOpen((v) => !v)} aria-expanded={quizOpen}>
+                    {quizOpen ? 'Close quiz' : 'Quiz this section'}
+                  </button>
+                )}
+                {hasNext && (
+                  <button className="btn-start" onClick={() => onOpenSection(index + 1)}>Next</button>
+                )}
+              </div>
             </div>
+
+            {hasQuiz && quizOpen && (
+              <div ref={quizBox}>
+                <SectionQuiz
+                  key={section.id}
+                  section={section}
+                  noteTitle={note.title}
+                  onClose={() => setQuizOpen(false)}
+                  onPassed={() => { if (!section.done) onToggleDone(index, true) }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -731,18 +740,14 @@ export default function NotesPane({ readyDocs = [], graphId }) {
   const [openId, setOpenId] = useState(null);
   const [index, setIndex] = useState(0);
 
-  // The body of the open section, loaded rather than derived: fetching it
-  // writes it, which takes twenty to thirty seconds the first time.
-  const [section, setSection] = useState(null);
-  const [writing, setWriting] = useState(false);
-  const [writeError, setWriteError] = useState("");
-  const [planning, setPlanning] = useState(false);
+  // Loaded, not derived: fetching the body writes it, slowly the first time.
+  const [section, setSection] = useState(null)
+  const [writing, setWriting] = useState(false)
+  const [writeError, setWriteError] = useState('')
+  const [planning, setPlanning] = useState(false)
 
-  // `Try again` re-requests the section already on screen, so it cannot work
-  // by setting the index it is already on — React skips the render and the
-  // effect never re-runs. Bumping a counter the effect depends on is what
-  // makes it fire.
-  const [retryTick, setRetryTick] = useState(0);
+  // Bumped by Try again: setting the same index again would not re-run the effect.
+  const [retryTick, setRetryTick] = useState(0)
   // Epoch ms until which this section refuses to be asked again.
   const [coolUntil, setCoolUntil] = useState(0);
   const [, tick] = useState(0);
@@ -760,9 +765,7 @@ export default function NotesPane({ readyDocs = [], graphId }) {
     };
   }, [graphId]);
 
-  // One fetch per section opened. `live` guards a reader who moves on while a
-  // slow write is still in flight — the answer to the section they left must
-  // not overwrite the one they are looking at now.
+  // One fetch per section opened; `live` stops a late answer landing on another section.
   useEffect(() => {
     if (view !== "detail" || !note) return undefined;
     const ac = new AbortController();

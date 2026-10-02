@@ -142,7 +142,7 @@ async def post_graph_document(
 		file.content_type or "application/octet-stream",
 	)
 	try:
-		pages = await asyncio.to_thread(extract_text, content, filename)
+		pages = await extract_text(content, filename)
 		chunks = build_document_chunks(pages, filename, document_id=document["id"])
 		embeddings = await asyncio.to_thread(encode_texts, [chunk["text"] for chunk in chunks])
 		persist_document_chunks(identity, document["id"], chunks, embeddings)

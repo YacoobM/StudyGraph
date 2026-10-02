@@ -13,5 +13,6 @@ class Relationship(BaseModel):
 
 
 class ExtractionResult(BaseModel):
+    graph_name: str = ""
     concepts: list[str]
     relationships: list[Relationship]

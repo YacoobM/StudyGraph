@@ -23,6 +23,7 @@ export default function Inspector({
   nodes = [],
   edges = [],
   maxWeek = 1,
+  onClose,
 }) {
   const canvasRef = useRef(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -188,34 +189,55 @@ export default function Inspector({
     ctx.fill();
   }, [info, evoWeek]);
 
-  if (!node) {
-    return (
-      <aside className="inspector" id="inspector">
-        <div className="insp-empty">
-          Click any bright node in the graph to see its relationships, sources,
-          and how it evolved.
-        </div>
-      </aside>
-    );
-  }
+  if (!node) return null;
+
+  // The only "type" the data supports is how connected the concept is, which
+  // Workspace already derives from node degree. Nothing else is invented.
+  const conceptType = node.kind === "core" ? "Core concept" : "Supporting concept";
 
   return (
-    <aside className="inspector" id="inspector">
-      <div className="insp-eyebrow">Concept</div>
+    <aside className="inspector insp-concept" id="inspector" role="complementary"
+           aria-label={`Details for ${node.name}`}>
+      <div className="insp-top">
+        <div className="insp-eyebrow">Concept</div>
+        {onClose && (
+          <button type="button" className="insp-close" onClick={onClose}
+                  aria-label="Close the concept panel" title="Close">
+            ×
+          </button>
+        )}
+      </div>
+
       <div className="insp-name">{node.name}</div>
+
+      <div className="insp-meta">
+        <span className="insp-chip">{conceptType}</span>
+        <span className="insp-chip quiet">
+          {info.neighbours.length} connection{info.neighbours.length === 1 ? "" : "s"}
+        </span>
+        <span className="insp-chip quiet">First seen week {node.week}</span>
+      </div>
+
       <div className="insp-def">{info.definition}</div>
 
-      <div className="insp-label">Connected to</div>
-      <div className="insp-pills">
-        {info.neighbours.length === 0 && (
-          <span className="insp-pill">No connections yet</span>
-        )}
-        {info.neighbours.map((n, i) => (
-          <span className="insp-pill" key={i}>
-            {n.name}
-          </span>
-        ))}
-      </div>
+      <div className="insp-label">Connections</div>
+      {info.neighbours.length === 0 ? (
+        <div className="insp-none">
+          No relationship to another concept was extracted for this one.
+        </div>
+      ) : (
+        <ul className="insp-rels">
+          {info.neighbours.map((n, i) => (
+            <li key={i}>
+              <span className="insp-rel-arrow" aria-hidden="true">
+                {n.outgoing ? "→" : "←"}
+              </span>
+              <span className="insp-rel-name">{n.name}</span>
+              <span className="insp-rel-type">{n.relation}</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="insp-label">Sources</div>
       {(node.sources || []).length === 0 ? (

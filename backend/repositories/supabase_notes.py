@@ -6,9 +6,51 @@ from repositories.supabase_graphs import request_table
 from repositories.supabase_graphs import list_graph_versions, load_graph_version
 from repositories.supabase_documents import list_graph_documents
 from repositories.users import SupabaseIdentity
-from services.notes_service import plan_sections
+from services.notes_service import request_titles
 from services.notes_service import write_body
 from repositories.supabase_search import search_graph_chunks
+
+
+def _fallback_section_title(filename: str) -> str:
+    stem = str(filename or "Mixed sources").rsplit("/", 1)[-1]
+    if "." in stem:
+        stem = stem.rsplit(".", 1)[0]
+    return " ".join(stem.replace("_", " ").replace("-", " ").split()) or "Mixed sources"
+
+
+async def _plan_supabase_sections(concepts: list[dict], edges: list[dict], cache_key: str) -> list[dict]:
+    """Build Supabase note sections from graph provenance.
+
+    The current notes service plans SQLite notes from document text internally;
+    it no longer exposes the old ``plan_sections`` graph-only helper. Supabase
+    already has the graph snapshot and provenance, so group concepts by their
+    source document here and reuse the current service's title call.
+    """
+    by_document: dict[str, list[str]] = {}
+    for concept in concepts:
+        filename = concept.get("source") or "Mixed sources"
+        by_document.setdefault(filename, []).append(concept["name"])
+
+    sections = [
+        {
+            "title": "",
+            "concepts": sorted(set(names)),
+            "document": filename,
+            "range": (0, 1),
+        }
+        for filename, names in by_document.items()
+    ]
+    if not sections:
+        return []
+
+    titles = await request_titles(sections, cache_key)
+    for index, section in enumerate(sections):
+        section["title"] = (
+            titles[index].strip()
+            if titles and index < len(titles) and titles[index].strip()
+            else _fallback_section_title(section["document"])
+        )
+    return sections
 
 
 def _sections(identity: SupabaseIdentity, note_id: str) -> list[dict]:
@@ -140,8 +182,11 @@ async def plan_graph_note(identity: SupabaseIdentity, graph_id: str, document_id
             edges.append({"from": source, "to": target, "relation": edge.get("relationship_type", "related_to"), "summary": edge.get("summary", "")})
     if not concepts:
         raise ValueError("No extracted concepts found for those documents.")
-    trace = []
-    sections = await plan_sections(sorted(names), edges, f"supabase-notes:{version['id']}:{','.join(sorted(selected))}", trace)
+    sections = await _plan_supabase_sections(
+        concepts,
+        edges,
+        f"supabase-notes:{version['id']}:{','.join(sorted(selected))}",
+    )
     if not sections:
         raise ValueError("The AI Service returned an unusable plan.")
     note_sections = [{"day": section.get("day"), "title": section["title"], "concepts": section.get("concepts", []), "relations": [edge for edge in edges if edge.get("from") in section.get("concepts", []) and edge.get("to") in section.get("concepts", [])], "sources": sorted({row["source"] for row in concepts if row["name"] in section.get("concepts", [])}), "must_cover": section.get("must_cover", []), "body": None, "done": False} for section in sections]

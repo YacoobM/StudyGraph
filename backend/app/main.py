@@ -1,8 +1,7 @@
 ﻿import sys
-import logging
 import time
 from pathlib import Path
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 backend_dir = Path(__file__).resolve().parents[1]
 if str(backend_dir) not in sys.path:
@@ -18,25 +17,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import asyncio
 import os
-import json
 from app.logging_config import configure_logging
-from groq import Groq
 from chromadb import Client
 from schemas.graph import GraphResponse
 from schemas.query import QueryRequest
 from api.routes.graphs import router as graphs_router
 from app import state as runtime_state
+from app.config import LLM_API_KEY_ENV
 from services.graph_runtime import save_graph_json
+from services.llm_provider import create_llm_client
+from app.logging_config import get_logger
 
-from services import evolution_data, graph_fusion
+from services import evolution_data
+from app.logging_config import get_logger
+from repositories.database import init_db
 
+logger = get_logger(__name__)
 load_dotenv()
 configure_logging()
 
 chroma = Client()
 
-if not os.getenv("GROQ_API_KEY"):
-    raise RuntimeError("GROQ_API_KEY is not configured!")
+if not os.getenv(LLM_API_KEY_ENV):
+    raise RuntimeError(f"{LLM_API_KEY_ENV} is not configured!")
 
 app = FastAPI(
     title="StudyGraph API",
@@ -44,6 +47,12 @@ app = FastAPI(
     version="0.1.0"
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on app startup"""
+    init_db()
+    logger.info("db intialised")
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"(http://localhost:\d+|http://127\.0\.0\.1:\d+|null)",
@@ -54,10 +63,11 @@ app.add_middleware(
 
 app.include_router(graphs_router)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
+client = create_llm_client(os.environ[LLM_API_KEY_ENV])
+
 runtime_state.configure_runtime(client, chroma)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @app.get("/health")
@@ -87,7 +97,11 @@ async def get_graph():
     week-based color coding for the evolution feature."""
     engine = runtime_state.engine
     if engine is None:
-        return GraphResponse(nodes=[], edges=[], status="active")
+        return GraphResponse(name="", nodes=[], edges=[])
+    graph_name = engine.graph_name or next(
+        (concept.get("source", "") for concept in engine.concepts if concept.get("source")),
+        "",
+    )
 
     week_color_map = evolution_data.get_week_color_map(engine)
 
@@ -186,7 +200,7 @@ async def get_graph():
         "canonical_nodes": len(engine.canonical_nodes),
         "fused_edges": len(engine.fused_edges),
         "inferred_edges": len(engine.inferred_edges)
-    })
+    }, graph_name)
 
     legend = {
         "weeks": [{"week": week, "color": color} for week, color in week_color_map.items()],
@@ -197,6 +211,7 @@ async def get_graph():
     engine.graph_status = "active" if engine.fused_edges or engine.edges else "active"
 
     return {
+        "name": graph_name,
         "nodes": nodes,
         "edges": edges,
         "status": engine.graph_status,
@@ -214,7 +229,7 @@ async def get_graph():
 @app.post("/api/query")
 async def query_rag(request: QueryRequest):
     """Query the knowledge graph with RAG"""
-    if not os.getenv("GROQ_API_KEY"):
+    if not os.getenv(LLM_API_KEY_ENV):
         raise HTTPException(
             status_code=503,
             detail="The AI Service is temporarily down. Please try again later."
@@ -256,7 +271,7 @@ async def fuse_knowledge_graph():
 
     fusion_started = time.perf_counter()
     try:
-        # fuse_graph is synchronous and makes blocking Groq calls. Left on the
+        # fuse_graph is synchronous and makes blocking OpenAI calls. Left on the
         # event loop it would freeze every request — the upload status poll
         # included — for the length of the fusion.
         async with runtime_state.fusion_lock:
@@ -268,7 +283,7 @@ async def fuse_knowledge_graph():
             "canonical_nodes": len(engine.canonical_nodes),
             "fused_edges": len(engine.fused_edges),
             "inferred_edges": len(engine.inferred_edges)
-        })
+        }, engine.graph_name or (engine.concepts[0].get("source", "") if engine.concepts else ""))
 
         engine.graph_status = "active"
         logger.info(
@@ -350,7 +365,7 @@ async def get_evolution_concept_subgraph(concept_name: str):
 async def regenerate_evolution_concept(concept_name: str):
     """
     Clears cached summaries/comparisons for a concept so the next request
-    for its description or full detail regenerates them from Groq instead
+    for its description or full detail regenerates them from OpenAI instead
     of reusing whatever's cached.
     """
     engine = runtime_state.engine

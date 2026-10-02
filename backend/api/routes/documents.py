@@ -15,13 +15,17 @@ from repositories.graphs import mark_graph_for_regeneration
 from repositories.users import current_user
 from schemas.documents import DocumentPatch
 from api.routes.upload import start_upload_pipeline
+from utils.validate_file import guard_file
+from services.quiz_service import document_title
 
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_SUFFIXES = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
 router = APIRouter(tags=["documents"])
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+logger = get_logger(__name__)
+
 
 
 @router.get("/api/documents")
@@ -32,7 +36,9 @@ async def list_documents(user: sqlite3.Row = Depends(current_user)):
 			(user["id"],),
 		).fetchall()
 
-	docs = [document_public(row) for row in rows]
+	# `title` is the same name the Quiz tab shows: the document's own title
+	# line from its stored text, else the cleaned filename.
+	docs = [{**document_public(row), "title": document_title(row["filename"])} for row in rows]
 	return {
 		"documents": docs,
 		"totals": {
@@ -58,12 +64,10 @@ async def create_document(
 	if not filename:
 		raise HTTPException(status_code=422, detail="Choose a file to upload.")
 
-	suffix = Path(filename).suffix.lower()
-	if suffix not in ALLOWED_SUFFIXES:
-		allowed = ", ".join(sorted(ALLOWED_SUFFIXES))
-		raise HTTPException(status_code=415, detail=f"That file type is not supported. Use: {allowed}")
-
 	data = await file.read()
+ 
+	guard_file(data, filename)
+ 
 	if len(data) == 0:
 		raise HTTPException(status_code=422, detail="That file is empty.")
 	if len(data) > MAX_UPLOAD_BYTES:
