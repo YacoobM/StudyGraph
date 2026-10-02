@@ -17,7 +17,8 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.config import LLM_API_KEY_ENV, EXTRACTION_MODEL, NON_RAG_REASONING_EFFORT, OUTPUT_DIR
+from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, LLM_API_KEY_ENV,
+                        NON_RAG_REASONING_EFFORT, OUTPUT_DIR)
 from api.routes.auth import current_user
 from models.quiz_models import QuizAttempt
 from repositories.database import connect
@@ -99,9 +100,7 @@ def pass_mark(total: int, kind: str = "section") -> int:
     return -(-2 * total // 3)
 
 
-# ---------------------------------------------------------------------------
-# document quiz, from the document's text: graph labels turned reversed edges into facts
-# ---------------------------------------------------------------------------
+# --- document quiz, from the document's text: graph labels turned reversed edges into facts ---
 
 _QUIZ_SYSTEM = (
     "You write multiple-choice revision questions for a student from the SOURCE TEXT only.\n"
@@ -180,17 +179,14 @@ _QUIZ_FIELDS = ("id", "q", "o", "a", "why", "d")
 
 
 def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
-    """One Groq call for a document's quiz from its text. Questions whose evidence is not in the
-    text, or that fail validate_quiz, are dropped."""
-    key = os.getenv("GROQ_API_KEY")
+    """One call for a document's quiz from its text, on the configured provider. Questions whose
+    evidence is not in the text, or that fail validate_quiz, are dropped."""
+    key = os.getenv(LLM_API_KEY_ENV)
     if not key:
-        return []
-    try:
-        from groq import Groq, RateLimitError
-    except ImportError:
         return []
     from services import notes_service as ns
     from services.graph_fusion import is_request_too_large, retry_after_seconds
+    from services.llm_provider import RATE_LIMIT_ERRORS, create_llm_client
 
     source = quiz_source_text(ns.document_texts({filename}).get(filename, ""))
     if not source.strip():
@@ -199,7 +195,7 @@ def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
     excerpt = sample_text(source, QuizConfig.LLM_INPUT_TOKENS * 4)
     user = f"Write {n} questions.\n\nSOURCE TEXT:\n{excerpt}"
 
-    client = Groq(api_key=key, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0)
+    client = create_llm_client(key, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0)
     finish, text = None, ""
     for attempt in range(2):
         try:
@@ -207,16 +203,17 @@ def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
             resp = client.chat.completions.create(
                 model=QuizConfig.LLM_MODEL,
                 messages=[{"role": "system", "content": _QUIZ_SYSTEM}, {"role": "user", "content": user}],
+                # Accepted by OpenAI only with reasoning_effort "none".
                 temperature=0.3,
-                reasoning_effort="none",
+                reasoning_effort=NON_RAG_REASONING_EFFORT,
                 response_format={"type": "json_object"},
-                max_tokens=QuizConfig.LLM_MAX_TOKENS,
+                **{COMPLETION_TOKEN_PARAMETER: QuizConfig.LLM_MAX_TOKENS},
             )
             finish = resp.choices[0].finish_reason
             text = (resp.choices[0].message.content or "").strip()
             data = json.loads(text)
             break
-        except RateLimitError as e:
+        except RATE_LIMIT_ERRORS as e:
             if is_request_too_large(e) or attempt == 1:
                 logger.warning("document_quiz_failed reason=rate_limited too_large=%s", is_request_too_large(e))
                 return []
@@ -454,9 +451,7 @@ async def document_stats(user=Depends(current_user)):
     return {"stats": by_source}
 
 
-# ---------------------------------------------------------------------------
-# results: every attempt per user in one JSON file; summaries are computed on read
-# ---------------------------------------------------------------------------
+# --- results: every attempt per user in one JSON file; summaries are computed on read ---
 
 RESULTS_FILE = OUTPUT_DIR / "quiz_results.json"
 _RESULTS_LOCK = threading.Lock()
@@ -536,9 +531,7 @@ def passed_quiz_ids(user_id, kind: str = "section") -> set[str]:
             if a.get("kind") == kind and a.get("passed")}
 
 
-# ---------------------------------------------------------------------------
-# section quizzes: kept per user so the Quiz tab lists them after the in-memory notes are gone
-# ---------------------------------------------------------------------------
+# --- section quizzes: kept per user so the Quiz tab lists them after the in-memory notes are gone ---
 
 SECTION_QUIZ_FILE = OUTPUT_DIR / "section_quizzes.json"
 _SECTION_QUIZ_LOCK = threading.Lock()

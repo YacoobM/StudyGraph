@@ -58,8 +58,9 @@ def note_section_counts(lengths: dict[str, int]) -> dict[str, int]:
 _TITLE_MAX_WORDS = 8
 _TITLES_MAX_TOKENS = 400
 
-# --- write step ------------------------------------------------------------
-# Runs when a section is opened, on Gemini: its input is thousands of tokens of source text.
+# --- write step ---
+
+# Runs on Gemini when a section is opened: its input is thousands of tokens of source text.
 _CHUNKS_PER_CONCEPT = 3        # retrieve_chunks' own default
 # retrieve_chunks has no source filter, so each concept asks for this many hits and keeps the first
 # few from the note's own documents.
@@ -91,9 +92,7 @@ _WRITE_RETRY_BUDGET_SECONDS = 30
 _PLAN_TIMEOUT_SECONDS = 60
 
 
-# ---------------------------------------------------------------------------
-# graph source
-# ---------------------------------------------------------------------------
+# --- graph source ---
 
 # The app registers a callable returning the live engine, so this module never
 # imports main.py (which would be circular).
@@ -126,9 +125,7 @@ def _graph():
     return concepts, edges, canonical
 
 
-# ---------------------------------------------------------------------------
-# store: swap these four for SQLite and nothing above them changes
-# ---------------------------------------------------------------------------
+# --- store: swap these four for SQLite and nothing above them changes ---
 
 _NOTES: dict[int, list[dict]] = {}      # user_id -> [note]
 _SEQ = {"note": 0, "section": 0}
@@ -221,11 +218,10 @@ def _section_public(section: dict, passed=frozenset()) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# relation classifier
-# Taxonomic edges arrive oriented by fusion, so direction carries the broader signal. The
-# label vocabulary is open, so labels are matched tolerantly rather than looked up.
-# ---------------------------------------------------------------------------
+# --- relation classifier ---
+
+# Fusion orients taxonomic edges, so direction carries the broader signal. Labels are an open
+# vocabulary, so they are matched tolerantly.
 
 _WS = re.compile(r"\s+")
 _SEPARATORS = re.compile(r"[_\-‐‑‒–—−]+")
@@ -388,9 +384,7 @@ def derive_constraints(edges: list[dict]) -> tuple[list[tuple], list[tuple]]:
     return sorted(ordering), sorted(cohesion)
 
 
-# ---------------------------------------------------------------------------
-# graph filtering
-# ---------------------------------------------------------------------------
+# --- graph filtering ---
 
 def filter_graph_to_documents(filenames: set[str]):
     """Concepts by source document and the edges whose ends both survive. Names go through
@@ -464,9 +458,7 @@ def section_neighbours(names, edges: list[dict]) -> list[dict]:
             for n in ranked[:_MAX_DISTRACTOR_POOL]]
 
 
-# ---------------------------------------------------------------------------
-# prompt
-# ---------------------------------------------------------------------------
+# --- prompt ---
 
 # Bump when the plan's output changes; it is part of the plan cache key.
 _PLAN_PROMPT_VERSION = "notes-plan-v10"
@@ -536,18 +528,13 @@ def build_titles_prompt(sections) -> str:
     return "\n".join(lines).rstrip()
 
 
-# ---------------------------------------------------------------------------
-# response validation
-# ---------------------------------------------------------------------------
+# --- response validation ---
 
 class _TitlesResponse(BaseModel):
     titles: list[str] = Field(min_length=1)
 
 
-# ---------------------------------------------------------------------------
-# plan cache: keyed on prompt version and model, so prompt iteration does not re-bill
-# identical calls. A development convenience; notes themselves live in _NOTES.
-# ---------------------------------------------------------------------------
+# --- plan cache: keyed on prompt version and model; notes themselves live in _NOTES ---
 
 PLAN_CACHE_FILE = OUTPUT_DIR / "notes_plan_cache.json"
 WRITE_CACHE_FILE = OUTPUT_DIR / "notes_write_cache.json"
@@ -627,16 +614,14 @@ def _call_key(prefix: str, kind: str, concept_names) -> str:
     return f"{prefix}|{kind}:{digest}"
 
 
-# ---------------------------------------------------------------------------
-# LLM
-# ---------------------------------------------------------------------------
+# --- LLM ---
 
 _client = None
 
 
 def _low_reasoning(client):
-    """Wraps a Groq client so every call pins reasoning_effort='low': at default effort the
-    reasoning model spent all of max_tokens thinking and returned nothing."""
+    """Wraps the client to log usage and default reasoning_effort to 'low' (at default effort the
+    model spent all of max_tokens thinking)."""
     create = client.chat.completions.create
 
     def create_low(**kwargs):
@@ -651,7 +636,7 @@ def _low_reasoning(client):
             kwargs.get("model"), kwargs.get("reasoning_effort"),
             getattr(usage, "completion_tokens", None),
             getattr(usage, "prompt_tokens", None),
-            kwargs.get("max_tokens"), finish,
+            kwargs.get("max_completion_tokens", kwargs.get("max_tokens")), finish,
         )
         return response
 
@@ -661,20 +646,18 @@ def _low_reasoning(client):
 
 
 def _llm_client():
-    """Groq client for the titles call, built lazily so importing needs no key. Retries and
-    pacing belong to evolution_data._call_with_retry."""
+    """The provider's client for the titles call, built lazily so importing needs no key. Retries
+    and pacing belong to evolution_data._call_with_retry."""
     global _client
     if _client is None:
-        key = os.getenv("GROQ_API_KEY")
+        from app.config import LLM_API_KEY_ENV
+        from services.llm_provider import create_llm_client
+        key = os.getenv(LLM_API_KEY_ENV)
         if not key:
-            return None
-        try:
-            from groq import Groq
-        except ImportError:
             return None
         # max_retries=1 leaves retrying to _call_with_retry rather than doubling
         # it up at the SDK layer.
-        _client = _low_reasoning(Groq(api_key=key, max_retries=1))
+        _client = _low_reasoning(create_llm_client(key, max_retries=1))
     return _client
 
 
@@ -693,12 +676,16 @@ async def request_titles(sections, cache_key: str) -> Optional[list[str]]:
         raw = await asyncio.wait_for(
             evolution_data._call_with_retry(
                 client, _TITLES_SYSTEM, build_titles_prompt(sections),
-                json_mode=True, temperature=0.2, max_tokens=_TITLES_MAX_TOKENS,
+                json_mode=True, max_tokens=_TITLES_MAX_TOKENS,
             ),
             timeout=_PLAN_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
         print(f"Notes plan: titles call exceeded {_PLAN_TIMEOUT_SECONDS}s — using fallback titles.")
+        return None
+    except Exception as exc:
+        # _call_with_retry raises once its retries are spent; the plan still stands without titles.
+        print(f"Notes plan: titles call failed ({type(exc).__name__}: {exc}) — using fallback titles.")
         return None
     if not raw:
         return None
@@ -715,9 +702,7 @@ async def request_titles(sections, cache_key: str) -> Optional[list[str]]:
     return titles
 
 
-# ---------------------------------------------------------------------------
-# assembly
-# ---------------------------------------------------------------------------
+# --- assembly ---
 
 def group_by_document(concept_names, sources_by_concept, doc_order, positions, texts,
                       edges=(), encode=None) -> list[dict]:
@@ -916,9 +901,7 @@ def concept_positions(occurrences):
     return {name: spots[0] for name, spots in occurrences.items()}
 
 
-# ---------------------------------------------------------------------------
-# must-cover sentences: picked by key_sentences, assigned at plan time, checked after writing
-# ---------------------------------------------------------------------------
+# --- must-cover sentences: picked by key_sentences, assigned at plan time, checked after writing ---
 
 # Sections whose nearest concept is within this fraction of the closest are tied; similarity to
 # their concept names breaks the tie.
@@ -1207,9 +1190,7 @@ def _title_for(filenames: list[str]) -> str:
     return "Revision notes"
 
 
-# ---------------------------------------------------------------------------
-# write step: a planned section into prose, when a reader opens it
-# ---------------------------------------------------------------------------
+# --- write step: a planned section into prose, when a reader opens it ---
 
 # Bump when the prompt or a section's inputs change; it is in the cache key, so older bodies are
 # never served.
@@ -2308,9 +2289,7 @@ async def _generate_group(client, prompt: str, labels: list[str]):
     return bodies, None
 
 
-# ---------------------------------------------------------------------------
-# routes
-# ---------------------------------------------------------------------------
+# --- routes ---
 
 class PlanRequest(BaseModel):
     document_ids: list[int] = Field(min_length=1)

@@ -86,7 +86,7 @@ LLM_CONCURRENCY = asyncio.Semaphore(2)
 
 
 @retry_async(
-    on=(RATE_LIMIT_ERRORS, BAD_REQUEST_ERRORS),
+    on=RATE_LIMIT_ERRORS + BAD_REQUEST_ERRORS,
     max_attempts=5,
     backoff=2.0,
 )

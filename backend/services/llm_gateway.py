@@ -39,10 +39,12 @@ class SharedTokenLimiter:
         return max(self.window_seconds - (now - self._window_started), 0.1)
 
     def acquire_sync(self, input_tokens: int, output_tokens: int) -> None:
-        """Synchronously acquire tokens. Blocks if necessary."""
-        with self._sync_lock:
-            wait_time = self._available_wait(input_tokens, output_tokens)
-        if wait_time > 0:
+        """Synchronously acquire tokens. Blocks until the reservation fits, then records it."""
+        while True:
+            with self._sync_lock:
+                wait_time = self._available_wait(input_tokens, output_tokens)
+            if wait_time <= 0:
+                return
             logger.warning(
                 "llm_local_rate_limit_wait input_tokens=%d output_tokens=%d wait_seconds=%.1f",
                 input_tokens, output_tokens, wait_time,
@@ -50,10 +52,12 @@ class SharedTokenLimiter:
             time.sleep(wait_time)
 
     async def acquire(self, input_tokens: int, output_tokens: int) -> None:
-        """Asynchronously acquire tokens. Awaits if necessary."""
-        with self._sync_lock:
-            wait_time = self._available_wait(input_tokens, output_tokens)
-        if wait_time > 0:
+        """Asynchronously acquire tokens. Awaits until the reservation fits, then records it."""
+        while True:
+            with self._sync_lock:
+                wait_time = self._available_wait(input_tokens, output_tokens)
+            if wait_time <= 0:
+                return
             logger.warning(
                 "llm_local_rate_limit_wait_async input_tokens=%d output_tokens=%d wait_seconds=%.1f",
                 input_tokens, output_tokens, wait_time,
