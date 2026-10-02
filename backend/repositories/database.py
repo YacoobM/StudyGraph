@@ -12,8 +12,7 @@ def connect() -> sqlite3.Connection:
 
 def init_db() -> None:
 	with connect() as conn:
-		conn.executescript(
-			"""
+		conn.executescript("""
 			CREATE TABLE IF NOT EXISTS users (
 				id            INTEGER PRIMARY KEY AUTOINCREMENT,
 				auth_user_id  TEXT,
@@ -48,9 +47,11 @@ def init_db() -> None:
 
 			CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 			CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
-			"""
-		)
+			""")
+		conn.commit()
+		
 		columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
 		if "auth_user_id" not in columns:
 			conn.execute("ALTER TABLE users ADD COLUMN auth_user_id TEXT")
 		conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id ON users(auth_user_id)")
+		conn.commit() 

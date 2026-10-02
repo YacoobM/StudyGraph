@@ -1,6 +1,7 @@
 spacy
 sentence_transformers
 google.generativeai
+openai
 groq
 PyMuPDF 
 sentence-transformers
@@ -19,3 +20,8 @@ easyocr
 opencv-python
 Pillow
 google-genai
+ragas[all]
+langchain-openai
+langchain-core
+langchain-community<0.4.2
+tqdm

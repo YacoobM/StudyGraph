@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 
 from chromadb import Client as ChromaClient
-from groq import Groq
+from typing import Any
 
 from services.graph_engine import StudyGraphEngine
 from services.graph_runtime import get_collection
 
 
-client: Groq | None = None
+client: Any | None = None
 chroma: ChromaClient | None = None
 engine: StudyGraphEngine | None = None
 
@@ -38,9 +38,9 @@ def uploads_in_flight() -> int:
     return _uploads_in_flight
 
 
-def configure_runtime(groq_client: Groq, chroma_client: ChromaClient) -> None:
+def configure_runtime(llm_client: Any, chroma_client: ChromaClient) -> None:
     global client, chroma
-    client = groq_client
+    client = llm_client
     chroma = chroma_client
 
 

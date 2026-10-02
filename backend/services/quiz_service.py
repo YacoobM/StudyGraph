@@ -1,5 +1,4 @@
-"""Quiz routes: document quizzes written by Groq from each document's text, and attempt records
-for document and section quizzes (those come from the notes write call)."""
+"""Quiz routes: document quizzes written by LLM from each document's text, and attempt records for document and section quizzes (those come from the notes write call)."""
 
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.config import EXTRACTION_MODEL, OUTPUT_DIR
+from app.config import LLM_API_KEY_ENV, EXTRACTION_MODEL, NON_RAG_REASONING_EFFORT, OUTPUT_DIR
 from api.routes.auth import current_user
 from models.quiz_models import QuizAttempt
 from repositories.database import connect
