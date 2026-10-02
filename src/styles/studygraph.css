@@ -907,6 +907,14 @@ input[type="range"].scrub::-webkit-slider-thumb {
 .ws-timeline input[type="range"] {
   max-width: 520px;
 }
+.sp-deleted {
+  margin-left: 7px;
+  color: var(--danger, #b3402a);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
 .node-tip {
   position: absolute;
   z-index: 5;

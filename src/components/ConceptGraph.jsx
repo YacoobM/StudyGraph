@@ -4,7 +4,7 @@ import * as d3 from 'd3'
 /**
  * Concept graph — a direct port of the prototype's gxBuild, including the
  * furniture around the canvas: legend, search, zoom/fit/re-layout toolbar,
- * hover tooltip, drag hint and the week timeline.
+ * hover tooltip, drag hint and graph-version timeline.
  *
  * The physics settings are the prototype's and are load-bearing, not
  * decoration: velocityDecay 0.62 gives heavy friction so nodes glide rather
@@ -21,9 +21,10 @@ const R = (d) => (d.kind === 'core' ? 13 : 8.5)
 export default function ConceptGraph({
   nodes: allNodes = [],
   edges: allEdges = [],
-  week,
-  maxWeek,
-  onWeekChange,
+  versions = [],
+  selectedVersionId,
+  onVersionChange,
+  loadingVersion,
   onSelectNode,
   selectedId,
 }) {
@@ -49,14 +50,9 @@ export default function ConceptGraph({
     [allEdges],
   )
 
-  /* Fill mirrors the legend exactly: this week's arrivals are copper, core
-     concepts bright, everything else muted. */
   const fill = useCallback(
-    (d) => {
-      if (d.week === week) return '#C1652F'
-      return d.kind === 'core' ? 'rgba(243,238,221,0.92)' : 'rgba(150,137,122,0.85)'
-    },
-    [week],
+    (d) => d.kind === 'core' ? 'rgba(243,238,221,0.92)' : 'rgba(150,137,122,0.85)',
+    [],
   )
 
   /* Re-tint and dim without rebuilding the simulation. */
@@ -100,9 +96,7 @@ export default function ConceptGraph({
     const W = wrap.clientWidth || 900
     const H = wrap.clientHeight || 600
 
-    const nodes = allNodes
-      .filter((n) => n.week <= week)
-      .map((n) => ({ ...n, ...(posRef.current[n.id] || {}) }))
+    const nodes = allNodes.map((n) => ({ ...n, ...(posRef.current[n.id] || {}) }))
     const ids = new Set(nodes.map((n) => n.id))
     const edges = allEdges
       .filter((e) => ids.has(e.source?.id ?? e.source) && ids.has(e.target?.id ?? e.target))
@@ -217,7 +211,7 @@ export default function ConceptGraph({
     })
 
     return () => sim.stop()
-  }, [allNodes, allEdges, week])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allNodes, allEdges])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- toolbar -------------------------------------------------------------
   const zoomBy = (k) => {
@@ -241,9 +235,6 @@ export default function ConceptGraph({
       <div className="ws-graph-legend">
         <div className="row">
           <span className="swatch" style={{ background: 'var(--night-text)' }} /> Core concept
-        </div>
-        <div className="row">
-          <span className="swatch" style={{ background: 'var(--copper)' }} /> Added this week
         </div>
         <div className="row">
           <span className="swatch" style={{ background: 'var(--night-slate)' }} /> Supporting idea
@@ -280,20 +271,47 @@ export default function ConceptGraph({
         </div>
       )}
 
-      <div className="ws-timeline">
-        <div className="ws-timeline-head">
-          <span>Week <span className="num">{week}</span> of {maxWeek}</span>
-          <span>Click a node to inspect it</span>
-        </div>
-        <input
-          type="range"
-          min="1"
-          max={maxWeek}
-          value={week}
-          step="1"
-          onChange={(e) => onWeekChange && onWeekChange(Number(e.target.value))}
-        />
+      <GraphVersionTimeline
+        versions={versions}
+        selectedVersionId={selectedVersionId}
+        onVersionChange={onVersionChange}
+        loading={loadingVersion}
+      />
+
+    </div>
+  )
+}
+
+export function GraphVersionTimeline({ versions, selectedVersionId, onVersionChange, loading }) {
+  const chronological = [...versions].sort(
+    (a, b) => Number(a.version_number) - Number(b.version_number),
+  )
+  const selectedIndex = Math.max(
+    0,
+    chronological.findIndex((version) => version.id === selectedVersionId),
+  )
+  const selected = chronological[selectedIndex]
+  if (!selected) return null
+
+  return (
+    <div className="ws-timeline" aria-label="Graph version timeline">
+      <div className="ws-timeline-head">
+        <span>
+          Version <span className="num">{selected.version_number}</span> of {chronological[chronological.length - 1].version_number}
+        </span>
+        <span>{loading ? 'Loading version…' : 'Click a node to inspect'}</span>
       </div>
+      <input
+        type="range"
+        min="0"
+        max={chronological.length - 1}
+        value={selectedIndex}
+        step="1"
+        disabled={loading || chronological.length < 2}
+        aria-label="Choose graph version"
+        aria-valuetext={`Version ${selected.version_number}`}
+        onChange={(event) => onVersionChange?.(chronological[Number(event.target.value)]?.id)}
+      />
     </div>
   )
 }

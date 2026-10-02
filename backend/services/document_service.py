@@ -12,6 +12,44 @@ from google import genai
 import io
 import os
 from dotenv import load_dotenv
+from groq import RateLimitError
+from services.llm_gateway import estimate_tokens
+
+logger = logging.getLogger(__name__)
+
+MAX_INPUT_TOKENS_PER_CALL = 4200
+MAX_CHUNKS_PER_BATCH = 4
+
+
+def make_extraction_batches(chunks):
+    batches, current, current_tokens = [], [], 0
+    for chunk in chunks:
+        chunk_tokens = estimate_tokens(chunk["text"])
+        if current and (len(current) >= MAX_CHUNKS_PER_BATCH or current_tokens + chunk_tokens > MAX_INPUT_TOKENS_PER_CALL):
+            batches.append(current)
+            current, current_tokens = [], 0
+        current.append(chunk)
+        current_tokens += chunk_tokens
+    if current:
+        batches.append(current)
+    return batches
+
+
+async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None, batch_index=None, total_batches=None, retries=5):
+    delay = 5
+    started = time.perf_counter()
+    for attempt in range(1, retries + 1):
+        try:
+            data = await engine.extract_knowledge_batch(chunks, known_concepts_by_chunk=known_concepts_by_chunk)
+            logger.info("extraction_batch_complete batch=%s/%s chunks=%d chars=%d concepts=%d relationships=%d attempts=%d duration_ms=%.1f", batch_index, total_batches, len(chunks), sum(len(chunk["text"]) for chunk in chunks), len(data.get("concepts", [])), len(data.get("relationships", [])), attempt, (time.perf_counter() - started) * 1000)
+            return data
+        except RateLimitError:
+            logger.warning("extraction_batch_rate_limited batch=%s/%s attempt=%d/%d", batch_index, total_batches, attempt, retries)
+            if attempt == retries:
+                break
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise Exception("Maximum retries exceeded!")
 
 load_dotenv()
 
@@ -44,6 +82,9 @@ def extract_text(file_bytes, filename=None):
 
     elif suffix == ".pptx":
         return extract_pptx(file_bytes)
+
+    elif suffix in [".txt", ".md"]:
+        return [{"page": 1, "text": file_bytes.decode("utf-8-sig")}]
 
     elif suffix in [".png", ".jpg", ".jpeg"]:
         return extract_image_ocr(file_bytes)
@@ -146,3 +187,6 @@ def extract_image_ocr(file_bytes):
             "source": "gemini-flash"
         }
     ]
+import asyncio
+import logging
+import time

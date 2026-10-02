@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from app.config import UPLOADS_DIR
 from repositories.database import connect
 from repositories.documents import document_public
+from repositories.graphs import mark_graph_for_regeneration
 from repositories.users import current_user
 from schemas.documents import DocumentPatch
 from api.routes.upload import start_upload_pipeline
@@ -47,6 +48,7 @@ async def list_documents(user: sqlite3.Row = Depends(current_user)):
 async def create_document(
 	file: UploadFile = File(...),
 	week: str = Form(default=""),
+	graph_id: int | None = Form(default=None),
 	max_nodes: int | None = Form(default=None),
 	min_mentions: int = Form(default=1),
 	user: sqlite3.Row = Depends(current_user),
@@ -74,14 +76,23 @@ async def create_document(
 	(UPLOADS_DIR / stored_name).write_bytes(data)
 
 	with connect() as conn:
+		if graph_id is not None:
+			graph_row = conn.execute(
+				"SELECT 1 FROM graphs WHERE id = ? AND user_id = ?",
+				(graph_id, user["id"]),
+			).fetchone()
+			if graph_row is None:
+				raise HTTPException(status_code=404, detail="That graph does not exist for this user.")
+
 		cur = conn.execute(
 			"""
 			INSERT INTO documents
-				(user_id, filename, stored_name, size_bytes, mime, status, week, uploaded_at)
-			VALUES (?,?,?,?,?,?,?,?)
+				(user_id, graph_id, filename, stored_name, size_bytes, mime, status, week, uploaded_at)
+			VALUES (?,?,?,?,?,?,?,?,?)
 			""",
 			(
 				user["id"],
+				graph_id,
 				filename,
 				stored_name,
 				len(data),
@@ -92,10 +103,13 @@ async def create_document(
 			),
 		)
 		row = conn.execute("SELECT * FROM documents WHERE id = ?", (cur.lastrowid,)).fetchone()
+		if graph_id is not None:
+			conn.execute("UPDATE documents SET graph_id = ? WHERE id = ?", (graph_id, row["id"]))
 
 		logger.info(
-			"document_record_created document_id=%s filename=%s bytes=%d status=queued",
+			"document_record_created document_id=%s graph_id=%s filename=%s bytes=%d status=queued",
 			row["id"],
+			graph_id,
 			filename,
 			len(data),
 		)
@@ -157,6 +171,8 @@ async def delete_document(doc_id: int, user: sqlite3.Row = Depends(current_user)
 		if row is None:
 			raise HTTPException(status_code=404, detail="That document is not in your library.")
 
+		if row["graph_id"] is not None:
+			mark_graph_for_regeneration(conn, row["graph_id"])
 		conn.execute("DELETE FROM documents WHERE id = ? AND user_id = ?", (doc_id, user["id"]))
 
 	stored = UPLOADS_DIR / row["stored_name"]

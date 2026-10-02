@@ -1910,7 +1910,7 @@ def _write_key(section: dict, other_concepts=()) -> str:
     return f"{_WRITE_PROMPT_VERSION}|{GEMINI_MODEL}|section:{digest}"
 
 
-async def gather_chunks(concept_names, documents=None) -> list[dict]:
+async def gather_chunks(concept_names, documents=None, retrieve=None) -> list[dict]:
     """
     Source text behind a section, one retrieval per concept name.
 
@@ -1923,8 +1923,9 @@ async def gather_chunks(concept_names, documents=None) -> list[dict]:
     `documents` limits the hits to the note's own files. Without it a section
     picked up other lectures in the store (Lecture 5 notes cited Lecture 6).
     """
-    engine = _engine()
-    retrieve = getattr(engine, "retrieve_chunks", None)
+    if retrieve is None:
+        engine = _engine()
+        retrieve = getattr(engine, "retrieve_chunks", None)
     if retrieve is None:
         return []
 
@@ -2239,7 +2240,7 @@ def _is_transient(exc: Exception) -> bool:
 
 
 async def write_body(section: dict, documents=None,
-                     other_concepts=()) -> tuple[Optional[dict], Optional[float]]:
+                     other_concepts=(), chunk_retriever=None) -> tuple[Optional[dict], Optional[float]]:
     """
     Writes one section's prose. Consults the write cache first and writes back
     on success.
@@ -2266,7 +2267,7 @@ async def write_body(section: dict, documents=None,
     if client is None:
         return None, None
 
-    chunks = await gather_chunks(section["concepts"], documents)
+    chunks = await gather_chunks(section["concepts"], documents, retrieve=chunk_retriever)
     if not chunks:
         print(f"Notes write: no source text retrieved for section {section['id']} "
               f"({len(section['concepts'])} concepts) — nothing to write from.")

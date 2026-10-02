@@ -24,11 +24,7 @@ from groq import Groq
 from chromadb import Client
 from schemas.graph import GraphResponse
 from schemas.query import QueryRequest
-from api.routes.auth import router as auth_router
-from api.routes.documents import router as documents_router
-from api.routes.notes import router as notes_router, set_graph_source as set_notes_graph
-from api.routes.quiz import router as quiz_router, set_graph_source
-from api.routes.upload import router as upload_router
+from api.routes.graphs import router as graphs_router
 from app import state as runtime_state
 from services.graph_runtime import save_graph_json
 
@@ -56,21 +52,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Auth + document management (see backend/auth_documents.py)
-app.include_router(auth_router)
-app.include_router(documents_router)
-app.include_router(upload_router)
-
-app.include_router(quiz_router)
-
-# Revision-note planning and writing from the extracted graph
-# (see backend/services/notes_service.py)
-app.include_router(notes_router)
+app.include_router(graphs_router)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 runtime_state.configure_runtime(client, chroma)
-set_graph_source(lambda: runtime_state.engine)
-set_notes_graph(lambda: runtime_state.engine)
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +87,7 @@ async def get_graph():
     week-based color coding for the evolution feature."""
     engine = runtime_state.engine
     if engine is None:
-        return GraphResponse(nodes=[], edges=[])
+        return GraphResponse(nodes=[], edges=[], status="active")
 
     week_color_map = evolution_data.get_week_color_map(engine)
 
@@ -209,9 +194,12 @@ async def get_graph():
         "no_week_data": {"label": "No week data", "color": evolution_data.DEFAULT_COLOR},
     }
 
+    engine.graph_status = "active" if engine.fused_edges or engine.edges else "active"
+
     return {
         "nodes": nodes,
         "edges": edges,
+        "status": engine.graph_status,
         "is_fused": bool(engine.fused_edges),
         "graph_saved_to": graph_save_path,
         "legend": legend,
@@ -282,6 +270,7 @@ async def fuse_knowledge_graph():
             "inferred_edges": len(engine.inferred_edges)
         })
 
+        engine.graph_status = "active"
         logger.info(
             "fusion_request_complete canonical_nodes=%d fused_edges=%d duration_ms=%.1f",
             len(engine.canonical_nodes),

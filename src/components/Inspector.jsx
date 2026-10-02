@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { fetchConcept } from "../services/api.js";
+import { fetchGraphConceptEvolution } from "../services/api.js";
 
 /**
  * Right-hand inspector — ported from the prototype's selectNode(), including
@@ -18,6 +18,7 @@ import { fetchConcept } from "../services/api.js";
  * than inventing an explanation the extraction never produced.
  */
 export default function Inspector({
+  graphId,
   node,
   nodes = [],
   edges = [],
@@ -68,11 +69,14 @@ export default function Inspector({
         ? `From your sources: ${node.name} ${phrase}.`
         : `${node.name} appears in your material but has no recorded relationships yet.`);
 
+    const sourceNames = [...new Set((node.sources || [])
+      .map((source) => (typeof source === "string" ? source : source.name))
+      .filter(Boolean))];
     const history = [
       {
         week: node.week,
         label: "First appears",
-        detail: `Extracted from ${(node.sources || []).join(", ") || "your uploads"}.`,
+        detail: `Extracted from ${sourceNames.join(", ") || "your uploads"}.`,
       },
       ...[...neighbours]
         .sort((a, b) => a.week - b.week)
@@ -107,7 +111,7 @@ export default function Inspector({
     setDetailsLoading(true);
     setDetailsError("");
     try {
-      const result = await fetchConcept(node.name);
+      const result = await fetchGraphConceptEvolution(graphId, node.name);
       setDetails(result);
     } catch (error) {
       setDetailsError(
@@ -221,8 +225,13 @@ export default function Inspector({
       ) : (
         node.sources.map((s, i) => (
           <div className="insp-source" key={i}>
-            <div className="st">{s}</div>
-            <div className="sp">Week {node.week}</div>
+            <div className="st">
+              {typeof s === "string" ? s : s.name}
+              {typeof s !== "string" && s.deleted && (
+                <span className="sp-deleted">(deleted)</span>
+              )}
+            </div>
+            <div className="sp">{typeof s === "string" ? `Week ${node.week}` : s.weekLabel}</div>
           </div>
         ))
       )}

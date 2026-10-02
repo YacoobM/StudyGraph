@@ -15,14 +15,12 @@ from app import state as runtime_state
 from app.state import get_engine
 from app import state as runtime_state
 from repositories.database import connect
-from services.document_service import extract_text
+from services.document_service import extract_text, make_extraction_batches, extract_with_exp_backoff
 from services.graph_runtime import (
     save_extraction_result,
     save_graph_json,
 )
 from services.graph_engine import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
-from services.llm_gateway import estimate_tokens
-from groq import RateLimitError
 
 
 router = APIRouter(tags=["upload"])
@@ -43,64 +41,6 @@ def _update_document_status(document_id, status, **fields):
         )
 
 
-MAX_INPUT_TOKENS_PER_CALL = 4200
-MAX_CHUNKS_PER_BATCH = 4
-
-
-def _make_extraction_batches(chunks):
-    batches = []
-    current = []
-    current_tokens = 0
-    for chunk in chunks:
-        chunk_tokens = estimate_tokens(chunk["text"])
-        if current and (
-            len(current) >= MAX_CHUNKS_PER_BATCH
-            or current_tokens + chunk_tokens > MAX_INPUT_TOKENS_PER_CALL
-        ):
-            batches.append(current)
-            current = []
-            current_tokens = 0
-        current.append(chunk)
-        current_tokens += chunk_tokens
-    if current:
-        batches.append(current)
-    return batches
-
-
-async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None, batch_index=None, total_batches=None, retries=5):
-    delay = 5
-    started = time.perf_counter()
-    for attempt in range(1, retries + 1):
-        try:
-            data = await engine.extract_knowledge_batch(
-                chunks,
-                known_concepts_by_chunk=known_concepts_by_chunk,
-            )
-            logger.info(
-                "extraction_batch_complete batch=%s/%s chunks=%d chars=%d concepts=%d relationships=%d attempts=%d duration_ms=%.1f",
-                batch_index,
-                total_batches,
-                len(chunks),
-                sum(len(chunk["text"]) for chunk in chunks),
-                len(data.get("concepts", [])),
-                len(data.get("relationships", [])),
-                attempt,
-                (time.perf_counter() - started) * 1000,
-            )
-            return data
-        except RateLimitError:
-            logger.warning(
-                "extraction_batch_rate_limited batch=%s/%s attempt=%d/%d",
-                batch_index,
-                total_batches,
-                attempt,
-                retries,
-            )
-            if attempt == retries:
-                break
-            await asyncio.sleep(delay)
-            delay *= 2
-    raise Exception("Maximum retries exceeded!")
 
 
 async def _fuse_when_idle(engine):
@@ -247,7 +187,7 @@ async def _run_upload_pipeline(
 
         phase_started = time.perf_counter()
         set_status("extracting", chunks=len(chunks), chunks_completed=0)
-        extraction_batches = _make_extraction_batches(chunks)
+        extraction_batches = make_extraction_batches(chunks)
         batch_contexts = []
         extraction_tasks = []
         for index, batch in enumerate(extraction_batches):

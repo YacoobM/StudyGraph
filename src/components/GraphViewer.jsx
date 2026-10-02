@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import GraphCanvas from './GraphCanvas'
 import NodeDetails from './NodeDetails'
 import GraphLegend from './GraphLegend'
@@ -15,13 +15,23 @@ import './GraphViewer.css'
  * nodes, edges - graph data, shape: see GraphCanvas
  * onClose - closes the modal
  */
-export default function GraphViewer({ nodes = [], edges = [], legend = null, onClose }) {
+export default function GraphViewer({
+  nodes = [],
+  edges = [],
+  legend = null,
+  graphStatus = 'active',
+  onClose,
+  onGraphRegenerate,
+}) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedNode, setSelectedNode] = useState(null)
   const [filterLevel, setFilterLevel] = useState(3)
   const [conceptDescription, setConceptDescription] = useState(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+  const [graphRegenerating, setGraphRegenerating] = useState(false)
+  const [toast, setToast] = useState(null)
+  const toastTimerRef = useRef(null)
 
   // Full evolution (all weeks + comparisons + timeline) is deliberately not
   // fetched on plain node select — it's the expensive tier, only loaded when
@@ -92,20 +102,47 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
     }
   }
 
+  const showToast = (message) => {
+    setToast(message)
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+    }
+    toastTimerRef.current = setTimeout(() => setToast(null), 2800)
+  }
+
   const handleRegenerate = async () => {
     if (!selectedNode) return
+    if (graphStatus !== 'needs_regeneration') {
+      showToast('This graph is still active — no concepts currently need regeneration.')
+      return
+    }
     setRegenerating(true)
     try {
       await regenerateConcept(selectedNode.name)
       const desc = await fetchConceptDescription(selectedNode.name).catch(() => null)
       setConceptDescription(desc)
-      // If the full evolution was already open, refresh it too — otherwise
-      // leave it collapsed, same as a freshly selected node.
       if (evolution) {
         await handleShowEvolution(selectedNode.name)
       }
     } finally {
       setRegenerating(false)
+    }
+  }
+
+  const handleGraphRegenerate = async () => {
+    if (graphStatus !== 'needs_regeneration') {
+      showToast('This graph is still active — no rebuild is needed.')
+      return
+    }
+    if (!onGraphRegenerate) {
+      showToast('Graph regeneration is unavailable right now.')
+      return
+    }
+    setGraphRegenerating(true)
+    try {
+      await onGraphRegenerate()
+    } finally {
+      setGraphRegenerating(false)
     }
   }
 
@@ -121,6 +158,7 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
   return (
     <div className="graph-modal-overlay" onClick={onClose}>
       <div className="graph-modal" onClick={(e) => e.stopPropagation()}>
+        {toast && <div className="graph-toast">{toast}</div>}
         <div className="graph-modal-header">
           <input
             className="graph-search"
@@ -137,6 +175,18 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
               <option value={3}>All</option>
             </select>
           </div>
+          <button
+            className="graph-regenerate-btn"
+            onClick={handleGraphRegenerate}
+            disabled={graphRegenerating || graphStatus !== 'needs_regeneration'}
+            title={
+              graphStatus === 'needs_regeneration'
+                ? 'Rebuild the graph from current evidence'
+                : 'This graph is still active — no rebuild is required.'
+            }
+          >
+            {graphRegenerating ? 'Rebuilding…' : 'Rebuild graph'}
+          </button>
           <button className="graph-close-btn" onClick={onClose}>×</button>
         </div>
 
@@ -167,6 +217,7 @@ export default function GraphViewer({ nodes = [], edges = [], legend = null, onC
             onShowEvolution={handleShowEvolution}
             onRegenerate={handleRegenerate}
             regenerating={regenerating}
+            graphStatus={graphStatus}
             onOpenSource={handleOpenSource}
           />
         </div>

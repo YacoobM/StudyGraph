@@ -21,9 +21,11 @@ export default function NodeDetails({
   conceptDescription, detailsLoading,
   evolution, evolutionLoading, onShowEvolution,
   onRegenerate, regenerating,
+  graphStatus = 'active',
   onOpenSource,
 }) {
   const sources = Array.isArray(node?.source) ? node.source : []
+  const canRegenerateConcept = graphStatus === 'needs_regeneration'
 
   return (
     <div className={`kg-side-panel ${node ? "open" : ""}`}>
@@ -42,8 +44,12 @@ export default function NodeDetails({
               <button
                 className="regenerate-btn"
                 onClick={onRegenerate}
-                disabled={regenerating}
-                title="Re-generate this description from the source material"
+                disabled={regenerating || !canRegenerateConcept}
+                title={
+                  canRegenerateConcept
+                    ? 'Re-generate this description from the source material'
+                    : 'This graph is still active — no concepts currently need regeneration.'
+                }
                 style={{ marginLeft: "auto" }}
               >
                 {regenerating ? "Regenerating…" : "⟳ Regenerate"}

@@ -2,7 +2,7 @@ import sqlite3
 
 
 def document_public(row: sqlite3.Row) -> dict:
-	return {
+	payload = {
 		"id": row["id"],
 		"filename": row["filename"],
 		"size_bytes": row["size_bytes"],
@@ -15,3 +15,6 @@ def document_public(row: sqlite3.Row) -> dict:
 		"error": row["error"],
 		"uploaded_at": row["uploaded_at"],
 	}
+	if "graph_id" in row.keys():
+		payload["graph_id"] = row["graph_id"]
+	return payload

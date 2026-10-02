@@ -167,6 +167,22 @@
   padding: 40px;
 }
 
+.graph-toast {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 30;
+  max-width: 360px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  color: #f8fafc;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
 /* ----- zoom controls ----- */
 
 .zoom-controls {

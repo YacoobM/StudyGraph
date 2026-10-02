@@ -7,13 +7,14 @@ from collections import Counter, defaultdict
 
 import numpy as np
 from groq import APIStatusError, RateLimitError
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from schemas.extraction import ExtractionResult
 from app.config import EXTRACTION_MODEL, RAG_MODEL
 from services import graph_fusion
 from services.graph_runtime import call_llm
+from services.chunking import build_document_chunks
+from services.embeddings import get_embedding_model
 
 
 ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
@@ -26,15 +27,17 @@ PRUNED_REACTIVATION_SIMILARITY = 0.85
 
 
 class StudyGraphEngine:
-    def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL):
+    def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL, graph_id=None):
         self.client = client
         self.llm_model = llm_model
         self.rag_model = rag_model
+        self.graph_id = graph_id
         self.concepts = []
         self.edges = []
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model = get_embedding_model()
         self.chunk_store = []
         self.graph = None
+        self.graph_status = "active"
         self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
         self.fused_edges = []           # Edges after conflict resolution (post-fusion)
         self.inferred_edges = []        # Transitive edges inferred during fusion
@@ -101,34 +104,15 @@ class StudyGraphEngine:
         overlap=DEFAULT_CHUNK_OVERLAP,
         week_key=None,
     ):
-        chunks = []
-        full_text = ""
-        position_to_page = []
+        chunks = build_document_chunks(
+            pages,
+            source,
+            size=size,
+            overlap=overlap,
+        )
 
-        for p in pages:
-            full_text += p["text"] + " "
-            position_to_page.extend([p["page"]] * (len(p["text"]) + 1))
-
-        if not full_text.strip():
+        if not chunks:
             return []
-
-        step = max(size - overlap, 1)
-        start = 0
-        while start < len(full_text):
-            end = min(start + size, len(full_text))
-            chunk_text = full_text[start:end]
-            spanned_pages = sorted(set(position_to_page[start:end]))
-            chunk_index = len(chunks)
-            digest = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()[:12]
-            chunk_id = f"{source}:chunk:{chunk_index}:{digest}"
-            chunks.append({
-                "chunk_id": chunk_id,
-                "text": chunk_text,
-                "pages": spanned_pages,
-                "source": source,
-                "index": chunk_index,
-            })
-            start += step
 
         self.index_chunks(chunks, week_key=week_key)
 
@@ -276,9 +260,17 @@ Respond with ONLY this exact JSON structure:
             logger.exception("chunk_extraction_failed raw_data_present=%s", raw_data is not None)
             return {"concepts": [], "relationships": []}
 
+    def _mark_graph_dirty(self, reason=None):
+        """Graph evidence changed; rebuild before treating the graph as current."""
+        if self.graph_status == "active":
+            self.graph_status = "needs_regeneration"
+        if reason:
+            logger.info("graph_marked_dirty reason=%s graph_id=%s", reason, self.graph_id)
+
     def add_to_graph(self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None):
         if not raw_data:
             return
+        mutated = False
         for c in raw_data.get("concepts", []):
             if not isinstance(c, str):
                 continue
@@ -292,6 +284,7 @@ Respond with ONLY this exact JSON structure:
                 doc_names.add(name)
             # We allow duplicate concept names, as they might come from different weeks/docs
             self.concepts.append({"name": name, "source": doc_name, "week": week_key, "pages": pages or []})
+            mutated = True
 
         for r in raw_data.get("relationships", []):
             from_node = r.get("from", "").lower().strip()
@@ -310,6 +303,10 @@ Respond with ONLY this exact JSON structure:
                         "chunk_id": chunk_id,
                     }
                 )
+                mutated = True
+
+        if mutated:
+            self._mark_graph_dirty("graph evidence changed")
 
     def deduplicate_extracted_edges(self):
         """Remove exact duplicate extracted edges without making an LLM call."""
@@ -395,6 +392,9 @@ Respond with ONLY this exact JSON structure:
         ]
         if doc_name in self._doc_concept_names:
             self._doc_concept_names[doc_name] -= dropped
+
+        if dropped:
+            self._mark_graph_dirty("concepts pruned")
 
         logger.info(
             "concepts_pruned document=%s week=%s dropped=%d",
@@ -492,6 +492,7 @@ Respond with ONLY this exact JSON structure:
         self.reactivate_similar_pruned_concepts()
         logger.info("graph_fusion_using_active_graph concepts=%d edges=%d", len(self.concepts), len(self.edges))
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(self, self.client)
+        self.graph_status = "active"
 
         logger.info(
             "graph_fusion_complete canonical_nodes=%d fused_edges=%d inferred_edges=%d",
@@ -757,6 +758,23 @@ Respond with ONLY this exact JSON structure:
             "total_count": len(visited)
         }
 
+    def set_graph(self, graph_id):
+        self.graph_id = graph_id
+
+    def mark_graph_for_regeneration(self, reason=None):
+        self.graph_status = "needs_regeneration"
+        if reason:
+            logger.info("graph_marked_for_regeneration reason=%s graph_id=%s", reason, self.graph_id)
+
+    def clear_graph_support(self):
+        """Clear graph-derived state so the graph can be rebuilt from the remaining evidence."""
+        self.concepts = []
+        self.edges = []
+        self.canonical_nodes = {}
+        self.fused_edges = []
+        self.inferred_edges = []
+        self.graph_status = "needs_regeneration"
+
     def index_chunks(self, chunks, week_key=None):
         # store into the vector database
         texts = [chunk["text"] for chunk in chunks]
@@ -776,6 +794,8 @@ Respond with ONLY this exact JSON structure:
                 "pages": chunk["pages"],
                 "source": chunk.get("source", "unknown"),
             }
+            if self.graph_id is not None:
+                meta["graph_id"] = self.graph_id
             if week_key is not None:
                 meta["week"] = week_key
             metadatas.append(meta)
@@ -787,13 +807,18 @@ Respond with ONLY this exact JSON structure:
             metadatas=metadatas
         )
 
-    def retrieve_chunks(self, query, top_k=3):
-        query_embedding  = self.model.encode([query.lower()], show_progress_bar=False)
+    def retrieve_chunks(self, query, top_k=3, graph_id=None):
+        target_graph_id = self.graph_id if graph_id is None else graph_id
+        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
 
-        results = self.collections.query(
-            query_embeddings=query_embedding,
-            n_results=top_k
-        )
+        query_kwargs = {
+            "query_embeddings": query_embedding,
+            "n_results": top_k,
+        }
+        if target_graph_id is not None:
+            query_kwargs["where"] = {"graph_id": target_graph_id}
+
+        results = self.collections.query(**query_kwargs)
 
         if not results["documents"] or not results["documents"][0]:
             return []  # case of failed chunk retrieval

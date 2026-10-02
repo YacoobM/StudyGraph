@@ -7,6 +7,7 @@ import {
   deleteDocument,
   generateGraph,
   fetchGraph,
+  regenerateGraph,
 } from "../services/api";
 import GraphViewer from "../components/GraphViewer.jsx";
 import ChatPanel from "../components/ChatPanel.jsx";
@@ -41,6 +42,7 @@ export default function Builder() {
     nodes: [],
     edges: [],
     legend: null,
+    status: 'active',
   });
   const [chatOpen, setChatOpen] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -71,6 +73,7 @@ export default function Builder() {
             nodes: result.nodes,
             edges: result.edges || [],
             legend: result.legend || null,
+            status: result.status || 'active',
           };
           setGraphData(nextGraphData);
           if (import.meta.env.DEV) {
@@ -125,6 +128,7 @@ export default function Builder() {
         nodes: result?.nodes || [],
         edges: result?.edges || [],
         legend: result?.legend || null,
+        status: result?.status || 'active',
       };
       setGraphData(nextGraphData);
       setGraphOpen(true);
@@ -138,6 +142,19 @@ export default function Builder() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleGraphRegeneration = async () => {
+    const result = await regenerateGraph();
+    const nextGraphData = {
+      nodes: result?.nodes || graphData.nodes,
+      edges: result?.edges || graphData.edges,
+      legend: result?.legend || graphData.legend,
+      status: result?.status || 'active',
+    };
+    setGraphData(nextGraphData);
+    setGraphOpen(true);
+    return result;
   };
 
   const deleteSelected = async () => {
@@ -521,6 +538,7 @@ export default function Builder() {
           nodes={graphData.nodes}
           edges={graphData.edges}
           legend={graphData.legend}
+          graphStatus={graphData.status}
           onClose={() => setGraphOpen(false)}
         />
       )}

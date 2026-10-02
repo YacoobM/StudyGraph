@@ -64,3 +64,7 @@ supabase/.temp/storage-migration
 supabase/.temp/storage-version
 StudyGraph-conversation.md
 backend/tests/test_graph_persistence.py
+backend/tests/test_supabase_graphs.py
+SUPABASE_PORT_HANDOFF.md
+backend/supabase_live_smoke.py
+backend/tests/test_pruned_reactivation.py

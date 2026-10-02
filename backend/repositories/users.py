@@ -4,10 +4,11 @@ import json
 import secrets
 import time
 import sqlite3
+from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 from app.config import SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL
 from repositories.database import connect
@@ -66,6 +67,31 @@ def _supabase_user(token: str) -> dict:
 			return json.loads(response.read())
 	except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
 		raise HTTPException(status_code=401, detail="Sign in to continue.")
+
+
+@dataclass(frozen=True)
+class SupabaseIdentity:
+	auth_user_id: str
+	email: str
+	access_token: str
+
+
+def current_supabase_identity(authorization: str = Header(default="")) -> SupabaseIdentity:
+	if not authorization.startswith("Bearer "):
+		raise HTTPException(status_code=401, detail="Sign in to continue.")
+
+	token = authorization[7:].strip()
+	supabase_user = _supabase_user(token)
+	auth_user_id = supabase_user.get("id")
+	email = (supabase_user.get("email") or "").strip().lower()
+	if not auth_user_id or not email:
+		raise HTTPException(status_code=401, detail="Supabase returned an incomplete user.")
+
+	return SupabaseIdentity(
+		auth_user_id=auth_user_id,
+		email=email,
+		access_token=token,
+	)
 
 
 def current_user(authorization: str = Header(default="")) -> sqlite3.Row:
