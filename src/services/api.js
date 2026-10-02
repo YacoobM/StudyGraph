@@ -273,17 +273,47 @@ export async function uploadDocument(
 // quiz
 // ---------------------------------------------------------------------------
 
-/** Topics and questions generated from the concepts in the uploaded documents. */
+/**
+ * Every document with the state of its quiz. Generates nothing — a quiz is
+ * only written when generateDocumentQuiz asks for it.
+ */
 export async function fetchQuiz() {
   return apiFetch(`${API_BASE_URL}/api/quiz`, { headers: await authHeaders() })
 }
 
-export async function saveQuizResult(quizId, correct, total, points) {
+/** Starts one document's quiz. Poll fetchQuiz until it leaves "generating". */
+export async function generateDocumentQuiz(documentId) {
+  return apiFetch(`${API_BASE_URL}/api/quiz/documents/${documentId}/generate`, {
+    method: 'POST',
+    headers: await authHeaders(),
+  })
+}
+
+/**
+ * Records one finished attempt. `kind` is "document" or "section"; `answers`
+ * is the option index picked for each question, in order. Errors are thrown,
+ * not swallowed — a save that fails has to be visible.
+ */
+export async function saveQuizResult({ quizId, kind = 'document', answers = [], correct, total, title = null, group = null }) {
   return apiFetch(`${API_BASE_URL}/api/quiz/results`, {
     method: 'POST',
     headers: await authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ quiz_id: quizId, correct, total, points }),
+    body: JSON.stringify({ quiz_id: quizId, kind, answers, correct, total, title, group }),
   })
+}
+
+/**
+ * Every section quiz the user has been given, grouped by note title. Read
+ * from the server's stored copy, so it is there after a restart even though
+ * the notes themselves are not.
+ */
+export async function fetchSectionQuizzes() {
+  return apiFetch(`${API_BASE_URL}/api/quiz/sections`, { headers: await authHeaders() })
+}
+
+/** Every stored attempt, summarised per quiz id. */
+export async function fetchQuizResults() {
+  return apiFetch(`${API_BASE_URL}/api/quiz/results`, { headers: await authHeaders() })
 }
 
 /** Per-document concept/edge counts, used to reconcile stuck rows. */

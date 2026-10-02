@@ -1,13 +1,9 @@
-from typing import Dict
-from pydantic import BaseModel
+from typing import Dict, Literal, Optional
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class QuizSubmission(BaseModel):
-    """
-    Request body for POST /api/quiz/{quiz_id}/submit.
-
-    answers maps question_id -> the selected option index.
-    """
+    """Request body for POST /api/quiz/{quiz_id}/submit: question id to chosen option index."""
     answers: Dict[str, int]
 
 
@@ -32,8 +28,16 @@ class QuizResponse(BaseModel):
     questions: list[QuizQuestion]
 
 
-class TopicResult(BaseModel):
-    topic_id: str
-    correct: int
+class QuizAttempt(BaseModel):
+    """One finished attempt for POST /api/quiz/results. The frontend sends quiz_id; topic_id is
+    still accepted."""
+    quiz_id: str = Field(validation_alias=AliasChoices("quiz_id", "topic_id"), min_length=1)
+    kind: Literal["document", "section"] = "document"
+    answers: list[Optional[int]] = Field(default_factory=list)
+    correct: int = Field(ge=0)
     total: int
-    points: int
+    title: Optional[str] = None      # shown in the Quiz tab's lists
+    group: Optional[str] = None      # a section quiz's note title
+
+
+TopicResult = QuizAttempt
