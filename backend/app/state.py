@@ -1,16 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-
-from chromadb import Client as ChromaClient
 from typing import Any
-
 from services.graph_engine import StudyGraphEngine
-from services.graph_runtime import get_collection
-
 
 client: Any | None = None
-chroma: ChromaClient | None = None
 engine: StudyGraphEngine | None = None
 
 # Held for the whole of a fusion. merge_graph reads engine.concepts and
@@ -38,21 +32,7 @@ def uploads_in_flight() -> int:
     return _uploads_in_flight
 
 
-def configure_runtime(llm_client: Any, chroma_client: ChromaClient) -> None:
-    global client, chroma
+def configure_runtime(llm_client: Any) -> None:
+    global client
     client = llm_client
-    chroma = chroma_client
 
-
-def get_engine() -> StudyGraphEngine:
-    global engine
-    if engine is None:
-        if client is None or chroma is None:
-            raise RuntimeError("Application runtime has not been configured")
-        engine = StudyGraphEngine(get_collection(chroma, 1), client)
-    return engine
-
-
-def set_engine(value: StudyGraphEngine) -> None:
-    global engine
-    engine = value
