@@ -30,7 +30,6 @@ from app.logging_config import get_logger
 
 from services import evolution_data
 from app.logging_config import get_logger
-from repositories.database import init_db
 
 logger = get_logger(__name__)
 load_dotenv()
@@ -49,9 +48,7 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on app startup"""
-    init_db()
-    logger.info("db intialised")
+    logger.info("Started server")
     
 app.add_middleware(
     CORSMiddleware,
