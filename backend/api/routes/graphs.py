@@ -29,6 +29,7 @@ from services.supabase_graph_processing import delete_graph_document_and_create_
 from services.supabase_rag import answer_graph_query
 from services.supabase_quiz import get_graph_quiz, save_quiz_progress
 from services.supabase_note_quiz import save_note_quiz_progress
+from repositories.supabase_documents import signed_graph_document_url
 from repositories.supabase_notes import get_note as get_supabase_note, list_graph_notes, mark_graph_notes_stale, plan_graph_note, write_graph_note_section
 
 
@@ -98,6 +99,15 @@ def get_graph_documents(
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	return {"documents": list_graph_documents(identity, str(graph_id))}
+
+
+@router.get("/api/graphs/{graph_id}/documents/{document_id}/file")
+def get_graph_document_file_url(
+	graph_id: UUID,
+	document_id: UUID,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return {"url": signed_graph_document_url(identity, str(graph_id), str(document_id))}
 
 
 @router.get("/api/graphs/{graph_id}/support")

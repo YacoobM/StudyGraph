@@ -167,6 +167,13 @@ export function getDocumentFileUrl(filename) {
   return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`;
 }
 
+export async function getGraphDocumentSignedUrl(graphId, documentId) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/documents/${encodeURIComponent(documentId)}/file`,
+    { headers: await authHeaders() },
+  );
+}
+
 export async function regenerateConcept(conceptName) {
   return safeFetchJson(
     `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`,

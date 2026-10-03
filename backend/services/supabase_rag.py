@@ -115,6 +115,7 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
 		context_blocks.append(f"{header}\n{chunk['text']}")
 		citations.extend(pages)
 		sources.append({
+			"document_id": chunk.get("document_id"),
 			"fileName": chunk.get("source", "document.pdf"),
 			"page_number": pages[0] if pages else 1,
 			"snippet": (
