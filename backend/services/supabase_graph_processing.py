@@ -23,7 +23,7 @@ from repositories.users import SupabaseIdentity
 from services import graph_fusion
 from services.embeddings import EMBEDDING_DIMENSIONS
 from services.graph_engine import StudyGraphEngine
-from services.evolution_data import summarize_weeks_batch
+from services.evolution_data import generate_concept_definitions_batch
 
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,6 @@ def _restore_engine(
 	documents: list[dict],
 	chunks_by_document: dict[str, list[dict]],
 	latest_snapshot: dict | None,
-	active_support: dict,
 ):
 	documents_by_id = {str(document["id"]): document for document in documents}
 	chunks_by_id = {
@@ -107,54 +106,6 @@ def _restore_engine(
 	previous_status = {}
 	if not latest_snapshot:
 		return concept_support, relationship_support, previous_status
-
-	concepts_by_id = {str(concept["id"]): concept for concept in latest_snapshot["concepts"]}
-	for concept in latest_snapshot["concepts"]:
-		previous_status[graph_fusion.normalize_concept(concept["name"])] = concept.get("status", "active")
-	for raw_name, document_ids in (active_support.get("concepts") or {}).items():
-		name = graph_fusion.normalize_concept(raw_name)
-		for document_id in document_ids:
-			document = documents_by_id.get(str(document_id))
-			engine.concepts.append({
-				"name": name,
-				"source": str(document_id),
-				"week": (document or {}).get("week") or "Week 1",
-				"pages": [],
-			})
-			engine._doc_concept_names.setdefault(str(document_id), set()).add(name)
-			engine.known_concepts.add(name)
-			concept_support.append({
-				"source_name": name,
-				"document_id": str(document_id),
-				"chunk_id": "",
-				"source_week": int(str((document or {}).get("week") or "Week 1").split()[-1]),
-			})
-	for relationship in latest_snapshot["relationships"]:
-		source_name = concepts_by_id.get(str(relationship["source_concept_id"]), {}).get("name", "")
-		target_name = concepts_by_id.get(str(relationship["target_concept_id"]), {}).get("name", "")
-		relation = str(relationship.get("relationship_type") or "related_to").lower().strip()
-		key = f"{graph_fusion.normalize_concept(source_name)}|{relation}|{graph_fusion.normalize_concept(target_name)}"
-		for document_id in (active_support.get("relationships") or {}).get(key, []):
-			engine.edges.append({
-				"from": graph_fusion.normalize_concept(source_name),
-				"to": graph_fusion.normalize_concept(target_name),
-				"relation": relation,
-				"source": str(document_id),
-				"summary": relationship.get("summary") or "",
-			})
-			relationship_support.append({
-				"source_from": source_name,
-				"source_to": target_name,
-				"source_relationship_type": relation,
-				"document_id": str(document_id),
-				"chunk_id": "",
-				"summary": relationship.get("summary") or "",
-				"context": "",
-				"source_week": int(str((documents_by_id.get(str(document_id)) or {}).get("week") or "Week 1").split()[-1]),
-			})
-	engine.rebuild_known_concept_embeddings()
-	return concept_support, relationship_support, previous_status
-
 
 	concepts_by_id = {str(concept["id"]): concept for concept in latest_snapshot["concepts"]}
 	for concept in latest_snapshot["concepts"]:
@@ -533,7 +484,7 @@ async def _generate_concept_descriptions(client, concepts, concept_support, chun
 	if not requests:
 		return {}
 	try:
-		return await summarize_weeks_batch(client, requests, engine)
+		return await generate_concept_definitions_batch(client, requests)
 	except Exception as error:
 		logger.warning("concept_definition_generation_failed error=%s", error)
 		return {}
@@ -613,8 +564,6 @@ async def create_graph_version_from_batch(
 		documents_by_id[document_id]["week"] = week_key
 	latest_sealed = next((row for row in all_versions if row.get("is_sealed")), None)
 	latest_snapshot = load_graph_version(identity, graph_id, str(latest_sealed["id"])) if latest_sealed else None
-	active_support = get_graph_active_support(identity, graph_id)
-
 	chunks_by_document = {
 		document_id: _read_document_chunks(identity, document_id)
 		for document_id in documents_by_id
@@ -627,7 +576,6 @@ async def create_graph_version_from_batch(
 		graph_documents,
 		chunks_by_document,
 		latest_snapshot,
-		active_support,
 	)
 	for document_id in selected_ids:
 		document = documents_by_id[document_id]

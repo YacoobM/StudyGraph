@@ -74,6 +74,12 @@ _DEFAULT_INPUT_LIMIT = int(os.getenv("LLM_INPUT_TOKENS_PER_MINUTE", _provider_li
 _DEFAULT_OUTPUT_LIMIT = int(os.getenv("LLM_OUTPUT_TOKENS_PER_MINUTE", _provider_limits[1]))
 limiter = SharedTokenLimiter(_DEFAULT_INPUT_LIMIT, _DEFAULT_OUTPUT_LIMIT)
 
+# Interactive RAG traffic gets its own reservation pool so a large extraction
+# or fusion batch cannot consume the capacity needed for a user's question.
+_RAG_INPUT_LIMIT = int(os.getenv("RAG_INPUT_TOKENS_PER_MINUTE", _DEFAULT_INPUT_LIMIT))
+_RAG_OUTPUT_LIMIT = int(os.getenv("RAG_OUTPUT_TOKENS_PER_MINUTE", _DEFAULT_OUTPUT_LIMIT))
+rag_limiter = SharedTokenLimiter(_RAG_INPUT_LIMIT, _RAG_OUTPUT_LIMIT)
+
 
 def estimate_tokens(text):
     return max(1, len(text) // 4)

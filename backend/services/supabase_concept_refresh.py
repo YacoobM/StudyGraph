@@ -22,12 +22,14 @@ async def refresh_degraded_concept_definitions(identity: SupabaseIdentity, graph
 		rows = [row for row in provenance if str(row.get("concept_id")) == str(concept["id"])]
 		evidence = []
 		for row in rows:
+			row_evidence = []
 			if row.get("chunk_id"):
 				chunks = request_table(identity, "document_chunks", f"?select=content&id=eq.{row['chunk_id']}")
 				if chunks:
-					evidence.append(chunks[0].get("content") or "")
-			elif row.get("source_excerpt"):
-				evidence.append(row["source_excerpt"])
+					row_evidence.append(chunks[0].get("content") or "")
+			if not row_evidence and row.get("source_excerpt"):
+				row_evidence.append(row["source_excerpt"])
+			evidence.extend(row_evidence)
 		if not evidence:
 			continue
 		evidence_text = "\n\n".join(evidence)[:8000]

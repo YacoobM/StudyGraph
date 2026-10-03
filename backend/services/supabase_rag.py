@@ -6,6 +6,7 @@ from repositories.supabase_graphs import list_graph_versions, load_graph_version
 from repositories.supabase_search import search_graph_chunks
 from repositories.users import SupabaseIdentity
 from app.config import RAG_MODEL
+from services.llm_gateway import estimate_tokens, rag_limiter
 from utils.rag_utils import (
 	build_rag_system_prompt,
 	build_rag_user_prompt,
@@ -132,6 +133,10 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
  
 	# Call the LLM and parse response
 	try:
+		rag_limiter.acquire_sync(
+			estimate_tokens(system_prompt) + estimate_tokens(user_prompt),
+			1500,
+		)
 		result = call_rag_llm(client, RAG_MODEL, system_prompt, user_prompt)
 		answer = result["answer"]
 		used_sources = filter_sources_by_chunks_used(sources, set(result["chunks_used"]))
