@@ -16,6 +16,7 @@ from repositories.supabase_graphs import (
 	list_graph_versions,
 	list_graphs,
 	load_graph_version,
+	update_graph_name,
 )
 from repositories.supabase_library import (
 	create_subject,
@@ -38,6 +39,7 @@ from services.supabase_graph_processing import create_graph_version_from_batch
 from services.supabase_graph_processing import delete_graph_document_and_create_version
 from services.supabase_rag import answer_graph_query
 from services.supabase_quiz import get_graph_quiz, regenerate_graph_quiz, save_quiz_progress
+from services.supabase_concept_refresh import refresh_degraded_concept_definitions
 from services.supabase_note_quiz import save_note_quiz_progress
 from repositories.supabase_documents import signed_graph_document_url
 from repositories.supabase_notes import get_note as get_supabase_note, list_graph_notes, mark_graph_notes_stale, plan_graph_note, write_graph_note_section
@@ -112,6 +114,11 @@ def post_graph(
 	return {"graph": create_graph(identity, body.name, body.topic_id)}
 
 
+@router.patch("/api/graphs/{graph_id}")
+def patch_graph(graph_id: UUID, body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"graph": update_graph_name(identity, str(graph_id), body.name)}
+
+
 @router.get("/api/graphs/{graph_id}/versions")
 def get_graph_versions(
 	graph_id: UUID,
@@ -177,6 +184,14 @@ def get_graph_support(
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	return get_graph_active_support(identity, str(graph_id))
+
+
+@router.post("/api/graphs/{graph_id}/concepts/refresh-degraded")
+async def refresh_degraded_concepts(
+	graph_id: UUID,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return await refresh_degraded_concept_definitions(identity, str(graph_id), runtime_state.client)
 
 
 @router.delete("/api/graphs/{graph_id}/documents/{document_id}")

@@ -119,6 +119,20 @@ def create_graph(identity: SupabaseIdentity, name: str, topic_id: str | None = N
 	return rows[0]
 
 
+def update_graph_name(identity: SupabaseIdentity, graph_id: str, name: str) -> dict:
+	rows = request_table(
+		identity,
+		"graphs",
+		f"?id=eq.{graph_id}&select=id,topic_id,name,created_at,updated_at",
+		method="PATCH",
+		payload={"name": name},
+		prefer="return=representation",
+	)
+	if len(rows) != 1:
+		raise HTTPException(status_code=404, detail="Graph not found.")
+	return rows[0]
+
+
 def get_graph_active_support(identity: SupabaseIdentity, graph_id: str) -> dict:
 	rows = request_table(
 		identity,

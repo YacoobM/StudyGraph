@@ -211,6 +211,9 @@ export default function Inspector({
       <div className="insp-name">{node.name}</div>
 
       <div className="insp-meta">
+        {node.status === "needs_regeneration" && (
+          <span className="insp-chip degraded">Degraded</span>
+        )}
         <span className="insp-chip">{conceptType}</span>
         <span className="insp-chip quiet">
           {info.neighbours.length} connection{info.neighbours.length === 1 ? "" : "s"}

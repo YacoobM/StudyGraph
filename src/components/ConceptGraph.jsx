@@ -69,6 +69,9 @@ export default function ConceptGraph({
   onWeekChange,
   onSelectNode,
   selectedId,
+  degradedCount = 0,
+  onRefreshDegraded,
+  refreshingDegraded = false,
 }) {
   const svgRef = useRef(null)
   const wrapRef = useRef(null)
@@ -581,9 +584,13 @@ export default function ConceptGraph({
 
     allNodeSel.select('circle')
       .attr('fill', (d) => (
-        d.week === week ? '#C1652F'
+        d.status === 'needs_regeneration' ? '#A84F3A'
+          : d.week === week ? '#C1652F'
           : d.tier === 'high' ? 'rgba(243,238,221,0.92)'
             : 'rgba(150,137,122,0.82)'))
+      .attr('stroke', (d) => (
+        d.status === 'needs_regeneration' ? '#F2B38C' : null))
+      .attr('stroke-width', (d) => (d.status === 'needs_regeneration' ? 2 : null))
 
     allNodeSel.select('text')
       .attr('font-size', (d) => (d.tier === 'high' ? 11.5 : 10.5))
@@ -693,10 +700,22 @@ export default function ConceptGraph({
 
   return (
     <div className="graph-panel-inner" ref={wrapRef} onMouseLeave={clearHover}>
+      {degradedCount > 0 && (
+        <div className="gx-degraded-banner">
+          <span>
+            <strong>{degradedCount} concept{degradedCount === 1 ? '' : 's'} need updated definitions</strong>
+            <small>Some source material was removed from this graph.</small>
+          </span>
+          <button type="button" onClick={onRefreshDegraded} disabled={refreshingDegraded}>
+            {refreshingDegraded ? 'Refreshing…' : `Refresh ${degradedCount} definition${degradedCount === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      )}
       <div className="gx-legend" aria-hidden="true">
         <span><i style={{ background: 'rgba(243,238,221,0.92)' }} />Core concept</span>
         <span><i style={{ background: '#C1652F' }} />Added this week</span>
         <span><i style={{ background: 'rgba(150,137,122,0.82)' }} />Supporting idea</span>
+        <span><i style={{ background: '#A84F3A' }} />Degraded</span>
       </div>
 
       <div className="gx-search">

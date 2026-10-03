@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  createSubject as createRemoteSubject,
+  createTopic as createRemoteTopic,
+  listLibrary,
+  updateSubject as updateRemoteSubject,
+  updateTopic as updateRemoteTopic,
+  updateGraph as updateRemoteGraph,
+} from '../services/api.js'
 
 /**
  * Subject → Topic → Graph organisation for the workspace sidebar.
@@ -75,6 +83,51 @@ export function useLibrary(userKey) {
   const loadedFor = useRef(storageKey)
   const skipWriteFor = useRef(null)
 
+  // Supabase is the source of truth for the hierarchy. localStorage remains
+  // only a cache for UI state such as expanded/collapsed rows.
+  useEffect(() => {
+    let cancelled = false
+    if (!userKey) {
+      setLib(EMPTY)
+      return () => { cancelled = true }
+    }
+    listLibrary().then(({ subjects = [] }) => {
+      if (cancelled) return
+      const previous = read(storageKey)
+      const previousSubjects = new Map(previous.subjects.map((s) => [String(s.id), s]))
+      const nextSubjects = subjects.map((s) => {
+        const oldSubject = previousSubjects.get(String(s.id))
+        const previousTopics = new Map((oldSubject?.topics || []).map((t) => [String(t.id), t]))
+        return {
+          id: String(s.id),
+          name: String(s.name || 'Untitled subject'),
+          open: oldSubject?.open !== false,
+          topics: (s.topics || []).map((t) => {
+            const oldTopic = previousTopics.get(String(t.id))
+            return {
+              id: String(t.id),
+              name: String(t.name || 'Untitled topic'),
+              open: oldTopic?.open !== false,
+              graphs: (t.graphs || []).map((g) => ({
+                id: String(g.id),
+                name: String(g.name || 'Untitled graph'),
+                docIds: Array.isArray(g.doc_ids) ? g.doc_ids : [],
+                supabaseId: String(g.id),
+              })),
+            }
+          }),
+        }
+      })
+      const activeGraphId = nextSubjects.some((s) => s.topics.some((t) => t.graphs.some((g) => g.id === previous.activeGraphId)))
+        ? previous.activeGraphId
+        : null
+      setLib({ subjects: nextSubjects, activeGraphId })
+    }).catch(() => {
+      // Keep the cached hierarchy visible if the backend is temporarily down.
+    })
+    return () => { cancelled = true }
+  }, [storageKey, userKey])
+
   // The signed-in user can arrive after first render; reload for the new key.
   useEffect(() => {
     if (loadedFor.current === storageKey) return
@@ -103,48 +156,77 @@ export function useLibrary(userKey) {
     s.topics.flatMap((t) => (pred(s, t) ? t.graphs.map((g) => g.id) : [])))
 
   // --- subjects ---
-  const addSubject = useCallback((name) => {
+  const addSubject = useCallback(async (name) => {
     const id = newId('sub')
     setLib((l) => ({ ...l, subjects: [...l.subjects, { id, name, open: true, topics: [] }] }))
-    return id
+    try {
+      const { subject } = await createRemoteSubject(name)
+      setLib((l) => ({
+        ...l,
+        subjects: l.subjects.map((s) => s.id === id ? { ...s, id: String(subject.id) } : s),
+      }))
+      return String(subject.id)
+    } catch {
+      return id
+    }
   }, [])
 
-  const renameSubject = useCallback((id, name) =>
-    setLib(mapSubjects((s) => (s.id === id ? { ...s, name } : s))), [])
+  const renameSubject = useCallback((id, name) => {
+    setLib(mapSubjects((s) => (s.id === id ? { ...s, name } : s)))
+    if (!String(id).startsWith('sub_')) updateRemoteSubject(id, name).catch(() => {})
+  }, [])
 
   const toggleSubject = useCallback((id, open) =>
     setLib(mapSubjects((s) => (s.id === id ? { ...s, open: open ?? !s.open } : s))), [])
 
-  const deleteSubject = useCallback((id) => setLib((l) => {
+  const deleteSubject = useCallback((id) => {
+    setLib((l) => {
     const gone = graphIdsOf(l.subjects, (s) => s.id === id)
     return {
       subjects: l.subjects.filter((s) => s.id !== id),
       activeGraphId: gone.includes(l.activeGraphId) ? null : l.activeGraphId,
     }
-  }), [])
+    })
+  }, [])
 
   // --- topics ---
-  const addTopic = useCallback((subjectId, name) => {
+  const addTopic = useCallback(async (subjectId, name) => {
     const id = newId('top')
     setLib(mapSubjects((s) => (s.id === subjectId
       ? { ...s, open: true, topics: [...s.topics, { id, name, open: true, graphs: [] }] }
       : s)))
+    if (!String(subjectId).startsWith('sub_')) {
+      try {
+        const { topic } = await createRemoteTopic(subjectId, name)
+        setLib(mapSubjects((s) => ({
+          ...s,
+          topics: s.topics.map((t) => t.id === id ? { ...t, id: String(topic.id) } : t),
+        })))
+        return String(topic.id)
+      } catch {
+        return id
+      }
+    }
     return id
   }, [])
 
-  const renameTopic = useCallback((id, name) =>
-    setLib(mapTopics((t) => (t.id === id ? { ...t, name } : t))), [])
+  const renameTopic = useCallback((id, name) => {
+    setLib(mapTopics((t) => (t.id === id ? { ...t, name } : t)))
+    if (!String(id).startsWith('top_')) updateRemoteTopic(id, name).catch(() => {})
+  }, [])
 
   const toggleTopic = useCallback((id, open) =>
     setLib(mapTopics((t) => (t.id === id ? { ...t, open: open ?? !t.open } : t))), [])
 
-  const deleteTopic = useCallback((id) => setLib((l) => {
+  const deleteTopic = useCallback((id) => {
+    setLib((l) => {
     const gone = graphIdsOf(l.subjects, (_s, t) => t.id === id)
     return {
       subjects: l.subjects.map((s) => ({ ...s, topics: s.topics.filter((t) => t.id !== id) })),
       activeGraphId: gone.includes(l.activeGraphId) ? null : l.activeGraphId,
     }
-  }), [])
+    })
+  }, [])
 
   // --- graphs ---
   /**
@@ -162,8 +244,13 @@ export function useLibrary(userKey) {
     return id
   }, [])
 
-  const renameGraph = useCallback((id, name) =>
-    setLib(mapGraphs((g) => (g.id === id ? { ...g, name } : g))), [])
+  const renameGraph = useCallback((id, name) => {
+    const supabaseId = lib.subjects
+      .flatMap((subject) => subject.topics.flatMap((topic) => topic.graphs))
+      .find((graph) => graph.id === id)?.supabaseId
+    setLib(mapGraphs((g) => (g.id === id ? { ...g, name } : g)))
+    if (supabaseId) updateRemoteGraph(supabaseId, name).catch(() => {})
+  }, [lib])
 
   const deleteGraph = useCallback((id) => setLib((l) => ({
     subjects: l.subjects.map((s) => ({

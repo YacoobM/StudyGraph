@@ -67,9 +67,69 @@ export async function listGraphs() {
   });
 }
 
-export async function createGraph(name) {
+export async function listLibrary() {
+  return apiFetch(`${API_BASE_URL}/api/library`, {
+    headers: await authHeaders(),
+  });
+}
+
+export async function createSubject(name) {
+  return apiFetch(`${API_BASE_URL}/api/subjects`, {
+    method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateSubject(subjectId, name) {
+  return apiFetch(`${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`, {
+    method: "PATCH",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteSubject(subjectId) {
+  return apiFetch(`${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
+export async function createTopic(subjectId, name) {
+  return apiFetch(`${API_BASE_URL}/api/topics`, {
+    method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ subject_id: subjectId, name }),
+  });
+}
+
+export async function updateTopic(topicId, name) {
+  return apiFetch(`${API_BASE_URL}/api/topics/${encodeURIComponent(topicId)}`, {
+    method: "PATCH",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteTopic(topicId) {
+  return apiFetch(`${API_BASE_URL}/api/topics/${encodeURIComponent(topicId)}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
+export async function createGraph(name, topicId = null) {
   return apiFetch(`${API_BASE_URL}/api/graphs`, {
     method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, topic_id: topicId }),
+  });
+}
+
+export async function updateGraph(graphId, name) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}`, {
+    method: "PATCH",
     headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
@@ -165,6 +225,13 @@ export async function regenerateGraph() {
 
 export function getDocumentFileUrl(filename) {
   return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`;
+}
+
+export async function refreshDegradedConcepts(graphId) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/concepts/refresh-degraded`,
+    { method: 'POST', headers: await authHeaders() },
+  )
 }
 
 export async function getGraphDocumentSignedUrl(graphId, documentId) {

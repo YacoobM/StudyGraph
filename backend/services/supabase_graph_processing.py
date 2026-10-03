@@ -23,6 +23,7 @@ from repositories.users import SupabaseIdentity
 from services import graph_fusion
 from services.embeddings import EMBEDDING_DIMENSIONS
 from services.graph_engine import StudyGraphEngine
+from services.evolution_data import summarize_weeks_batch
 
 
 logger = logging.getLogger(__name__)
@@ -232,7 +233,9 @@ def _persist_version(
 	relationship_support: list[dict],
 	previous_status: dict[str, str],
 	documents_by_id: dict[str, dict],
+	concept_descriptions: dict[str, str] | None = None,
 ):
+	concept_descriptions = concept_descriptions or {}
 	canonical_names = set()
 	for concept in engine.concepts:
 		canonical_names.add(_canonical_name(engine, concept["name"]))
@@ -247,6 +250,8 @@ def _persist_version(
 			"name": name,
 			"normalized_name": graph_fusion.normalize_concept(name),
 			"status": previous_status.get(graph_fusion.normalize_concept(name), "active"),
+			**({"description": concept_descriptions[graph_fusion.normalize_concept(name)]}
+			   if concept_descriptions.get(graph_fusion.normalize_concept(name)) else {}),
 		}
 		for name in sorted(canonical_names)
 	]
@@ -287,7 +292,10 @@ def _persist_version(
 		method="POST",
 		payload=[
 			{
-				**concept,
+				"id": concept["id"],
+				"name": concept["name"],
+				"normalized_name": concept["normalized_name"],
+				"status": concept["status"],
 				"graph_version_id": version_id,
 			}
 			for concept in concepts
@@ -420,6 +428,14 @@ def _persist_version(
 
 
 def _build_deleted_snapshot(snapshot: dict, active_support: dict, document_id: str) -> tuple[dict, dict]:
+	# A surviving concept can still have enough support to remain in the graph,
+	# while its stored definition/evidence has changed because the deleted
+	# document contributed to it. Keep that distinction explicit for the UI.
+	affected_concept_ids = {
+		str(row.get("concept_id"))
+		for row in (snapshot.get("concept_provenance") or [])
+		if str(row.get("document_id")) == str(document_id) and row.get("concept_id")
+	}
 	concept_support = {
 		key: [str(value) for value in values if str(value) != document_id]
 		for key, values in (active_support.get("concepts") or {}).items()
@@ -430,18 +446,19 @@ def _build_deleted_snapshot(snapshot: dict, active_support: dict, document_id: s
 	concept_support = {
 		key: values for key, values in concept_support.items() if values
 	}
-	concept_status = {
-		str(concept.get("normalized_name") or graph_fusion.normalize_concept(concept.get("name", ""))): concept.get("status", "active")
-		for concept in snapshot.get("concepts", [])
-	}
 	concepts = []
 	for concept in snapshot.get("concepts", []):
 		key = str(concept.get("normalized_name") or graph_fusion.normalize_concept(concept.get("name", "")))
 		if key in deleted_concepts:
 			continue
 		updated = dict(concept)
-		if key in (active_support.get("concepts") or {}) and document_id in [str(value) for value in (active_support["concepts"].get(key) or [])]:
+		# The remaining provenance is authoritative. A concept that still has
+		# support stays in the graph. If deleted evidence contributed to its
+		# definition, retain a targeted stale/degraded marker for later refresh.
+		if str(concept.get("id")) in affected_concept_ids:
 			updated["status"] = "needs_regeneration"
+		else:
+			updated["status"] = "active"
 		concepts.append(updated)
 
 	concept_ids = {str(concept["id"]): str(concept.get("normalized_name") or graph_fusion.normalize_concept(concept.get("name", ""))) for concept in concepts}
@@ -483,6 +500,43 @@ def _build_deleted_snapshot(snapshot: dict, active_support: dict, document_id: s
 		"concept_provenance": concept_provenance,
 		"relationship_provenance": relationship_provenance,
 	}, {"concepts": concept_support, "relationships": relationship_support}
+
+
+async def _generate_concept_descriptions(client, concepts, concept_support, chunks_by_document, engine):
+	"""Generate grounded descriptions for concepts in a newly created version."""
+	if not client:
+		return {}
+	by_name = {}
+	for support in concept_support:
+		name = graph_fusion.normalize_concept(support.get("source_name", ""))
+		if not name:
+			continue
+		chunk_id = str(support.get("chunk_id") or "")
+		chunk = next(
+			(row for row in chunks_by_document.get(str(support.get("document_id")), [])
+			 if str(row.get("id")) == chunk_id),
+			 None,
+		)
+		if chunk:
+			by_name.setdefault(name, []).append(chunk.get("content", "")[:700])
+	requests = []
+	for concept in concepts:
+		name = graph_fusion.normalize_concept(concept["name"])
+		evidence = "\n\n".join(dict.fromkeys(by_name.get(name, [])))
+		if evidence:
+			requests.append({
+				"key": name,
+				"concept_name": concept["name"],
+				"week": "Current material",
+				"evidence": evidence[:2400],
+			})
+	if not requests:
+		return {}
+	try:
+		return await summarize_weeks_batch(client, requests, engine)
+	except Exception as error:
+		logger.warning("concept_definition_generation_failed error=%s", error)
+		return {}
 
 
 async def delete_graph_document_and_create_version(
@@ -651,6 +705,29 @@ async def create_graph_version_from_batch(
 				"chunk_id": support["chunk_id"],
 				"source_week": support.get("source_week") or version_number,
 			})
+	canonical_names = {
+		_canonical_name(engine, concept["name"])
+		for concept in engine.concepts
+	}
+	canonical_names.update(
+		_canonical_name(engine, endpoint)
+		for edge in engine.fused_edges
+		for endpoint in (edge["from"], edge["to"])
+	)
+	description_targets = [{"name": name} for name in sorted(canonical_names) if name]
+	concept_descriptions = await _generate_concept_descriptions(
+		runtime_state.client,
+		description_targets,
+		concept_support,
+		chunks_by_document,
+		engine,
+	)
+	# Carry forward definitions for concepts restored from the previous version
+	# when no new chunk evidence was available for them.
+	for previous in (latest_snapshot or {}).get("concepts", []):
+		name = graph_fusion.normalize_concept(previous.get("name", ""))
+		if name and previous.get("description") and name not in concept_descriptions:
+			concept_descriptions[name] = previous["description"]
 	new_version = _persist_version(
 		identity,
 		graph_id,
@@ -660,6 +737,7 @@ async def create_graph_version_from_batch(
 		relationship_support,
 		previous_status,
 		documents_by_id,
+		concept_descriptions,
 	)
 	for document_id in selected_ids:
 		set_graph_document_status(identity, document_id, "processed", None, week=week_key)

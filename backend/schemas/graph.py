@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class GraphCreateRequest(BaseModel):
 	name: str
+	topic_id: str | None = None
 
 	@field_validator("name")
 	@classmethod

@@ -49,6 +49,7 @@ function resultFromProgress(progress) {
 const toNoteQuizzes = ({ notes = [] }) => notes.map((n) => ({
   id: n.title,
   title: n.title,
+  stale: n.status === "stale",
   sections: (n.sections || [])
     .map((s) => {
       const body = s.body || {};
@@ -58,6 +59,7 @@ const toNoteQuizzes = ({ notes = [] }) => notes.map((n) => ({
         quiz: s.questions || body.quiz || [],
         passMark: s.pass_mark ?? body.quiz_pass_mark,
         sectionId: s.id,
+        stale: n.status === "stale",
         progress: normalizeProgress(s.quiz_progress),
       };
     })
@@ -373,16 +375,22 @@ export default function QuizPane({ onToast, graphId }) {
           const r = results[s.quizId] || resultFromProgress(s.progress);
           const inProgress = r?.status === "in_progress";
           const attempted = r?.current_index || 0;
+          const stale = note.stale || s.stale;
           return (
             <QuizCard
               key={s.quizId}
               title={s.title}
-              badge={r?.passed ? "Complete" : null}
+              badge={stale ? "Stale" : r?.passed ? "Complete" : null}
+              badgeTone={stale ? "stale" : ""}
               meta={note.title}
-              progress={r ? Math.round((attempted / s.quiz.length) * 100) : 0}
+              progress={stale ? null : r ? Math.round((attempted / s.quiz.length) * 100) : 0}
               line={`${s.quiz.length} questions`}
-              sub={r ? `${attempted}/${s.quiz.length} questions attempted · ${scoreLine(r)}` : "Not attempted yet"}
-              actions={(
+              sub={stale
+                ? "Regenerate the notes before taking this quiz."
+                : r ? `${attempted}/${s.quiz.length} questions attempted · ${scoreLine(r)}` : "Not attempted yet"}
+              actions={stale ? (
+                <button className="btn-secondary" disabled>Regenerate notes first</button>
+              ) : (
                 <>
                   <button className="btn-secondary" onClick={() => setReview({ note, section: s })}>Review</button>
                   <button className={`btn-start ${r && !inProgress ? "retry" : ""}`} onClick={() => startSection(note, s)}>
