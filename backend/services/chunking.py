@@ -2,7 +2,7 @@ import hashlib
 from uuid import UUID, uuid5
 
 
-def build_document_chunks(pages, source, document_id=None, size=5600, overlap=800):
+def build_document_chunks(pages, source, document_id=None, size=1024, overlap=150):
 	full_text = ""
 	position_to_page = []
 	for page in pages:

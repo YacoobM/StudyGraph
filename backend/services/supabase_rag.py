@@ -14,6 +14,9 @@ from utils.rag_utils import (
 	prioritize_graph,
 )
 
+from app.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 def _format_pages(pages: list[int]) -> str:
 	if not pages:
@@ -33,10 +36,21 @@ def _latest_snapshot(identity: SupabaseIdentity, graph_id: str) -> dict:
 
 
 def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, client) -> dict:
+	"""
+	GraphRAG Query: Combine retrieved text chunks with the graph structure
+	to improve the quality of responses.
+ 
+	For broad queries with weak text matches, we lean on the graph to provide
+	the user with an output.
+ 
+	Returns: dict with answer, citations, sources, subgraph, concepts_mentioned
+	and metadata
+	"""
 	if client is None:
 		raise HTTPException(status_code=503, detail="The AI Service is temporarily down.")
-
+ 
 	chunks = search_graph_chunks(identity, graph_id, query, top_k=5)
+	
 	if not chunks:
 		return {
 			"answer": "No relevant text chunks found in this graph. Try a different query.",
@@ -45,46 +59,93 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
 			"sources": [],
 			"chunks_used": 0,
 			"chunks": [],
-			"subgraph": {"nodes": [], "edges": [], "is_fused": False},
+			"subgraph": {"nodes": [], "edges": [], "is_fused": True},
 			"graph_search_depth": 0,
+			"concepts_mentioned": [],
+			"fusion_status": "fused",
+			"retrieval_method": "text",
+			"graph_used": False,
 		}
-
-	snapshot = _latest_snapshot(identity, graph_id)
-	concepts = {str(concept["id"]): concept["name"] for concept in snapshot["concepts"]}
-	graph_lines = [
-		f"  {concepts.get(edge['source_concept_id'], '?')} [{edge['relationship_type']}] "
-		f"{concepts.get(edge['target_concept_id'], '?')}"
-		for edge in snapshot["relationships"][:10]
-	]
+ 
+	# Load the graph snapshot to build context from relationships
+	try:
+		snapshot = _latest_snapshot(identity, graph_id)
+	except HTTPException:
+		raise
+	except Exception as e:
+		logger.exception("Failed to load graph snapshot: %s", e)
+		raise HTTPException(status_code=409, detail="Could not load graph data.") from e
+ 
+	# Build concept lookup and graph section for context
+	concepts = {str(concept["id"]): concept["name"] for concept in snapshot.get("concepts", [])}
+	relationships = snapshot.get("relationships", [])
+	
+	graph_section = ""
+	subgraph_nodes = []
+	subgraph_edges = []
+	
+	if relationships:
+		graph_lines = ["Related concepts and connections:"]
+		for e in relationships[:8]:
+			source_name = concepts.get(str(e["source_concept_id"]), "?")
+			target_name = concepts.get(str(e["target_concept_id"]), "?")
+			relation = e.get("relationship_type", "relates to")
+			graph_lines.append(f"  • {source_name} --[{relation}]--> {target_name}")
+		graph_section = "\n".join(graph_lines)
+		subgraph_edges = relationships
+		# Collect unique concept nodes referenced in edges
+		concept_ids = set()
+		for e in relationships:
+			concept_ids.add(str(e["source_concept_id"]))
+			concept_ids.add(str(e["target_concept_id"]))
+		subgraph_nodes = [
+			{"id": cid, "name": concepts.get(cid, "?")}
+			for cid in concept_ids
+		]
+ 
+	# Build context blocks from chunks
 	context_blocks = []
 	sources = []
 	citations = []
+	
 	for chunk in chunks:
-		pages = chunk["pages"]
+		pages = chunk.get("pages", [])
 		citation = _format_pages(pages)
 		header = f"[Chunk {len(context_blocks) + 1}: {citation}]" if citation else f"[Chunk {len(context_blocks) + 1}]"
 		context_blocks.append(f"{header}\n{chunk['text']}")
 		citations.extend(pages)
 		sources.append({
-			"fileName": chunk["source"],
+			"fileName": chunk.get("source", "document.pdf"),
 			"page_number": pages[0] if pages else 1,
-			"snippet": chunk["text"][:120] + ("..." if len(chunk["text"]) > 120 else ""),
+			"snippet": (
+				(chunk["text"][:120] + "...") if len(chunk["text"]) > 120 else chunk["text"]
+			),
 		})
-
+ 
 	context_text = "\n\n".join(context_blocks)
-	graph_section = "Related concepts and connections:\n" + "\n".join(
-		f"  • {line.strip()}" for line in graph_lines
-	) if graph_lines else ""
-	system_prompt = build_rag_system_prompt(prioritize_graph(chunks))
+	unique_pages = sorted(set(citations))
+	use_graph_primarily = prioritize_graph(chunks)
+ 
+	system_prompt = build_rag_system_prompt(prioritize_graph=use_graph_primarily)
 	user_prompt = build_rag_user_prompt(context_text, query, graph_section)
+ 
+	# Call the LLM and parse response
 	try:
 		result = call_rag_llm(client, RAG_MODEL, system_prompt, user_prompt)
 		answer = result["answer"]
 		used_sources = filter_sources_by_chunks_used(sources, set(result["chunks_used"]))
-	except Exception as error:
-		raise HTTPException(status_code=502, detail="The AI Service failed to answer this query.") from error
-
-	unique_pages = sorted(set(citations))
+		concepts_mentioned = result.get("concepts_mentioned", [])
+	except (AttributeError, KeyError, ValueError) as e:
+		logger.exception("rag_query_response_parse_failed error=%s", e)
+		answer = "Error: Could not parse response from language model. Please try again"
+		used_sources = []
+		concepts_mentioned = []
+	except Exception as e:
+		logger.exception("rag_query_llm_failed error_type=%s", type(e).__name__)
+		answer = f"Error querying language model: {type(e).__name__}"
+		used_sources = []
+		concepts_mentioned = []
+ 
 	return {
 		"answer": answer,
 		"citations": unique_pages,
@@ -93,13 +154,21 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
 		"chunks_used": len(used_sources),
 		"chunks": [
 			{
-				"text": chunk["text"][:200] + ("..." if len(chunk["text"]) > 200 else ""),
-				"pages": chunk["pages"],
-				"citation": _format_pages(chunk["pages"]),
-				"similarity": chunk["similarity"],
+				"text": chunk["text"],
+				"pages": chunk.get("pages", []),
+				"citation": _format_pages(chunk.get("pages", [])),
+				"similarity": chunk.get("similarity", 0),
 			}
 			for chunk in chunks
 		],
-		"subgraph": {"nodes": [], "edges": snapshot["relationships"], "is_fused": True},
-		"graph_search_depth": 1 if snapshot["relationships"] else 0,
+		"subgraph": {
+			"nodes": subgraph_nodes,
+			"edges": subgraph_edges,
+			"is_fused": True,
+		},
+		"graph_search_depth": 1 if relationships else 0,
+		"concepts_mentioned": concepts_mentioned,
+		"fusion_status": "fused",
+		"retrieval_method": "text+graph" if graph_section else "text",
+		"graph_used": bool(graph_section),
 	}
