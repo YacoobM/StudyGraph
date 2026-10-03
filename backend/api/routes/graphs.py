@@ -245,14 +245,20 @@ async def post_graph_document(
 
 
 @router.post("/api/graphs/{graph_id}/query")
-def post_graph_query(
+async def post_graph_query(
 	graph_id: UUID,
 	body: GraphQueryRequest,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	if not body.query.strip():
 		raise HTTPException(status_code=422, detail="Ask a question about this graph.")
-	return answer_graph_query(identity, str(graph_id), body.query.strip(), runtime_state.client)
+	return await asyncio.to_thread(
+		answer_graph_query,
+		identity,
+		str(graph_id),
+		body.query.strip(),
+		runtime_state.client,
+	)
 
 
 @router.get("/api/graphs/{graph_id}/quiz")
