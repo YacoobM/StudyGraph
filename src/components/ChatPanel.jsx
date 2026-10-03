@@ -180,6 +180,7 @@ export default function ChatPanel({
       const data = graphId
         ? await askGraphQuestion(graphId, q)
         : await askQuestion(q);
+      console.log('API response:', data);
       setMessages((m) => [
         ...m,
         {

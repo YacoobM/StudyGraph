@@ -7,14 +7,13 @@ import Inspector from '../components/Inspector.jsx'
 import NotesPane from '../components/NotesPane.jsx'
 import ChatPanel from '../components/ChatPanel.jsx'
 import SubjectSidebar from '../components/SubjectSidebar.jsx'
-import UploadDialog, { UploadDrop, UploadQueue, TopicSelect } from '../components/UploadPanel.jsx'
+import UploadDialog, { UploadDrop, UploadQueue } from '../components/UploadPanel.jsx'
 import { useLibrary } from '../lib/library.js'
 
 import '../styles/studygraph.css'
 import './Workspace.css'
 
 import {
-  listGraphs,
   createGraph as createSupabaseGraph,
   listGraphVersions,
   getGraphActiveSupport,
@@ -166,7 +165,7 @@ export default function Workspace() {
   const navigate = useNavigate()
   const library = useLibrary(user?.id || user?.email)
 
-  // --- UI state (teammate's shell) ---
+  // --- UI state ---
   const [tab, setTab] = useState('graph')
   const [chatOpen, setChatOpen] = useState(false)
   const [sideOpen, setSideOpen] = useState(false)
@@ -180,25 +179,21 @@ export default function Workspace() {
   const [error, setError] = useState('')
   const setBusyToast = (msg) => { setBusy(msg); setTimeout(() => setBusy(''), 1800) }
 
-  // --- persisted state (Supabase graphs / versions) ---
-  const [graphs, setGraphs] = useState([])
-  const [selectedGraphId, setSelectedGraphId] = useState('')
+  // --- Supabase state (loaded on demand per graph) ---
   const [versions, setVersions] = useState([])
   const [selectedVersionId, setSelectedVersionId] = useState('')
-  const [creatingGraph, setCreatingGraph] = useState(false)
-  const [graphName, setGraphName] = useState('')
   const [docs, setDocs] = useState([])
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
 
   // The upload queue outlives a graph switch, so loops check this ref before
   // refreshing the screen for a graph the user has already left.
   const activeGraphRef = useRef('')
-  useEffect(() => { activeGraphRef.current = selectedGraphId }, [selectedGraphId])
+  useEffect(() => { activeGraphRef.current = library.activeGraphId }, [library.activeGraphId])
 
   // --- derived ------------------------------------------------------------
 
-  const selectedGraph = graphs.find((g) => String(g.id) === String(selectedGraphId))
   const viewingLatestVersion = !versions.length || selectedVersionId === versions[0]?.id
+  const found = library.findGraph(library.activeGraphId)
 
   // Notes are written from documents the engine has finished reading.
   const readyDocs = useMemo(
@@ -206,180 +201,128 @@ export default function Workspace() {
     [docs],
   )
 
-  // Current view: the whole graph, or one topic inside it.
-  const found = library.activeTopicId ? library.findTopic(library.activeTopicId) : null
-  const activeTopicId = found ? found.topic.id : null
-  const topicDocIds = found ? found.topic.docIds.map(String) : null
+  // The graph view is what the backend returned; shapeGraph ranks its nodes.
+  const view = useMemo(() => shapeGraph(graph.nodes, graph.edges), [graph])
 
-  const viewDocs = useMemo(
-    () => (topicDocIds ? docs.filter((d) => topicDocIds.includes(String(d.id))) : docs),
-    [docs, topicDocIds?.join('|')],   // eslint-disable-line react-hooks/exhaustive-deps
-  )
-
-  // A topic's graph is the concepts that cite at least one of the topic's
-  // documents, plus the relationships between them. Same snapshot, filtered.
-  const view = useMemo(() => {
-    if (!topicDocIds) return shapeGraph(graph.nodes, graph.edges)
-    const ids = new Set(viewDocs.map((d) => String(d.id)))
-    const nodes = graph.nodes.filter((n) =>
-      (n.sources || []).some((s) => ids.has(String(s.documentId))),
-    )
-    return shapeGraph(nodes, graph.edges)
-  }, [graph, viewDocs, topicDocIds?.join('|')])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  const evolutionMaxWeek = Math.max(1, ...viewDocs.map((d) => weekNumber(d.week)))
+  const evolutionMaxWeek = Math.max(1, ...docs.map((d) => weekNumber(d.week)))
   const maxWeek = Math.max(
     evolutionMaxWeek,
     ...view.nodes.flatMap((n) => n.weeks || [n.week || 1]),
   )
-  const viewKey = `${selectedGraphId}:${selectedVersionId}:${activeTopicId || 'all'}`
+  const viewKey = `${library.activeGraphId}:${selectedVersionId}`
 
   // Land on the newest week whenever the view or its range changes.
   useEffect(() => { setWeek(maxWeek) }, [viewKey, maxWeek])
   useEffect(() => { setSelected(null) }, [viewKey])
 
-  // --- data: graphs, versions, snapshot -----------------------------------
+  // --- data: load Supabase graph when library.activeGraphId changes ---
 
-  const loadGraphs = useCallback(async () => {
-    try {
-      const result = await listGraphs()
-      setGraphs(result.graphs || [])
-      setError('')
-    } catch (e) {
-      setError(e.message)
-    }
-  }, [])
-
-  const loadGraphWorkspace = useCallback(async (graphId, requestedVersionId = null) => {
-    if (!graphId) return
-    const [{ documents = [] }, { versions: graphVersions = [] }] = await Promise.all([
-      listGraphDocuments(graphId),
-      listGraphVersions(graphId),
-    ])
-    setDocs(documents.map(graphDocumentRow))
-    setVersions(graphVersions)
-    const version =
-      graphVersions.find((item) => item.id === requestedVersionId) || graphVersions[0]
-    setSelectedVersionId(version?.id || '')
-    if (!version) {
+  const loadGraphWorkspace = useCallback(async (supabaseGraphId, requestedVersionId = null) => {
+    if (!supabaseGraphId) {
+      setDocs([])
+      setVersions([])
       setGraph({ nodes: [], edges: [] })
       setSelected(null)
       return
     }
-    const snapshot = await fetchGraphVersion(graphId, version.id)
-    const activeSupport =
-      graphVersions[0]?.id === version.id ? await getGraphActiveSupport(graphId) : null
-    setGraph(graphViewFromSnapshot(snapshot, activeSupport, documents))
-    setSelected(null)
+    try {
+      const [{ documents = [] }, { versions: graphVersions = [] }] = await Promise.all([
+        listGraphDocuments(supabaseGraphId),
+        listGraphVersions(supabaseGraphId),
+      ])
+      setDocs(documents.map(graphDocumentRow))
+      setVersions(graphVersions)
+      const version = graphVersions.find((item) => item.id === requestedVersionId) || graphVersions[0]
+      setSelectedVersionId(version?.id || '')
+      if (!version) {
+        setGraph({ nodes: [], edges: [] })
+        setSelected(null)
+        return
+      }
+      const snapshot = await fetchGraphVersion(supabaseGraphId, version.id)
+      const activeSupport = graphVersions[0]?.id === version.id ? await getGraphActiveSupport(supabaseGraphId) : null
+      setGraph(graphViewFromSnapshot(snapshot, activeSupport, documents))
+      setSelected(null)
+    } catch (e) {
+      setError(e.message)
+    }
   }, [])
 
-  useEffect(() => { loadGraphs() }, [loadGraphs])
-
-  // Keep the current graph across a refresh. The id is only a UI selection;
-  // all graph data still comes from the persisted graph APIs.
+  // When the library's active graph changes, load its Supabase data.
   useEffect(() => {
-    if (selectedGraphId || !graphs.length || !user?.id) return
-    const stored = window.localStorage.getItem(`studygraph.activeGraphId:${user.id}`)
-    const graphId = graphs.some((g) => String(g.id) === stored) ? stored : ''
-    if (graphId) selectGraph(graphId)
-  }, [graphs, selectedGraphId, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function selectGraph(graphId) {
-    setSelectedGraphId(graphId)
-    setSelectedVersionId('')
+  const g = library.findGraph(library.activeGraphId)
+  const supabaseId = g?.graph?.supabaseId
+  if (supabaseId) {
+    setBusy('Loading graph…')
+    loadGraphWorkspace(supabaseId).catch(() => {}).finally(() => setBusy(''))
+  } else {
     setDocs([])
     setVersions([])
     setGraph({ nodes: [], edges: [] })
     setSelected(null)
-    setError('')
-    if (user?.id) {
-      const key = `studygraph.activeGraphId:${user.id}`
-      if (graphId) window.localStorage.setItem(key, String(graphId))
-      else window.localStorage.removeItem(key)
-    }
-    if (!graphId) return
-    setBusy('Loading graph…')
-    try {
-      await loadGraphWorkspace(graphId)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy('')
-    }
   }
-
-  async function createGraphFromForm(event) {
-    event.preventDefault()
-    const name = graphName.trim()
-    if (!name) return
-    setBusy('Creating graph…')
-    try {
-      const { graph: created } = await createSupabaseGraph(name)
-      setGraphs((current) => [created, ...current])
-      setGraphName('')
-      setCreatingGraph(false)
-      await selectGraph(created.id)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy('')
-    }
-  }
+}, [library.activeGraphId])
 
   async function selectVersion(versionId) {
     setSelectedVersionId(versionId)
-    if (!selectedGraphId || !versionId) return
+    const g = library.findGraph(library.activeGraphId)
+    const supabaseId = g?.graph?.supabaseId
+    if (!supabaseId || !versionId) return
     setBusy('Loading version…')
     setTab('graph')
     try {
-      await loadGraphWorkspace(selectedGraphId, versionId)
+      await loadGraphWorkspace(supabaseId, versionId)
     } catch (e) {
       setError(e.message)
     } finally {
       setBusy('')
     }
-  }
-
-  function newGraph() {
-    setCreatingGraph(true)
-    setGraphName('')
-    setError('')
   }
 
   // --- upload -------------------------------------------------------------
   //
-  // Several files can be picked at once. They are processed one after another:
-  // each is uploaded to the selected graph, then a new graph version is built
-  // from it. The graph refreshes after every file, so it grows while the rest
-  // are still waiting.
+  // Files are queued and processed one at a time. When uploading to a local
+  // graph (no supabaseId yet), the first file triggers graph creation on the
+  // backend. Subsequent files go to the same graph. The graph view refreshes
+  // after each file.
 
   const pending = useRef([])
   const draining = useRef(false)
   const patchItem = (key, patch) =>
     setQueue((q) => q.map((i) => (i.key === key ? { ...i, ...patch } : i)))
 
-  function uploadBlockedReason() {
-    if (!selectedGraphId) return 'Choose a graph before uploading documents.'
-    if (!viewingLatestVersion) return 'Select the latest graph version before uploading documents.'
-    return ''
-  }
+  async function processItem({ key, file, name, localGraphId, topicId }) {
+    const g = library.findGraph(localGraphId)
+    if (!g) {
+      patchItem(key, { status: 'failed', message: 'Graph not found' })
+      setError(`Graph for ${name} not found`)
+      return
+    }
 
-  async function processItem({ key, file, name, topicId, graphId }) {
+    let supabaseGraphId = g.graph.supabaseId
     patchItem(key, { status: 'uploading', message: '' })
     try {
-      const { document } = await uploadGraphDocument(graphId, file)
-      // Assign the topic as soon as the document exists, so it is filed even
-      // if building the version fails.
-      if (topicId) library.assignDocs([document.id], topicId)
+      // Create the Supabase graph on first upload to this local graph
+      if (!supabaseGraphId) {
+        patchItem(key, { status: 'uploading', message: 'Creating graph…' })
+        const { graph: created } = await createSupabaseGraph(g.graph.name)
+        supabaseGraphId = created.id
+        library.promoteGraphToSupabase(localGraphId, supabaseGraphId)
+      }
+
+      const { document } = await uploadGraphDocument(supabaseGraphId, file)
+      library.assignDocs([document.id], localGraphId)
       patchItem(key, { status: 'reading', message: 'Building graph…' })
-      await createGraphVersion(graphId, [document.id])
+      await createGraphVersion(supabaseGraphId, [document.id])
       patchItem(key, { status: 'done', message: '' })
     } catch (e) {
       patchItem(key, { status: 'failed', message: e.message })
       setError(`Could not process ${name}: ${e.message}`)
     }
-    if (activeGraphRef.current === graphId) {
-      await loadGraphWorkspace(graphId).catch(() => {})
+
+    // Refresh the view if this item is still for the active graph
+    if (activeGraphRef.current === localGraphId && supabaseGraphId) {
+      await loadGraphWorkspace(supabaseGraphId).catch(() => {})
     }
   }
 
@@ -393,10 +336,11 @@ export default function Workspace() {
     }
   }
 
-  /** Returns false (and sets an error) when the upload can't start. */
-  function enqueue(files, topicId) {
-    const blocked = uploadBlockedReason()
-    if (blocked) { setError(blocked); return false }
+  function enqueue(files, localGraphId) {
+    if (!localGraphId) {
+      setError('Choose or create a graph before uploading documents.')
+      return false
+    }
 
     const stamp = Date.now()
     const items = files.map((file, i) => {
@@ -406,8 +350,8 @@ export default function Workspace() {
         key: `${stamp}-${i}-${file.name}`,
         file,
         name: file.name,
-        topicId: topicId || null,
-        graphId: selectedGraphId,
+        localGraphId,
+        topicId: null,
         status: ok ? 'queued' : 'failed',
         message: ok ? '' : `.${ext} files aren't supported — use PDF, DOCX, PPTX, TXT or MD.`,
       }
@@ -420,20 +364,24 @@ export default function Workspace() {
   }
 
   function openUpload() {
-    const blocked = uploadBlockedReason()
-    if (blocked) { setError(blocked); return }
-    setUploadDest(activeTopicId)
+    if (!library.activeGraphId) {
+      setError('Choose or create a graph before uploading documents.')
+      return
+    }
+    setUploadDest(library.activeGraphId)
     setUploadOpen(true)
   }
 
   const activeUploads = queue.filter((i) => ACTIVE.includes(i.status)).length
 
   async function remove(doc) {
-    if (!selectedGraphId || !viewingLatestVersion) return
+    const g = library.findGraph(library.activeGraphId)
+    const supabaseId = g?.graph?.supabaseId
+    if (!supabaseId || !viewingLatestVersion) return
     try {
-      await deleteGraphDocument(selectedGraphId, doc.id)
+      await deleteGraphDocument(supabaseId, doc.id)
       library.assignDocs([doc.id], null)
-      await loadGraphWorkspace(selectedGraphId)
+      await loadGraphWorkspace(supabaseId)
     } catch (e) {
       setError(`Could not remove ${doc.name || doc.filename}: ${e.message}`)
     }
@@ -446,11 +394,11 @@ export default function Workspace() {
 
   const t = { count: docs.length, concepts: graph.nodes.length, relationships: graph.edges.length }
 
-  // Header: a topic names itself (with its graph above). Otherwise the graph does.
-  const title = found ? found.topic.name : selectedGraph?.name || 'Choose a graph'
+  // Header: subject › graph (from library structure)
+  const title = found?.graph.name || 'Choose a graph'
 
   const fileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
-  const canUpload = Boolean(selectedGraphId) && viewingLatestVersion
+  const canUpload = Boolean(library.activeGraphId) && viewingLatestVersion
 
   return (
     <div className="ws">
@@ -462,17 +410,6 @@ export default function Workspace() {
         onHome={() => navigate('/')}
         user={user}
         onSignOut={signOut}
-        // Graph management, for a sidebar that wants to host the graph list.
-        graphItems={graphs}
-        selectedGraphId={selectedGraphId}
-        onSelectGraph={selectGraph}
-        onNewGraph={newGraph}
-        creatingGraph={creatingGraph}
-        graphName={graphName}
-        onGraphNameChange={setGraphName}
-        onCreateGraph={createGraphFromForm}
-        onCancelCreate={() => setCreatingGraph(false)}
-        busy={busy}
       />
 
       {/* ---------------- main ---------------- */}
@@ -491,23 +428,23 @@ export default function Workspace() {
                 <div className="ws-crumb">
                   <span title={found.subject.name}>{found.subject.name}</span>
                   <span aria-hidden="true">›</span>
-                  <span>{selectedGraph?.name || 'Graph'}</span>
+                  <span title={found.topic.name}>{found.topic.name}</span>
                 </div>
               )}
               <div className="ws-title" title={title}>{title}</div>
-              {selectedGraphId && view.nodes.length ? (
+              {library.activeGraphId && view.nodes.length ? (
                 <div className="ws-facts">
-                  <span><b>{viewDocs.length}</b> document{viewDocs.length === 1 ? '' : 's'}</span>
+                  <span><b>{docs.length}</b> document{docs.length === 1 ? '' : 's'}</span>
                   <span><b>{view.nodes.length}</b> concepts</span>
                   <span><b>{view.edges.length}</b> relationships</span>
                   <span>Week <b>{week}</b> of {maxWeek}</span>
                 </div>
               ) : (
                 <div className="ws-sub">
-                  {!selectedGraphId
-                    ? 'Select or create a graph to continue'
-                    : viewDocs.length
-                      ? `${viewDocs.length} document${viewDocs.length === 1 ? '' : 's'} · no concepts yet`
+                  {!library.activeGraphId
+                    ? 'Select or create a graph in the sidebar'
+                    : docs.length
+                      ? `${docs.length} document${docs.length === 1 ? '' : 's'} · no concepts yet`
                       : 'No sources yet'}
                 </div>
               )}
@@ -515,40 +452,9 @@ export default function Workspace() {
           </div>
 
           <div className="ws-top-right">
-            {/* Graph switcher — lives here until the sidebar hosts the graph list. */}
-            <div className="ws-graphpick">
-              {creatingGraph ? (
-                <form onSubmit={createGraphFromForm}>
-                  <input
-                    autoFocus
-                    value={graphName}
-                    onChange={(e) => setGraphName(e.target.value)}
-                    placeholder="Graph name"
-                    aria-label="Graph name"
-                  />
-                  <button type="submit" disabled={!graphName.trim() || Boolean(busy)}>Create</button>
-                  <button type="button" onClick={() => setCreatingGraph(false)}>Cancel</button>
-                </form>
-              ) : (
-                <>
-                  <select
-                    value={selectedGraphId}
-                    onChange={(e) => selectGraph(e.target.value)}
-                    aria-label="Graph"
-                  >
-                    <option value="">Choose a graph…</option>
-                    {graphs.map((g) => (
-                      <option key={g.id} value={String(g.id)}>{g.name}</option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={newGraph}>+ New graph</button>
-                </>
-              )}
-            </div>
-
             <button type="button" className={`ws-upload${activeUploads ? ' is-busy' : ''}`}
                     onClick={openUpload} disabled={!canUpload}
-                    title={!canUpload ? uploadBlockedReason() : undefined}>
+                    title={!canUpload ? 'Choose a graph before uploading' : undefined}>
               {activeUploads ? (
                 <><span className="ws-upload-dot" aria-hidden="true" />
                   <span className="ws-upload-long">Uploading · {activeUploads} left</span>
@@ -566,7 +472,7 @@ export default function Workspace() {
                   className={`ws-tab${tab === x ? ' on' : ''}`}
                   onClick={() => setTab(x)}
                   disabled={
-                    (x !== 'graph' && !selectedGraphId) ||
+                    (x !== 'graph' && !library.activeGraphId) ||
                     (['notes', 'quiz'].includes(x) && !viewingLatestVersion)
                   }
                 >
@@ -576,7 +482,7 @@ export default function Workspace() {
               <button
                 type="button"
                 className={`ws-tab${chatOpen ? ' on' : ''}`}
-                disabled={!selectedGraphId || !viewingLatestVersion}
+                disabled={!library.activeGraphId || !viewingLatestVersion}
                 onClick={() => setChatOpen((open) => !open)}
               >
                 Ask StudyGraph
@@ -603,30 +509,29 @@ export default function Workspace() {
                 e.preventDefault()
                 setDropOver(false)
                 const files = Array.from(e.dataTransfer.files || [])
-                if (files.length && enqueue(files, activeTopicId)) {
-                  setUploadDest(activeTopicId)
+                if (files.length && enqueue(files, library.activeGraphId)) {
+                  setUploadDest(library.activeGraphId)
                   setUploadOpen(true)
                 }
               }}
             >
               {view.nodes.length === 0 ? (
                 <div className="empty-state">
-                  {!selectedGraphId ? (
+                  {!library.activeGraphId ? (
                     <>
                       <h3>Choose a graph</h3>
-                      <p>Select a saved graph or create one to view its documents and knowledge graph.</p>
-                      <button className="btn-primary" onClick={newGraph}>New graph</button>
+                      <p>Select or create a graph in the sidebar to view its documents and knowledge graph.</p>
                     </>
                   ) : (
                     <>
-                      {viewDocs.length ? (
+                      {docs.length ? (
                         <>
                           <h3>Still reading your documents</h3>
                           <p>Concepts appear here as soon as each file has been read.</p>
                         </>
                       ) : (
                         <>
-                          <h3>{found ? `Nothing in ${found.topic.name} yet` : 'Nothing here yet'}</h3>
+                          <h3>{found ? `Nothing in ${found.graph.name} yet` : 'Nothing here yet'}</h3>
                           <p>Add your lecture notes or slides and StudyGraph will build the
                              graph right here.</p>
                         </>
@@ -634,8 +539,8 @@ export default function Workspace() {
                       {viewingLatestVersion && (
                         <UploadDrop
                           tone="dark"
-                          title={found ? `Add documents to ${found.topic.name}` : 'Drop your documents here'}
-                          onFiles={(files) => enqueue(files, activeTopicId)}
+                          title={found ? `Add documents to ${found.graph.name}` : 'Drop your documents here'}
+                          onFiles={(files) => enqueue(files, library.activeGraphId)}
                         />
                       )}
                       <UploadQueue items={queue} />
@@ -667,7 +572,7 @@ export default function Workspace() {
           )}
           {tab === 'graph' && view.nodes.length > 0 && selected && (
             <Inspector
-              graphId={selectedGraphId}
+              graphId={found?.graph?.supabaseId}
               node={selected}
               nodes={view.nodes}
               edges={view.edges}
@@ -678,22 +583,22 @@ export default function Workspace() {
 
           {tab === 'documents' && (
             <DocumentsTab
-              docs={viewDocs} totals={t} topic={found?.topic || null}
+              docs={docs} totals={t} topic={found?.topic || null}
               library={library} queue={queue}
-              onFiles={(files) => enqueue(files, activeTopicId)}
+              onFiles={(files) => enqueue(files, library.activeGraphId)}
               onRemove={remove}
               readOnly={!viewingLatestVersion}
             />
           )}
 
-          {tab === 'notes' && <NotesPane graphId={selectedGraphId} readyDocs={readyDocs} />}
-          {tab === 'quiz' && <QuizPane graphId={selectedGraphId} onToast={setBusyToast} />}
+          {tab === 'notes' && <NotesPane graphId={found?.graph?.supabaseId} readyDocs={readyDocs} />}
+          {tab === 'quiz' && <QuizPane graphId={found?.graph?.supabaseId} onToast={setBusyToast} />}
         </section>
       </main>
 
-      {chatOpen && selectedGraphId && (
+      {chatOpen && library.activeGraphId && (
         <ChatPanel
-          graphId={selectedGraphId}
+          graphId={found?.graph?.supabaseId}
           onClose={() => setChatOpen(false)}
           onConceptClick={(conceptName) => {
             const node = view.nodes.find(
@@ -718,6 +623,28 @@ export default function Workspace() {
         onClearFinished={() => setQueue((q) => q.filter((i) => ACTIVE.includes(i.status)))}
       />
     </div>
+  )
+}
+
+function TopicSelect({ id, label, subjects = [], value, onChange }) {
+  return (
+    <>
+      {label}
+      <select
+        id={id}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+      >
+        <option value="">Unassigned</option>
+        {subjects.map((s) => (
+          <optgroup key={s.id} label={s.name}>
+            {(s.topics || []).map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </>
   )
 }
 
@@ -753,16 +680,14 @@ function DocumentsTab({ docs, totals, topic, library, queue, onFiles, onRemove, 
       <table className="doc-table">
         <thead>
           <tr>
-            <th>File</th><th>Status</th><th>Topic</th><th>Week</th>
+            <th>File</th><th>Status</th><th>Week</th>
             <th className="r">Concepts</th><th className="r">Links</th><th />
           </tr>
         </thead>
         <tbody>
           {docs.length === 0 ? (
-            <tr><td colSpan={7}><div className="empty">
-              {topic
-                ? 'No documents in this topic yet. Add some above, or move one here from All documents.'
-                : 'No documents yet. Add some above and StudyGraph will start reading them.'}
+            <tr><td colSpan={6}><div className="empty">
+              No documents yet. Add some above and StudyGraph will start reading them.
             </div></td></tr>
           ) : docs.map((d) => (
             <tr key={d.id}>
@@ -775,15 +700,6 @@ function DocumentsTab({ docs, totals, topic, library, queue, onFiles, onRemove, 
               </td>
               <td><span className={`pill ${statusClass(d.status)}`}>
                 <span className="pd" />{statusLabel(d.status)}</span></td>
-              <td>
-                <TopicSelect
-                  id={`doc-topic-${d.id}`}
-                  label={<span className="sr-only">Topic for {d.name || d.filename}</span>}
-                  subjects={library.subjects}
-                  value={library.topicOfDoc(d.id)}
-                  onChange={(topicId) => library.assignDocs([d.id], topicId)}
-                />
-              </td>
               <td className="mono">{d.week || '—'}</td>
               <td className="r mono">{d.nodes ?? d.concepts ?? 0}</td>
               <td className="r mono">{d.relationships ?? 0}</td>
