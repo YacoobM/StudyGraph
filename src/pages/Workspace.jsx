@@ -30,7 +30,7 @@ const extOf = (n) => (n.split('.').pop() || '').toLowerCase()
 
 function statusClass(s) {
   const v = (s || '').toLowerCase()
-  if (['done', 'ready', 'processed', 'complete', 'completed'].includes(v)) return 'ready'
+  if (['done', 'ready', 'processed', 'chunked', 'complete', 'completed'].includes(v)) return 'ready'
   if (['running', 'processing', 'extracting', 'building graph', 'seeding'].includes(v)) return 'working'
   if (['error', 'failed'].includes(v)) return 'failed'
   return 'queued'

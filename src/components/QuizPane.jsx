@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchQuiz, fetchNotes, saveQuizProgress, saveNoteQuizProgress,
+  fetchQuiz, fetchNotes, regenerateGraphQuiz, saveQuizProgress, saveNoteQuizProgress,
 } from "../services/api.js";
 import QuizRunner, { BackLink, QuizReview } from "./QuizRunner.jsx";
 import { displayName } from "../utils/documentTitle.js";
@@ -117,7 +117,8 @@ export default function QuizPane({ onToast, graphId }) {
       document_id: topic.id,
       quiz_id: topic.id,
       title: topic.name,
-      status: "ready",
+      status: topic.stale ? "stale" : (topic.status || "ready"),
+      stale: Boolean(topic.stale),
       week: `Version ${topic.day}`,
       topic,
       resume,
@@ -149,7 +150,7 @@ export default function QuizPane({ onToast, graphId }) {
   }, [refreshDocs, graphId]);
 
   const topics = useMemo(
-    () => docs.filter((d) => d.status === "ready" && d.topic)
+    () => docs.filter((d) => (d.status === "ready" || d.status === "stale") && d.topic && d.topic.questions?.length)
       .map((d) => ({ ...d.topic, name: d.title || displayName(d.topic.name), resume: d.resume })),
     [docs],
   );
@@ -246,6 +247,16 @@ export default function QuizPane({ onToast, graphId }) {
     // the notes list reads it back from the saved results.
     if (correct >= (r.need ?? total)) {
       onToast?.(r.kind === "section" ? "Section complete" : "Topic passed");
+    }
+  }
+
+  async function regenerateGraph() {
+    setError("");
+    try {
+      await regenerateGraphQuiz(graphId);
+      await refreshDocs();
+    } catch (e) {
+      setError(e.message || "Could not regenerate this quiz.");
     }
   }
 
@@ -465,7 +476,7 @@ export default function QuizPane({ onToast, graphId }) {
           stats={topicStats(d.quiz_id)}
           questions={d.topic ? questionsFor(d.topic) : []}
           filter={filter}
-          onGenerate={() => {}}
+          onGenerate={regenerateGraph}
           onStart={() => startTopic(topics.find((t) => t.id === d.quiz_id))}
         />
       ))}
@@ -474,7 +485,8 @@ export default function QuizPane({ onToast, graphId }) {
 }
 
 function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
-  const ready = doc.status === "ready" && doc.topic;
+  const stale = doc.status === "stale" || doc.topic?.stale;
+  const ready = (doc.status === "ready" || stale) && doc.topic;
   const failed = doc.status === "failed";
   const barPct = ready && stats.total ? Math.round((stats.correct / stats.total) * 100) : 0;
   const meta = [doc.week, doc.concepts ? `${doc.concepts} concepts` : null].filter(Boolean).join(" · ");
@@ -484,6 +496,8 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
     action = <div className="sub">Too few concepts for a quiz</div>;
   } else if (doc.status === "generating") {
     action = <button className="btn-start" disabled>Generating…</button>;
+  } else if (stale) {
+    action = <button className="btn-primary2" onClick={onGenerate}>Regenerate quiz</button>;
   } else if (ready) {
     action = (
       <button className={`btn-start ${stats.attempted ? "retry" : ""}`} onClick={onStart} disabled={!questions.length}>
@@ -498,7 +512,10 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
 
   let line;
   let sub;
-  if (ready) {
+  if (stale) {
+    line = `${questions.length} questions`;
+    sub = "This quiz belongs to an older graph version.";
+  } else if (ready) {
     line = `${questions.length} questions`;
     sub = stats.attempted
       ? `${stats.answered}/${stats.total} questions attempted · ${stats.line}`
@@ -517,7 +534,8 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
   return (
     <QuizCard
       title={doc.title || displayName(doc.filename)}
-      badge={stats.mastered ? "Mastered" : null}
+      badge={stale ? "Stale" : stats.mastered ? "Mastered" : null}
+      badgeTone={stale ? "stale" : ""}
       meta={meta}
       progress={ready ? barPct : null}
       line={line}
@@ -529,14 +547,14 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
 }
 
 /** One quiz in a list; document and section quizzes share it. */
-function QuizCard({ title, badge, meta, progress, line, sub, actions, tone = "" }) {
+function QuizCard({ title, badge, badgeTone = "", meta, progress, line, sub, actions, tone = "" }) {
   return (
     <div className={`qz-topic qz-card${tone ? ` ${tone}` : ""}`}>
       <div className="qz-topic-head">
         <div className="grow">
           <div className="qz-topic-name">
             {title}
-            {badge && <span className="qz-mastered">{badge}</span>}
+            {badge && <span className={`qz-mastered${badgeTone ? ` ${badgeTone}` : ""}`}>{badge}</span>}
           </div>
           {meta && <div className="qz-topic-desc">{meta}</div>}
         </div>

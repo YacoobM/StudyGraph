@@ -520,6 +520,13 @@ export async function fetchQuiz(graphId) {
   return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz`, { headers: await authHeaders() });
 }
 
+export async function regenerateGraphQuiz(graphId) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/regenerate`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}
+
 // Compatibility endpoint for the older per-document quiz view. The current
 // Supabase graph flow uses fetchQuiz(graphId), which loads or creates the
 // persisted quiz for the latest graph version.

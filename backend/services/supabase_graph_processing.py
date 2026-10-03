@@ -462,7 +462,27 @@ def _build_deleted_snapshot(snapshot: dict, active_support: dict, document_id: s
 		if document_id in [str(value) for value in (active_support.get("relationships") or {}).get(key, [])]:
 			continue
 		relationships.append(relationship)
-	return {"concepts": concepts, "relationships": relationships}, {"concepts": concept_support, "relationships": relationship_support}
+	concept_ids = {str(concept["id"]) for concept in concepts}
+	relationship_ids = {str(relationship["id"]) for relationship in relationships}
+	deleted_id = str(document_id)
+	concept_provenance = [
+		{key: value for key, value in row.items() if key not in {"id", "graph_version_id"}}
+		for row in (snapshot.get("concept_provenance") or [])
+		if str(row.get("document_id")) != deleted_id
+		and str(row.get("concept_id")) in concept_ids
+	]
+	relationship_provenance = [
+		{key: value for key, value in row.items() if key not in {"id", "graph_version_id"}}
+		for row in (snapshot.get("relationship_provenance") or [])
+		if str(row.get("document_id")) != deleted_id
+		and str(row.get("relationship_id")) in relationship_ids
+	]
+	return {
+		"concepts": concepts,
+		"relationships": relationships,
+		"concept_provenance": concept_provenance,
+		"relationship_provenance": relationship_provenance,
+	}, {"concepts": concept_support, "relationships": relationship_support}
 
 
 async def delete_graph_document_and_create_version(

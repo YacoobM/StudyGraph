@@ -45,7 +45,9 @@ function toNote(raw) {
     id: raw.id,
     title: raw.title,
     kind: raw.kind,
+    status: raw.status || "current",
     days: raw.days,
+    documentIds: raw.document_ids || [],
     docCount: (raw.documents || []).length,
     created: createdLabel(raw.created_at),
     total: raw.total,
@@ -206,6 +208,13 @@ export async function createNote(graphId, { docs, split, days }) {
   if (!ids.length) return null
 
   const { note } = await planNote(graphId, ids, split ? days : null);
+  // Regeneration replaces the sections under the same note id. Clear the
+  // client-side completion cache so the new sections start at 0% progress.
+  const noteId = String(note.id);
+  const prefix = `${noteId}:`;
+  for (const key of completion.keys()) {
+    if (key.startsWith(prefix)) completion.delete(key);
+  }
   const adapted = toNote(note);
   seen.set(adapted.id, adapted);
   return adapted.id;

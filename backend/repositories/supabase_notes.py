@@ -169,7 +169,7 @@ async def plan_graph_note(identity: SupabaseIdentity, graph_id: str, document_id
     if not selected or not selected.issubset(documents):
         raise ValueError("Select documents belonging to this graph.")
     names_by_id = {str(row["id"]): row["name"] for row in loaded["concepts"]}
-    provenance = request_table(identity, "concept_provenance", f"?select=concept_id,document_id,source_week&graph_version_id=eq.{version['id']}")
+    provenance = loaded.get("concept_provenance") or []
     concepts = []
     seen = set()
     for row in provenance:

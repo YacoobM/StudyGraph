@@ -1593,6 +1593,10 @@ a {
   border-radius: 100px;
   margin-left: 8px;
 }
+.qz-mastered.stale {
+  color: var(--orange, #c6532d);
+  background: #f7e8df;
+}
 .qz-list {
   border-top: 1px solid var(--line);
 }
@@ -2429,6 +2433,18 @@ a {
   flex: 1;
   min-width: 0;
 }
+.nt-card-open {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nt-card-regenerate {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .nt-card-top {
   display: flex;
   align-items: center;
@@ -2450,6 +2466,10 @@ a {
 .nt-tag.full {
   background: var(--cream);
   color: var(--ink-soft);
+}
+.nt-tag.stale {
+  background: #f7e3d4;
+  color: #b6532d;
 }
 .nt-card-date {
   font-size: 11.5px;

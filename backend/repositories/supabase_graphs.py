@@ -164,12 +164,16 @@ def load_graph_version(
 		"?select=id,graph_version_id,concept_id,document_id,document_filename,chunk_id,source_name,source_excerpt,page_start,page_end,source_week,created_at"
 		f"&graph_version_id=eq.{version_id}&order=created_at.asc,id.asc",
 	)
+	if not concept_provenance:
+		concept_provenance = snapshot.get("concept_provenance") or []
 	relationship_provenance = request_table(
 		identity,
 		"relationship_provenance",
 		"?select=id,graph_version_id,relationship_id,document_id,document_filename,chunk_id,source_from,source_to,source_relationship_type,summary,context,source_week,created_at"
 		f"&graph_version_id=eq.{version_id}&order=created_at.asc,id.asc",
 	)
+	if not relationship_provenance:
+		relationship_provenance = snapshot.get("relationship_provenance") or []
 	return {
 		"version": version,
 		"concepts": snapshot.get("concepts") or [],
@@ -187,16 +191,15 @@ async def get_graph_concept_evolution(identity: SupabaseIdentity, graph_id: str,
 		return {"comparison": f"{concept_name} appears across 0 graph version(s).", "weeks_data": [], "consecutive_comparisons": []}
 	version = versions[0]
 	version_id = str(version["id"])
-	concepts = request_table(identity, "concepts", f"?select=id,name,normalized_name&graph_version_id=eq.{version_id}")
-	concept = next((row for row in concepts if normalize_concept(row.get("normalized_name") or row.get("name", "")) == target), None)
+	loaded = load_graph_version(identity, graph_id, version_id)
+	concept = next((row for row in loaded["concepts"] if normalize_concept(row.get("normalized_name") or row.get("name", "")) == target), None)
 	if not concept:
 		return {"comparison": f"{concept_name} appears across 0 graph version(s).", "weeks_data": [], "consecutive_comparisons": []}
-	rows = request_table(
-		identity, "concept_provenance",
-		"?select=document_id,document_filename,source_name,source_week,chunk_id"
-		f"&graph_version_id=eq.{version_id}&concept_id=eq.{concept['id']}"
-		"&order=source_week.asc,document_filename.asc,id.asc",
-	)
+	rows = [
+		row for row in loaded["concept_provenance"]
+		if str(row.get("concept_id")) == str(concept["id"])
+	]
+	rows.sort(key=lambda row: (int(row.get("source_week") or version["version_number"]), row.get("document_filename") or "", str(row.get("id") or "")))
 	chunk_by_id = {}
 	chunk_by_document = {}
 	for row in rows:
