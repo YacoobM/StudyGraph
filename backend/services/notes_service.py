@@ -20,7 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import OUTPUT_DIR
-from repositories.database import connect
 from services import evolution_data, key_sentences
 
 router = APIRouter(tags=["notes"])
@@ -1102,20 +1101,6 @@ async def measure_coverage(picks: list[str], body: dict) -> Optional[dict]:
     }
 
 
-def _document_order(user_id: int, document_ids: list[int]) -> list[str]:
-    """The note's filenames in teaching order: by week, then by filename read
-    naturally, so Lecture 5 comes before Lecture 6 and Lecture 10."""
-    unique = list(dict.fromkeys(document_ids))
-    placeholders = ",".join("?" for _ in unique)
-    with connect() as conn:
-        rows = conn.execute(
-            f"SELECT filename, week FROM documents WHERE user_id = ? AND id IN ({placeholders})",
-            (user_id, *unique),
-        ).fetchall()
-    rows = sorted(rows, key=lambda r: (_week_number(r["week"]), _natural_key(r["filename"])))
-    return list(dict.fromkeys(r["filename"] for r in rows))
-
-
 def build_note(user_id, title, document_ids, filenames, sections,
                sources_by_concept, edges, days):
     """Assembles the note and its sections; bodies stay empty until written."""
@@ -1160,27 +1145,6 @@ def build_note(user_id, title, document_ids, filenames, sections,
         "created_at": time.time(),
         "sections": rows,
     }
-
-
-def _resolve_documents(user_id: int, document_ids: list[int]) -> dict[int, str]:
-    """Document ids to filenames for the signed-in user; the engine keys concepts by filename."""
-    unique = list(dict.fromkeys(document_ids))
-    placeholders = ",".join("?" for _ in unique)
-    with connect() as conn:
-        rows = conn.execute(
-            f"SELECT id, filename FROM documents WHERE user_id = ? AND id IN ({placeholders})",
-            (user_id, *unique),
-        ).fetchall()
-
-    found = {r["id"]: r["filename"] for r in rows}
-    missing = [i for i in unique if i not in found]
-    if missing:
-        listed = ", ".join(str(i) for i in missing)
-        raise HTTPException(
-            status_code=404,
-            detail=f"Not in your library: document {listed}.",
-        )
-    return found
 
 
 def _title_for(filenames: list[str]) -> str:

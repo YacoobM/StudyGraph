@@ -20,7 +20,6 @@ from pydantic import BaseModel
 from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, LLM_API_KEY_ENV,
                         NON_RAG_REASONING_EFFORT, OUTPUT_DIR)
 from models.quiz_models import QuizAttempt
-from repositories.database import connect
 from services.llm_gateway import estimate_tokens, limiter
 
 router = APIRouter(tags=["quiz"])
@@ -409,17 +408,6 @@ async def _generate_topic(topic_id: str, week: str, members: list[dict],
         _TOPIC_CACHE[topic_id] = {"fingerprint": fingerprint, "topic": topic}
     finally:
         _GENERATING.discard(topic_id)
-
-
-def _user_documents(user_id) -> list:
-    """The user's document rows, oldest week first. A seam for tests."""
-    with connect() as conn:
-        rows = conn.execute(
-            "SELECT id, filename, week, status FROM documents WHERE user_id = ? "
-            "ORDER BY uploaded_at", (user_id,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
 
 # A title line: a short run of words, not a page number, URL, date or copyright notice.
 _TITLE_MAX_CHARS = 90
