@@ -74,12 +74,7 @@ function Actions({ items }) {
   )
 }
 
-export default function SubjectSidebar(props) {
-  if (props.graphItems) return <GraphSidebar {...props} />
-  return <LibrarySubjectSidebar {...props} />
-}
-
-function LibrarySubjectSidebar({
+export default function SubjectSidebar({
   library, docs, open, onClose, onHome, user, onSignOut,
 }) {
   const {
@@ -274,84 +269,6 @@ function LibrarySubjectSidebar({
             <div className="su-text">
               <div className="su-name">{user?.name || user?.user_metadata?.full_name || 'Signed in'}</div>
               <div className="su-mail">{user?.email || ''}</div>
-            </div>
-          </div>
-          <button type="button" className="side-signout" onClick={onSignOut}>Sign out</button>
-        </div>
-      </aside>
-    </>
-  )
-}
-
-// Supabase-backed workspace variant. The graph UUID is kept as the value all
-// the way through onSelectGraph; this presentation layer never creates a
-// browser-only graph ID.
-function GraphSidebar({
-  graphItems = [], selectedGraphId = "", docs = [], open, onClose, onHome,
-  user, onSignOut, onSelectGraph, onNewGraph, creatingGraph, graphName, onGraphNameChange,
-  onCreateGraph, onCancelCreate, busy,
-}) {
-  return (
-    <>
-      <div className={`ws-side-backdrop${open ? " on" : ""}`} onClick={onClose} aria-hidden="true" />
-      <aside className={`ws-side${open ? " open" : ""}`} aria-label="Subjects and graphs">
-        <button type="button" className="side-brand" onClick={onHome}>StudyGraph</button>
-        <button type="button" className="side-new" onClick={onNewGraph}>
-          <Icon d={I.plus} /> New graph
-        </button>
-
-        {creatingGraph && (
-          <form className="graph-create" onSubmit={onCreateGraph}>
-            <input
-              autoFocus
-              aria-label="Graph name"
-              placeholder="Graph name"
-              value={graphName}
-              onChange={(event) => onGraphNameChange(event.target.value)}
-            />
-            <div>
-              <button type="button" className="row-btn" onClick={onCancelCreate}>Cancel</button>
-              <button type="submit" className="row-btn graph-create-submit"
-                disabled={!graphName.trim() || Boolean(busy)}>Create</button>
-            </div>
-          </form>
-        )}
-
-        <button type="button" className={`side-all${selectedGraphId ? "" : " on"}`}
-          aria-current={selectedGraphId ? undefined : "page"} onClick={() => { onSelectGraph(""); onClose?.() }}>
-          <Icon d={I.all} />
-          <span className="st-name">All graphs</span>
-          <span className="st-count">{docs.length}</span>
-        </button>
-
-        <div className="side-sec">Your graphs</div>
-        <nav className="side-tree">
-          {graphItems.length === 0 ? (
-            <p className="side-hint">Create a graph to start organising your study sources.</p>
-          ) : (
-            <ul className="st-list">
-              {graphItems.map((graph) => (
-                <li key={graph.id}>
-                  <div className={`st-row st-row-graph${String(selectedGraphId) === String(graph.id) ? " on" : ""}`}>
-                    <button type="button" className="st-main"
-                      aria-current={String(selectedGraphId) === String(graph.id) ? "page" : undefined}
-                      onClick={() => { onSelectGraph(graph.id); onClose?.() }}>
-                      <Icon d={I.graph} size={13} />
-                      <span className="st-name" title={graph.name}>{graph.name}</span>
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </nav>
-
-        <div className="side-foot">
-          <div className="side-user">
-            <div className="su-avatar">{(user?.name || user?.email || "··").slice(0, 2).toUpperCase()}</div>
-            <div className="su-text">
-              <div className="su-name">{user?.name || "Signed in"}</div>
-              <div className="su-mail">{user?.email || ""}</div>
             </div>
           </div>
           <button type="button" className="side-signout" onClick={onSignOut}>Sign out</button>

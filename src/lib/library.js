@@ -7,33 +7,26 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * is a set of uploaded documents. Opening a graph shows the concepts that came
  * from its documents.
  *
- * The backend has no notion of subjects, topics or separate graphs — a
- * document row is just a file, a status and a week, and /api/graph returns one
- * combined graph. So this grouping lives in the browser, keyed per signed-in
- * user, and only ever stores backend document ids. Nothing here is sent to
- * the server, and deleting a subject, topic or graph never deletes a document.
+ * Graphs are created lazily: a graph entry exists locally (with name and docIds)
+ * until the first document is uploaded, at which point a Supabase graph is
+ * created and the local id is replaced with the backend uuid.
+ *
+ * This grouping lives in the browser and only stores backend document ids and
+ * graph uuids. Deleting a subject, topic or graph never deletes documents or
+ * backend graphs — those are orphaned but still there.
  *
  * Shape:
  *   { subjects: [{ id, name, open,
  *       topics: [{ id, name, open,
- *         graphs: [{ id, name, docIds: [] }] }] }],
+ *         graphs: [{ id, name, docIds: [], supabaseId?: uuid }] }] }],
  *     activeGraphId: string | null }        null = "All documents"
- *
- * Trade-off: because it is browser-local, the grouping does not follow the
- * user to another browser or device. Moving it server-side later only means
- * swapping read()/write() for API calls — the hook's surface can stay.
  */
 
 const EMPTY = { subjects: [], activeGraphId: null }
-const keyFor = (userKey) => `studygraph.library.v1:${userKey || 'anon'}`
+const keyFor = (userKey) => `studygraph.library.v2:${userKey || 'anon'}`
 const newId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 const sameId = (a, b) => String(a) === String(b)
 
-/**
- * Reads the saved library. The first version of this panel stored documents
- * directly on a topic (topic.docIds, activeTopicId); those are carried over
- * into a first graph inside the same topic so nothing a user organised is lost.
- */
 function read(key) {
   try {
     const raw = window.localStorage.getItem(key)
@@ -49,12 +42,14 @@ function read(key) {
       topics: (s.topics || []).map((t) => {
         let graphs = Array.isArray(t.graphs)
           ? t.graphs.map((g) => ({
-            id: String(g.id), name: String(g.name || 'Untitled graph'),
+            id: String(g.id),
+            name: String(g.name || 'Untitled graph'),
             docIds: Array.isArray(g.docIds) ? g.docIds : [],
+            supabaseId: g.supabaseId ? String(g.supabaseId) : undefined,
           }))
           : []
+        // Migration: old shape had docIds on the topic itself
         if (!Array.isArray(t.graphs)) {
-          // old shape: the topic itself held the documents
           const gid = `${t.id}_g1`
           graphs = [{ id: gid, name: 'Graph 1', docIds: Array.isArray(t.docIds) ? t.docIds : [] }]
           if (!activeGraphId && data.activeTopicId && String(data.activeTopicId) === String(t.id)) {
@@ -103,10 +98,13 @@ export function useLibrary(userKey) {
     setLib((l) => ({ ...l, subjects: [...l.subjects, { id, name, open: true, topics: [] }] }))
     return id
   }, [])
+
   const renameSubject = useCallback((id, name) =>
     setLib(mapSubjects((s) => (s.id === id ? { ...s, name } : s))), [])
+
   const toggleSubject = useCallback((id, open) =>
     setLib(mapSubjects((s) => (s.id === id ? { ...s, open: open ?? !s.open } : s))), [])
+
   const deleteSubject = useCallback((id) => setLib((l) => {
     const gone = graphIdsOf(l.subjects, (s) => s.id === id)
     return {
@@ -123,10 +121,13 @@ export function useLibrary(userKey) {
       : s)))
     return id
   }, [])
+
   const renameTopic = useCallback((id, name) =>
     setLib(mapTopics((t) => (t.id === id ? { ...t, name } : t))), [])
+
   const toggleTopic = useCallback((id, open) =>
     setLib(mapTopics((t) => (t.id === id ? { ...t, open: open ?? !t.open } : t))), [])
+
   const deleteTopic = useCallback((id) => setLib((l) => {
     const gone = graphIdsOf(l.subjects, (_s, t) => t.id === id)
     return {
@@ -136,7 +137,10 @@ export function useLibrary(userKey) {
   }), [])
 
   // --- graphs ---
-  /** Adds a graph to a topic and opens it. */
+  /**
+   * Adds a graph to a topic locally. The graph is not created on Supabase
+   * until the first document is uploaded to it. Returns the local graph id.
+   */
   const addGraph = useCallback((topicId, name) => {
     const id = newId('gr')
     setLib((l) => ({
@@ -147,8 +151,10 @@ export function useLibrary(userKey) {
     }))
     return id
   }, [])
+
   const renameGraph = useCallback((id, name) =>
     setLib(mapGraphs((g) => (g.id === id ? { ...g, name } : g))), [])
+
   const deleteGraph = useCallback((id) => setLib((l) => ({
     subjects: l.subjects.map((s) => ({
       ...s, topics: s.topics.map((t) => ({ ...t, graphs: t.graphs.filter((g) => g.id !== id) })),
@@ -158,7 +164,11 @@ export function useLibrary(userKey) {
 
   const setActiveGraph = useCallback((id) => setLib((l) => ({ ...l, activeGraphId: id || null })), [])
 
-  /** A document sits in at most one graph; graphId null takes it out of all. */
+  /**
+   * A document sits in at most one graph; graphId null takes it out of all.
+   * If the graph has a supabaseId, document ids are backend uuids. If not,
+   * they are whatever was passed in (used during upload before the graph exists).
+   */
   const assignDocs = useCallback((docIds, graphId) => setLib(mapGraphs((g) => {
     const kept = g.docIds.filter((d) => !docIds.some((x) => sameId(x, d)))
     return g.id === graphId ? { ...g, docIds: [...kept, ...docIds] } : { ...g, docIds: kept }
@@ -174,6 +184,16 @@ export function useLibrary(userKey) {
     return null
   }, [lib])
 
+  const findGraphBySupabaseId = useCallback((supabaseId) => {
+    for (const subject of lib.subjects) {
+      for (const topic of subject.topics) {
+        const graph = topic.graphs.find((g) => g.supabaseId === String(supabaseId))
+        if (graph) return { subject, topic, graph }
+      }
+    }
+    return null
+  }, [lib])
+
   const graphOfDoc = useCallback((docId) => {
     for (const s of lib.subjects) {
       for (const t of s.topics) {
@@ -183,12 +203,38 @@ export function useLibrary(userKey) {
     return null
   }, [lib])
 
+  /**
+   * Replaces a local graph id with its Supabase uuid after the graph is
+   * created on the backend. Called from Workspace after createSupabaseGraph.
+   */
+  const promoteGraphToSupabase = useCallback((localGraphId, supabaseId) => {
+    setLib(mapGraphs((g) => {
+      if (g.id === localGraphId) {
+        return { ...g, id: String(supabaseId), supabaseId: String(supabaseId) }
+      }
+      return g
+    }))
+  }, [])
+
+  const topicOfDoc = useCallback((docId) => {
+    for (const s of lib.subjects) {
+      for (const t of s.topics) {
+        for (const g of t.graphs) {
+          if (g.docIds.some((d) => sameId(d, docId))) return t.id
+        }
+      }
+    }
+    return null
+  }, [lib])
+
   return {
     subjects: lib.subjects,
     activeGraphId: lib.activeGraphId,
+    activeTopicId: null,
     addSubject, renameSubject, toggleSubject, deleteSubject,
     addTopic, renameTopic, toggleTopic, deleteTopic,
     addGraph, renameGraph, deleteGraph,
-    setActiveGraph, assignDocs, findGraph, graphOfDoc,
+    setActiveGraph, assignDocs, findGraph, findGraphBySupabaseId, graphOfDoc, topicOfDoc,
+    promoteGraphToSupabase,
   }
 }
