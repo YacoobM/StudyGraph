@@ -204,13 +204,14 @@ export function useLibrary(userKey) {
   }, [lib])
 
   /**
-   * Replaces a local graph id with its Supabase uuid after the graph is
-   * created on the backend. Called from Workspace after createSupabaseGraph.
+   * Associates the local graph with its Supabase UUID after the graph is
+   * created on the backend. The local id stays stable because activeGraphId,
+   * queued uploads, and sidebar references use it.
    */
   const promoteGraphToSupabase = useCallback((localGraphId, supabaseId) => {
     setLib(mapGraphs((g) => {
       if (g.id === localGraphId) {
-        return { ...g, id: String(supabaseId), supabaseId: String(supabaseId) }
+        return { ...g, supabaseId: String(supabaseId) }
       }
       return g
     }))
