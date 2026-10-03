@@ -50,23 +50,51 @@ async def refresh_degraded_concept_definitions(identity: SupabaseIdentity, graph
 			updated_names.append(concept.get("name", ""))
 
 	if updated_names:
-		version_id = str(latest["version"]["id"])
+		new_version_number = int(latest["version"].get("version_number") or 0) + 1
+		rows = request_table(
+			identity,
+			"graph_versions",
+			"?select=id,graph_id,version_number,created_at,is_sealed,snapshot",
+			method="POST",
+			payload={
+				"graph_id": graph_id,
+				"version_number": new_version_number,
+				"is_sealed": False,
+				"snapshot": {
+					"concepts": latest["concepts"],
+					"relationships": latest["relationships"],
+					"concept_provenance": latest.get("concept_provenance") or [],
+					"relationship_provenance": latest.get("relationship_provenance") or [],
+				},
+			},
+			prefer="return=representation",
+		)
+		if len(rows) != 1:
+			raise HTTPException(status_code=502, detail="Supabase did not create the refreshed graph version.")
+		version_id = str(rows[0]["id"])
 		request_table(
 			identity,
 			"graph_versions",
-			f"?id=eq.{version_id}",
+			f"?id=eq.{version_id}&is_sealed=eq.false",
 			method="PATCH",
-			payload={"snapshot": {"concepts": latest["concepts"], "relationships": latest["relationships"]}},
+			payload={"is_sealed": True},
 			prefer="return=minimal",
 		)
-		for concept in degraded:
-			if concept.get("name") in updated_names:
-				request_table(
-					identity,
-					"concepts",
-					f"?graph_version_id=eq.{version_id}&id=eq.{concept['id']}",
-					method="PATCH",
-					payload={"status": "active"},
-					prefer="return=minimal",
-				)
-	return {"updated": len(updated_names), "concepts": updated_names}
+		# Read back the saved snapshot. Do not report success based only on the
+		# in-memory object. The old sealed version remains immutable by design;
+		# the refreshed version must be the one the UI serves.
+		saved = load_graph_version(identity, graph_id, version_id)
+		remaining = [
+			concept.get("name", "")
+			for concept in saved["concepts"]
+			if concept.get("status") == "needs_regeneration"
+		]
+		if remaining:
+			raise HTTPException(
+				status_code=502,
+				detail=(
+					"Supabase did not persist all refreshed concept definitions. "
+					f"Still degraded: {', '.join(remaining)}"
+				),
+			)
+	return {"updated": len(updated_names), "concepts": updated_names, "remaining": [], "version_id": version_id if updated_names else None}

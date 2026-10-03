@@ -155,9 +155,10 @@ export async function getGraphActiveSupport(graphId) {
 
 export async function fetchGraphVersion(graphId, versionId) {
   return apiFetch(
-    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/versions/${encodeURIComponent(versionId)}`,
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/versions/${encodeURIComponent(versionId)}?refresh=${Date.now()}`,
     {
       headers: await authHeaders(),
+      cache: "no-store",
     },
   );
 }
