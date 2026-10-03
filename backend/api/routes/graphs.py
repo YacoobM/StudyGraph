@@ -17,11 +17,21 @@ from repositories.supabase_graphs import (
 	list_graphs,
 	load_graph_version,
 )
+from repositories.supabase_library import (
+	create_subject,
+	create_topic,
+	delete_subject,
+	delete_topic,
+	list_library,
+	update_subject,
+	update_topic,
+)
 from repositories.users import SupabaseIdentity, current_supabase_identity
 from services.chunking import build_document_chunks
 from services.document_service import extract_text
 from services.embeddings import encode_texts
 from schemas.graph import GraphCreateRequest, GraphVersionCreateRequest
+from pydantic import BaseModel, field_validator
 from schemas.query import GraphQueryRequest
 from app import state as runtime_state
 from services.supabase_graph_processing import create_graph_version_from_batch
@@ -38,6 +48,57 @@ MAX_GRAPH_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_GRAPH_SUFFIXES = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
 
+class LibraryNameRequest(BaseModel):
+	name: str
+
+	@field_validator("name")
+	@classmethod
+	def normalize_name(cls, name: str) -> str:
+		name = name.strip()
+		if not name:
+			raise ValueError("Name cannot be empty.")
+		return name
+
+
+class TopicCreateRequest(LibraryNameRequest):
+	subject_id: UUID
+
+
+@router.get("/api/library")
+def get_library(identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"subjects": list_library(identity)}
+
+
+@router.post("/api/subjects", status_code=201)
+def post_subject(body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"subject": create_subject(identity, body.name)}
+
+
+@router.patch("/api/subjects/{subject_id}")
+def patch_subject(subject_id: UUID, body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"subject": update_subject(identity, str(subject_id), body.name)}
+
+
+@router.delete("/api/subjects/{subject_id}", status_code=204)
+def remove_subject(subject_id: UUID, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	delete_subject(identity, str(subject_id))
+
+
+@router.post("/api/topics", status_code=201)
+def post_topic(body: TopicCreateRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"topic": create_topic(identity, str(body.subject_id), body.name)}
+
+
+@router.patch("/api/topics/{topic_id}")
+def patch_topic(topic_id: UUID, body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"topic": update_topic(identity, str(topic_id), body.name)}
+
+
+@router.delete("/api/topics/{topic_id}", status_code=204)
+def remove_topic(topic_id: UUID, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	delete_topic(identity, str(topic_id))
+
+
 @router.get("/api/graphs")
 def get_graphs(identity: SupabaseIdentity = Depends(current_supabase_identity)):
 	return {"graphs": list_graphs(identity)}
@@ -48,7 +109,7 @@ def post_graph(
 	body: GraphCreateRequest,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
-	return {"graph": create_graph(identity, body.name)}
+	return {"graph": create_graph(identity, body.name, body.topic_id)}
 
 
 @router.get("/api/graphs/{graph_id}/versions")

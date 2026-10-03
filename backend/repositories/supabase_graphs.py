@@ -95,17 +95,23 @@ def list_graphs(identity: SupabaseIdentity) -> list[dict]:
 	return request_table(
 		identity,
 		"graphs",
-		"?select=id,name,created_at,updated_at&order=created_at.desc,id.desc",
+		"?select=id,topic_id,name,created_at,updated_at&order=created_at.desc,id.desc",
 	)
 
 
-def create_graph(identity: SupabaseIdentity, name: str) -> dict:
+def create_graph(identity: SupabaseIdentity, name: str, topic_id: str | None = None) -> dict:
+	payload = {"user_id": identity.auth_user_id, "name": name}
+	if topic_id:
+		owned_topic = request_table(identity, "topics", f"?select=id&id=eq.{topic_id}")
+		if not owned_topic:
+			raise HTTPException(status_code=404, detail="Topic not found.")
+		payload["topic_id"] = topic_id
 	rows = request_table(
 		identity,
 		"graphs",
-		"?select=id,name,created_at,updated_at",
+		"?select=id,topic_id,name,created_at,updated_at",
 		method="POST",
-		payload={"user_id": identity.auth_user_id, "name": name},
+		payload=payload,
 		prefer="return=representation",
 	)
 	if len(rows) != 1:
