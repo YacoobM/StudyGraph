@@ -73,16 +73,26 @@ export function useLibrary(userKey) {
   const storageKey = keyFor(userKey)
   const [lib, setLib] = useState(() => read(storageKey))
   const loadedFor = useRef(storageKey)
+  const skipWriteFor = useRef(null)
 
   // The signed-in user can arrive after first render; reload for the new key.
   useEffect(() => {
     if (loadedFor.current === storageKey) return
     loadedFor.current = storageKey
+    // Do not persist the previous user's in-memory state under this new key.
+    // The write effect runs for the same render as this reload effect and
+    // otherwise can copy User A's library into User B's localStorage entry.
+    skipWriteFor.current = storageKey
     setLib(read(storageKey))
   }, [storageKey])
 
   useEffect(() => {
-    if (loadedFor.current === storageKey) write(storageKey, lib)
+    if (loadedFor.current !== storageKey) return
+    if (skipWriteFor.current === storageKey) {
+      skipWriteFor.current = null
+      return
+    }
+    write(storageKey, lib)
   }, [lib, storageKey])
 
   // --- small immutable-update helpers ---
