@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { askGraphQuestion, askQuestion } from "../services/api";
+import { useEffect, useRef, useState } from "react";
+import { askGraphQuestion } from "../services/api";
 import "./ChatPanel.css";
 import { ArrowUp } from "lucide-react";
 
@@ -175,11 +175,7 @@ export default function ChatPanel({
     setInput("");
     setBusy(true);
     try {
-      // Workspace chat must stay scoped to the selected persisted graph. Keep
-      // the legacy endpoint for Builder's standalone chat, which has no graph.
-      const data = graphId
-        ? await askGraphQuestion(graphId, q)
-        : await askQuestion(q);
+      const data = await askGraphQuestion(graphId, q)
       console.log('API response:', data);
       setMessages((m) => [
         ...m,

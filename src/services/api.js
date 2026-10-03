@@ -25,42 +25,6 @@ async function safeFetchJson(url, options = {}) {
   return handleResponse(response);
 }
 
-// Backend starts extraction as a background task when /api/documents creates
-// the document row. This polls the single status slot until that work reports
-// done/error.
-export async function getPipelineStatus() {
-  return safeFetchJson(`${API_BASE_URL}/api/upload/status`);
-}
-
-export async function retryFailedUploadBatches() {
-  return safeFetchJson(`${API_BASE_URL}/api/upload/retry-failed`, {
-    method: "POST",
-  });
-}
-
-async function pollUntilDone(
-  pollFn,
-  { intervalMs = 1500, timeoutMs = 10 * 60 * 1000 } = {},
-) {
-  const start = Date.now();
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const status = await pollFn();
-    if (["done", "error", "partially_processed"].includes(status.stage))
-      return status;
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(
-        "Timed out waiting for the backend to finish processing.",
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
-
-export async function fetchGraph() {
-  return safeFetchJson(`${API_BASE_URL}/api/graph`, { method: "GET" });
-}
-
 export async function listGraphs() {
   return apiFetch(`${API_BASE_URL}/api/graphs`, {
     headers: await authHeaders(),
@@ -157,112 +121,6 @@ export async function askGraphQuestion(graphId, question) {
   );
 }
 
-export async function regenerateGraph() {
-  return safeFetchJson(`${API_BASE_URL}/api/graph/regenerate`, {
-    method: "POST",
-  });
-}
-
-export function getDocumentFileUrl(filename) {
-  return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`;
-}
-
-export async function regenerateConcept(conceptName) {
-  return safeFetchJson(
-    `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`,
-    {
-      method: "POST",
-    },
-  );
-}
-
-function buildGraphPayload(raw) {
-  if (!raw) return { nodes: [], relationships: [], stats: {} };
-
-  const nodes = Array.isArray(raw.nodes)
-    ? raw.nodes.map((node) => {
-        const {
-          id,
-          name,
-          description,
-          source,
-          is_canonical,
-          color,
-          appears_in_weeks,
-          ...rest
-        } = node;
-        return {
-          id,
-          label: name || "Concept",
-          // Use the color from the backend, with a fallback for older data structures.
-          color: color || (is_canonical ? "#4D7C0F" : "#6D28D9"),
-          properties: {
-            ...rest,
-            ...(name ? { name } : {}),
-            ...(description ? { description } : {}),
-            ...(source ? { source } : {}),
-            ...(appears_in_weeks !== undefined ? { appears_in_weeks } : {}),
-          },
-        };
-      })
-    : [];
-
-  const relationshipsSource = raw.edges || raw.relationships || [];
-  const relationships = Array.isArray(relationshipsSource)
-    ? relationshipsSource.map((rel) => {
-        const {
-          id,
-          source,
-          target,
-          relation,
-          label,
-          summary,
-          context,
-          ...rest
-        } = rel;
-        return {
-          id: id || `${source}_${target}`,
-          source,
-          target,
-          type: relation || label || "RELATED_TO",
-          properties: {
-            ...rest,
-            ...(summary ? { summary } : {}),
-            ...(context ? { context } : {}),
-          },
-        };
-      })
-    : [];
-
-  const stats = raw.stats || {
-    total_nodes: nodes.length,
-    total_relationships: relationships.length,
-  };
-
-  return {
-    nodes,
-    relationships,
-    stats,
-    is_fused: !!raw.is_fused,
-    status: raw.status || "active",
-  };
-}
-
-export async function getGraph() {
-  const rawGraph = await safeFetchJson(`${API_BASE_URL}/api/graph`);
-  return buildGraphPayload(rawGraph);
-}
-
-export async function askQuestion(question) {
-  const response = await safeFetchJson(`${API_BASE_URL}/api/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: question }),
-  })
-  console.log(response)
-  return response
-}
-
 // Cheap tier: one grounded summary from the concept's earliest-appearance
 // week only. Use this for a plain node click — it's what backs the
 // "DESCRIPTION" text in both the general graph and the Evolution graph.
@@ -296,10 +154,6 @@ export async function fetchConceptSubgraph(conceptName) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// token plumbing
-// ---------------------------------------------------------------------------
-
 // Supabase owns token storage and refreshes expired sessions for us.
 async function authHeaders(extra = {}) {
   const {
@@ -320,7 +174,7 @@ async function apiFetch(url, options = {}) {
     // already running.
     if (e?.name === "AbortError") throw e;
     const err = new Error(
-      `Cannot reach the backend at ${API_BASE_URL}. Start it with: python dev_server.py`,
+      `Cannot reach the backend at ${API_BASE_URL}. Make sure the backend is running!`,
     );
     err.offline = true;
     throw err;
@@ -329,214 +183,73 @@ async function apiFetch(url, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// auth
-// ---------------------------------------------------------------------------
-
-export async function login(email, password) {
-  return apiFetch(`${API_BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-}
-
-export async function register(email, password, name) {
-  return apiFetch(`${API_BASE_URL}/api/auth/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, name: name || "" }),
-  });
-}
-
-export async function logout() {
-  try {
-    return await apiFetch(`${API_BASE_URL}/api/auth/logout`, {
-      method: "POST",
-      headers: await authHeaders(),
-    });
-  } catch {
-    return { ok: true }; // the local token is cleared regardless
-  }
-}
-
-/** Confirms a restored token is still valid. Throws 401 if it isn't. */
-export async function me() {
-  return apiFetch(`${API_BASE_URL}/api/auth/me`, {
-    headers: await authHeaders(),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// row shape
-// ---------------------------------------------------------------------------
-
-
-function toRow(doc) {
-  const ext = (doc.filename?.split(".").pop() || "").toUpperCase();
-  const label =
-    {
-      done: "Processed",
-      ready: "Processed",
-      partially_processed: "Partially processed",
-      error: "Failed",
-      queued: "Queued",
-      running: "Processing",
-    }[(doc.status || "").toLowerCase()] || "Uploaded";
-
-  return {
-    ...doc,
-    name: doc.filename,
-    type: ext,
-    size: doc.size_kb,
-    status: doc.status === "done" ? "Ready" : doc.status || "New",
-    upload_status: label,
-    nodes: doc.concepts ?? 0,
-    relationships: doc.relationships ?? 0,
-    source: doc.week || "upload",
-    model: "openai/gpt-oss-120b",
-  };
-}
-
-// ---------------------------------------------------------------------------
-// documents
-// ---------------------------------------------------------------------------
-
-export async function listDocuments() {
-  const data = await apiFetch(`${API_BASE_URL}/api/documents`, {
-    headers: await authHeaders(),
-  });
-  return { ...data, documents: (data.documents || []).map(toRow) };
-}
-
-export async function patchDocument(id, fields) {
-  return apiFetch(`${API_BASE_URL}/api/documents/${id}`, {
-    method: "PATCH",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(fields),
-  });
-}
-
-export async function deleteDocument(id) {
-  return apiFetch(`${API_BASE_URL}/api/documents/${id}`, {
-    method: "DELETE",
-    headers: await authHeaders(),
-  });
-}
-
-/**
- * POST /api/documents stores the file and starts extraction in the backend.
- * Extraction runs in a background task, so status comes from polling
- * /api/upload/status rather than from the upload response.
- */
-export async function uploadDocument(
-  file,
-  seedMethod = "llm",
-  maxNodes = null,
-  onStatus = null,
-  minMentions = null,
-) {
-  // Keep the existing UI signature while sending the supported pipeline
-  // controls to the document endpoint.
-  const form = new FormData();
-  form.append("file", file);
-  if (maxNodes != null) form.append("max_nodes", String(maxNodes));
-  if (minMentions != null) form.append("min_mentions", String(minMentions));
-
-  const created = await apiFetch(`${API_BASE_URL}/api/documents`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: form,
-  });
-  const doc = created.document;
-
-  try {
-    // The backend keeps a single global pipeline status, so a status naming a
-    // different file belongs to another upload. Treat a long run of those as
-    // a stall instead of polling until the ten-minute timeout.
-    let foreign = 0;
-    const final = await pollUntilDone(
-      async () => {
-        const status = await getPipelineStatus();
-        if (onStatus) onStatus(status);
-        if (status.filename && status.filename !== file.name) {
-          foreign += 1;
-          if (foreign > 20) {
-            return {
-              stage: "error",
-              error:
-                "Another upload took over the pipeline. Try again once it finishes.",
-            };
-          }
-          return { stage: "running", operation: "waiting for the pipeline" };
-        }
-        foreign = 0;
-        return status;
-      },
-      { intervalMs: 1500 },
-    );
-
-    if (final?.stage === "error" || final?.stage === "partially_processed") {
-      const updated = await patchDocument(doc.id, {
-        status: final.stage,
-        error:
-          final.error ||
-          (final.stage === "partially_processed"
-            ? "Some extraction batches failed."
-            : "Extraction failed."),
-      });
-      return { document: toRow(updated.document), raw: final };
-    }
-
-    const updated = await patchDocument(doc.id, {
-      status: "done",
-      // main.py reports raw_concepts; the dev stub used to say total_concepts
-      concepts: final?.raw_concepts ?? final?.total_concepts ?? 0,
-      relationships: final?.total_edges ?? 0,
-    });
-    return { document: toRow(updated.document), raw: final };
-  } catch (err) {
-    // The row exists and the file is stored; only extraction failed. Record
-    // that on the row rather than losing the upload.
-    await patchDocument(doc.id, { status: "error", error: err.message }).catch(
-      () => {},
-    );
-    throw err;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // quiz
 // ---------------------------------------------------------------------------
 
 /** Topics and questions generated from the concepts in the uploaded documents. */
 export async function fetchQuiz(graphId) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz`, { headers: await authHeaders() });
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz`,
+    { headers: await authHeaders() },
+  );
 }
 
 // Compatibility endpoint for the older per-document quiz view. The current
 // Supabase graph flow uses fetchQuiz(graphId), which loads or creates the
 // persisted quiz for the latest graph version.
 export async function generateDocumentQuiz(_graphId, documentId) {
-  return apiFetch(`${API_BASE_URL}/api/quiz/documents/${encodeURIComponent(documentId)}/generate`, {
-    method: "POST",
-    headers: await authHeaders(),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/quiz/documents/${encodeURIComponent(documentId)}/generate`,
+    {
+      method: "POST",
+      headers: await authHeaders(),
+    },
+  );
 }
 
 export async function saveQuizResult(graphId, quizId, correct, total, points) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/results`, {
-    method: "POST",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ quiz_id: quizId, correct, total, points, completed: true }),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/results`,
+    {
+      method: "POST",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        quiz_id: quizId,
+        correct,
+        total,
+        points,
+        completed: true,
+      }),
+    },
+  );
 }
 
-export async function saveQuizProgress(graphId, quizId, currentIndex, answers, correct, total, points, completed = false) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/results`, {
-    method: "POST",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ quiz_id: quizId, current_index: currentIndex, answers, correct, total, points, completed }),
-  });
+export async function saveQuizProgress(
+  graphId,
+  quizId,
+  currentIndex,
+  answers,
+  correct,
+  total,
+  points,
+  completed = false,
+) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/results`,
+    {
+      method: "POST",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        quiz_id: quizId,
+        current_index: currentIndex,
+        answers,
+        correct,
+        total,
+        points,
+        completed,
+      }),
+    },
+  );
 }
 
 /**
@@ -545,17 +258,14 @@ export async function saveQuizProgress(graphId, quizId, currentIndex, answers, c
  * the notes themselves are not.
  */
 export async function fetchSectionQuizzes() {
-  return apiFetch(`${API_BASE_URL}/api/quiz/sections`, { headers: await authHeaders() })
+  return apiFetch(`${API_BASE_URL}/api/quiz/sections`, {
+    headers: await authHeaders(),
+  });
 }
 
 /** Every stored attempt, summarised per quiz id. */
 export async function fetchQuizResults() {
-  return apiFetch(`${API_BASE_URL}/api/quiz/results`, { headers: await authHeaders() })
-}
-
-/** Per-document concept/edge counts, used to reconcile stuck rows. */
-export async function fetchDocumentStats() {
-  return apiFetch(`${API_BASE_URL}/api/documents/stats`, {
+  return apiFetch(`${API_BASE_URL}/api/quiz/results`, {
     headers: await authHeaders(),
   });
 }
@@ -572,24 +282,33 @@ export async function fetchDocumentStats() {
 
 /** Plans a note over the given documents. `days` splits it; null does not. */
 export async function planNote(graphId, documentIds, days = null) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/plan`, {
-    method: "POST",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ document_ids: documentIds, days }),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/plan`,
+    {
+      method: "POST",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ document_ids: documentIds, days }),
+    },
+  );
 }
 
 /** Notes planned in this backend process, newest first. */
 export async function fetchNotes(graphId) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes`, {
-    headers: await authHeaders(),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes`,
+    {
+      headers: await authHeaders(),
+    },
+  );
 }
 
 export async function fetchNote(graphId, noteId) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/${noteId}`, {
-    headers: await authHeaders(),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/${noteId}`,
+    {
+      headers: await authHeaders(),
+    },
+  );
 }
 
 /**
@@ -599,10 +318,18 @@ export async function fetchNote(graphId, noteId) {
  * `generated` flag says which happened, and the section comes back with its
  * `body` filled in either way.
  */
-export async function writeSection(graphId, noteId, sectionId, { signal } = {}) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/${noteId}/sections/${sectionId}/write`, {
-    method: "POST",
-    headers: await authHeaders(),
-    signal,
-  });
+export async function writeSection(
+  graphId,
+  noteId,
+  sectionId,
+  { signal } = {},
+) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/${noteId}/sections/${sectionId}/write`,
+    {
+      method: "POST",
+      headers: await authHeaders(),
+      signal,
+    },
+  );
 }
