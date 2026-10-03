@@ -288,6 +288,10 @@ export default function Workspace() {
 
   const pending = useRef([])
   const draining = useRef(false)
+  // React state updates are asynchronous. This ref keeps a newly-created
+  // Supabase graph available to the next queued file immediately, even when
+  // several files were selected in the same picker action.
+  const supabaseIds = useRef(new Map())
   const patchItem = (key, patch) =>
     setQueue((q) => q.map((i) => (i.key === key ? { ...i, ...patch } : i)))
 
@@ -299,7 +303,8 @@ export default function Workspace() {
       return
     }
 
-    let supabaseGraphId = g.graph.supabaseId
+    let supabaseGraphId = supabaseIds.current.get(localGraphId) || g.graph.supabaseId
+    if (supabaseGraphId) supabaseIds.current.set(localGraphId, supabaseGraphId)
     patchItem(key, { status: 'uploading', message: '' })
     try {
       // Create the Supabase graph on first upload to this local graph
@@ -307,6 +312,7 @@ export default function Workspace() {
         patchItem(key, { status: 'uploading', message: 'Creating graph…' })
         const { graph: created } = await createSupabaseGraph(g.graph.name)
         supabaseGraphId = created.id
+        supabaseIds.current.set(localGraphId, supabaseGraphId)
         library.promoteGraphToSupabase(localGraphId, supabaseGraphId)
       }
 
