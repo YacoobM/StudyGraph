@@ -31,7 +31,12 @@ logger = logging.getLogger(__name__)
 class QuizConfig:
     # Six questions measured 583 output tokens; the model's output limit is 1,000 a minute.
     POOL_SIZE_PER_TOPIC = 6
+    DISTRACTOR_COUNT = 3
+    HUB_DEGREE_EASY = 4
+    HUB_DEGREE_MEDIUM = 2
     LLM_MAX_TOKENS = 900
+    LLM_MAX_CONCEPTS = 40
+    LLM_MAX_RELATIONS = 40
     MIN_CONCEPTS_PER_TOPIC = 4
     MIN_POOL_TO_SHOW_TOPIC = 2
     LLM_TIMEOUT_SECONDS = 45

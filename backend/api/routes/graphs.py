@@ -28,6 +28,7 @@ from services.supabase_graph_processing import create_graph_version_from_batch
 from services.supabase_graph_processing import delete_graph_document_and_create_version
 from services.supabase_rag import answer_graph_query
 from services.supabase_quiz import get_graph_quiz, save_quiz_progress
+from services.supabase_note_quiz import save_note_quiz_progress
 from repositories.supabase_notes import get_note as get_supabase_note, list_graph_notes, mark_graph_notes_stale, plan_graph_note, write_graph_note_section
 
 
@@ -232,3 +233,23 @@ async def save_graph_quiz_result(
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	return save_quiz_progress(identity, str(body.get("quiz_id") or ""), int(body.get("current_index") or 0), body.get("answers") or {}, int(body.get("correct") or 0), int(body.get("total") or 0), int(body.get("points") or 0), bool(body.get("completed")))
+
+
+@router.post("/api/graphs/{graph_id}/notes/sections/{section_id}/quiz-progress")
+async def save_note_quiz_result(
+	graph_id: UUID,
+	section_id: UUID,
+	body: dict,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return save_note_quiz_progress(
+		identity,
+		str(graph_id),
+		str(section_id),
+		int(body.get("current_index") or 0),
+		body.get("answers") or {},
+		int(body.get("correct") or 0),
+		int(body.get("total") or 0),
+		int(body.get("points") or 0),
+		bool(body.get("completed")),
+	)

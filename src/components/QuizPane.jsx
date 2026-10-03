@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchQuiz, fetchQuizResults, fetchSectionQuizzes, generateDocumentQuiz, saveQuizResult,
+  fetchQuiz, fetchNotes, saveQuizProgress, saveNoteQuizProgress,
 } from "../services/api.js";
 import QuizRunner, { BackLink, QuizReview } from "./QuizRunner.jsx";
 import { displayName } from "../utils/documentTitle.js";
@@ -12,21 +12,61 @@ const RING_RADIUS = 28;
 const RING_VIEWBOX = 66;
 const DIFFICULTIES = ["all", "easy", "medium", "hard"];
 
+function normalizeProgress(progress) {
+  if (!progress) return null;
+  const rawAnswers = progress.answers || [];
+  const answers = Array.isArray(rawAnswers)
+    ? rawAnswers
+    : Object.keys(rawAnswers)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((key) => rawAnswers[key]);
+  return {
+    currentIndex: Number(progress.current_index ?? progress.currentIndex ?? 0),
+    answers,
+    correct: Number(progress.correct || 0),
+    total: Number(progress.total || answers.length || 0),
+    passed: Boolean(progress.passed),
+    status: progress.status,
+    updated_at: progress.updated_at,
+    created_at: progress.created_at,
+  };
+}
+
+function resultFromProgress(progress) {
+  if (!progress) return null;
+  return {
+    best: { correct: progress.correct, total: progress.total },
+    current_index: progress.currentIndex,
+    last_at: progress.updated_at || progress.created_at,
+    attempts: 1,
+    passed: progress.passed,
+    status: progress.status,
+    last: { answers: progress.answers },
+  };
+}
+
 /** The server's stored section quizzes in the shape the list renders. */
 const toNoteQuizzes = ({ notes = [] }) => notes.map((n) => ({
   id: n.title,
   title: n.title,
   sections: (n.sections || [])
-    .filter((s) => s.questions?.length)
-    .map((s) => ({
-      quizId: s.quiz_id, title: s.title, quiz: s.questions,
-      passMark: s.pass_mark,
-    })),
+    .map((s) => {
+      const body = s.body || {};
+      return {
+        quizId: s.quiz_id || body.quiz_id,
+        title: s.title,
+        quiz: s.questions || body.quiz || [],
+        passMark: s.pass_mark ?? body.quiz_pass_mark,
+        sectionId: s.id,
+        progress: normalizeProgress(s.quiz_progress),
+      };
+    })
+    .filter((s) => s.quizId && s.quiz?.length)
 })).filter((n) => n.sections.length);
 
 /** "Sep 30". Fixed to English month names so it reads the same everywhere. */
 const shortDate = (seconds) => (seconds
-  ? new Date(seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  ? new Date(typeof seconds === "number" ? seconds * 1000 : seconds).toLocaleDateString("en-US", { month: "short", day: "numeric" })
   : "");
 
 /** "3 of 5 correct · Sep 30", plus the attempt count only when there is more than one. */
@@ -53,55 +93,64 @@ export default function QuizPane({ onToast, graphId }) {
   const [view, setView] = useState("home");   // home | documents | notes
   const [run, setRun] = useState(null);
   const [review, setReview] = useState(null);
-  const [pollAfter, setPollAfter] = useState(4);
+  const [drafts, setDrafts] = useState({});
   const alive = useRef(true);
 
   const refreshDocs = useCallback(async () => {
     const data = await fetchQuiz(graphId);
     if (!alive.current) return;
-    setDocs(data.documents || []);
+    const topics = data.topics || [];
+    const saved = data.resume;
+    const savedAnswers = saved?.answers
+      ? (Array.isArray(saved.answers)
+        ? saved.answers
+        : Object.keys(saved.answers)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((key) => saved.answers[key]))
+      : [];
+    const resume = saved ? {
+      currentIndex: Number(saved.current_index || 0),
+      answers: savedAnswers,
+      correct: Number(saved.correct || 0),
+    } : null;
+    setDocs(topics.map((topic) => ({
+      document_id: topic.id,
+      quiz_id: topic.id,
+      title: topic.name,
+      status: "ready",
+      week: `Version ${topic.day}`,
+      topic,
+      resume,
+    })));
+    if (data.result && topics[0]?.id) {
+      setResults({
+        [topics[0].id]: {
+          best: { correct: data.result.correct || 0, total: data.result.total || 0 },
+          current_index: data.result.current_index || 0,
+          last_at: data.result.updated_at || data.result.created_at,
+          attempts: 1,
+          passed: Boolean(data.result.passed),
+        },
+      });
+    }
     setReason(data.reason || null);
-    if (data.poll_after_seconds) setPollAfter(data.poll_after_seconds);
   }, [graphId]);
 
   useEffect(() => {
     alive.current = true;
     (async () => {
-      const [quiz, res, notes] = await Promise.allSettled([
-        refreshDocs(), fetchQuizResults(graphId), fetchSectionQuizzes(graphId),
-      ]);
+      const [quiz, notes] = await Promise.allSettled([refreshDocs(), fetchNotes(graphId)]);
       if (!alive.current) return;
       if (quiz.status === "rejected") setReason(quiz.reason?.message || "Could not load quizzes.");
-      if (res.status === "fulfilled") setResults(res.value.results || {});
       if (notes.status === "fulfilled") setNoteQuizzes(toNoteQuizzes(notes.value));
       setLoading(false);
     })();
     return () => { alive.current = false; };
   }, [refreshDocs, graphId]);
 
-  // Poll only while something is generating, and only as long as it is.
-  const generating = docs.some((d) => d.status === "generating");
-  useEffect(() => {
-    if (!generating) return undefined;
-    const t = setTimeout(() => { refreshDocs().catch(() => {}); }, pollAfter * 1000);
-    return () => clearTimeout(t);
-  }, [generating, docs, pollAfter, refreshDocs]);
-
-  async function generate(doc) {
-    setError("");
-    setDocs((rows) => rows.map((d) => (d.document_id === doc.document_id ? { ...d, status: "generating" } : d)));
-    try {
-      const { document } = await generateDocumentQuiz(graphId, doc.document_id);
-      setDocs((rows) => rows.map((d) => (d.document_id === doc.document_id ? document : d)));
-    } catch (e) {
-      setError(e.message);
-      refreshDocs().catch(() => {});
-    }
-  }
-
   const topics = useMemo(
     () => docs.filter((d) => d.status === "ready" && d.topic)
-      .map((d) => ({ ...d.topic, name: d.title || displayName(d.topic.name) })),
+      .map((d) => ({ ...d.topic, name: d.title || displayName(d.topic.name), resume: d.resume })),
     [docs],
   );
 
@@ -117,6 +166,7 @@ export default function QuizPane({ onToast, graphId }) {
       attempted: !!r,
       correct: r?.best.correct || 0,
       total: r?.best.total || topic?.questions.length || 0,
+      answered: r?.current_index || 0,
       mastered: !!r?.passed,
       line: scoreLine(r),
     };
@@ -135,10 +185,34 @@ export default function QuizPane({ onToast, graphId }) {
   const toggleTopic = (id) =>
     setExcluded((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
-  async function save(attempt, { quizId }) {
+  async function save(attempt, { quizId, sectionId, kind }, completed) {
     try {
-      const res = await saveQuizResult(attempt);
-      if (alive.current) setResults((r) => ({ ...r, [quizId]: res.result }));
+      const answers = Object.fromEntries((attempt.answers || []).map((answer, index) => [index, answer]));
+      const saveFn = kind === "section" ? saveNoteQuizProgress : saveQuizProgress;
+      const res = await saveFn(
+        graphId,
+        kind === "section" ? sectionId : quizId,
+        attempt.answers?.length || 0,
+        answers,
+        attempt.correct,
+        attempt.total,
+        attempt.correct * 10,
+        completed,
+      );
+      if (alive.current) {
+        setResults((r) => ({
+          ...r,
+          [quizId]: {
+            best: { correct: res.result.correct, total: res.result.total },
+            current_index: res.result.current_index || attempt.answers?.length || 0,
+            last_at: res.result.updated_at || res.result.created_at,
+            attempts: 1,
+            passed: Boolean(res.passed),
+            status: res.result.status,
+            last: { answers: attempt.answers },
+          },
+        }));
+      }
     } catch (e) {
       // Shown, not swallowed: a lost score is something the reader should know.
       if (alive.current) setError(`Your score was not saved: ${e.message}`);
@@ -151,23 +225,34 @@ export default function QuizPane({ onToast, graphId }) {
     if (!questions.length) return;
     setReview(null);
     setRun({ kind: "document", quizId: topic.id, title: topic.name, questions,
-             need: topic.pass_marks?.[filter], key: Date.now() });
+             need: topic.pass_marks?.[filter], key: Date.now(), resume: drafts[topic.id] || topic.resume });
   };
 
   const startSection = (note, s) => {
     setReview(null);
-    setRun({ kind: "section", quizId: s.quizId, title: s.title, group: note.title, questions: s.quiz,
-             need: s.passMark, key: Date.now() });
+    setRun({ kind: "section", quizId: s.quizId, sectionId: s.sectionId, title: s.title, group: note.title, questions: s.quiz,
+             need: s.passMark, key: Date.now(), resume: drafts[s.quizId] || s.progress });
   };
 
   function finish(r, { answers, correct, total }) {
     save({ quizId: r.quizId, kind: r.kind, answers, correct, total, title: r.title, group: r.group || null },
-         { quizId: r.quizId });
+         { quizId: r.quizId, sectionId: r.sectionId, kind: r.kind }, true);
+    setDrafts((current) => {
+      const next = { ...current };
+      delete next[r.quizId];
+      return next;
+    });
     // A passing section attempt is what ticks the section in Revision notes;
     // the notes list reads it back from the saved results.
     if (correct >= (r.need ?? total)) {
       onToast?.(r.kind === "section" ? "Section complete" : "Topic passed");
     }
+  }
+
+  function progress(r, { answers, correct, total, currentIndex }) {
+    const draft = { currentIndex, answers, correct };
+    setDrafts((current) => ({ ...current, [r.quizId]: draft }));
+    save({ ...draft, total }, { quizId: r.quizId, sectionId: r.sectionId, kind: r.kind }, false);
   }
 
   if (run) {
@@ -177,7 +262,24 @@ export default function QuizPane({ onToast, graphId }) {
         key={run.key}
         title={run.title}
         questions={run.questions}
-        onExit={() => setRun(null)}
+        initialProgress={run.resume}
+        onProgress={(progressState) => progress(run, progressState)}
+        onExit={(progress) => {
+          if (!progress.done && progress.answers.length) {
+            const draft = {
+              currentIndex: progress.i,
+              answers: progress.answers,
+              correct: progress.correct,
+            };
+            setDrafts((current) => ({ ...current, [run.quizId]: draft }));
+            save(
+              { ...progress, quizId: run.quizId, total: run.questions.length },
+              { quizId: run.quizId, sectionId: run.sectionId, kind: run.kind },
+              false,
+            );
+          }
+          setRun(null);
+        }}
         onFinish={(res) => finish(run, res)}
         need={run.need}
         passTitle={section ? "Section complete" : "Topic passed"}
@@ -224,8 +326,8 @@ export default function QuizPane({ onToast, graphId }) {
           </div>
           <LandingRow
             icon={<DocumentIcon />}
-            title="By document"
-            desc="A quiz for each document you upload, written when you ask for it."
+            title="By graph version"
+            desc="A quiz for the latest version of this graph."
             onClick={() => setView("documents")}
           />
           <LandingRow
@@ -257,21 +359,23 @@ export default function QuizPane({ onToast, graphId }) {
             </p>
           </div>
         ) : noteQuizzes.flatMap((note) => note.sections.map((s) => {
-          const r = results[s.quizId];
+          const r = results[s.quizId] || resultFromProgress(s.progress);
+          const inProgress = r?.status === "in_progress";
+          const attempted = r?.current_index || 0;
           return (
             <QuizCard
               key={s.quizId}
               title={s.title}
               badge={r?.passed ? "Complete" : null}
               meta={note.title}
-              progress={r ? Math.round((r.best.correct / r.best.total) * 100) : 0}
+              progress={r ? Math.round((attempted / s.quiz.length) * 100) : 0}
               line={`${s.quiz.length} questions`}
-              sub={r ? scoreLine(r) : "Not attempted yet"}
+              sub={r ? `${attempted}/${s.quiz.length} questions attempted · ${scoreLine(r)}` : "Not attempted yet"}
               actions={(
                 <>
                   <button className="btn-secondary" onClick={() => setReview({ note, section: s })}>Review</button>
-                  <button className={`btn-start ${r ? "retry" : ""}`} onClick={() => startSection(note, s)}>
-                    {r ? "Retake" : "Start"}
+                  <button className={`btn-start ${r && !inProgress ? "retry" : ""}`} onClick={() => startSection(note, s)}>
+                    {inProgress ? "Continue" : r ? "Retake" : "Start"}
                   </button>
                 </>
               )}
@@ -286,7 +390,7 @@ export default function QuizPane({ onToast, graphId }) {
     <div className="study-wrap"><div className="study-col">
       {back}
       {error && <div className="nt-error">{error}</div>}
-      <div className="qz-section-title">By document</div>
+      <div className="qz-section-title">By graph version</div>
 
       {topics.length > 0 && (
         <>
@@ -336,7 +440,7 @@ export default function QuizPane({ onToast, graphId }) {
               const s = topicStats(t.id);
               return (
                 <button key={t.id} className={`qz-day ${s.mastered ? "done" : ""}`} onClick={() => startTopic(t)}>
-                  <div className="d"><span>DAY {idx + 1}</span><span>{s.correct}/{s.total}</span></div>
+                <div className="d"><span>DAY {idx + 1}</span><span>{s.answered}/{s.total}</span></div>
                   <div className="t">{t.name}</div>
                   <div className="s">
                     <span className="qz-check">✓</span>
@@ -361,7 +465,7 @@ export default function QuizPane({ onToast, graphId }) {
           stats={topicStats(d.quiz_id)}
           questions={d.topic ? questionsFor(d.topic) : []}
           filter={filter}
-          onGenerate={() => generate(d)}
+          onGenerate={() => {}}
           onStart={() => startTopic(topics.find((t) => t.id === d.quiz_id))}
         />
       ))}
@@ -373,7 +477,7 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
   const ready = doc.status === "ready" && doc.topic;
   const failed = doc.status === "failed";
   const barPct = ready && stats.total ? Math.round((stats.correct / stats.total) * 100) : 0;
-  const meta = [doc.week, `${doc.concepts} concepts`].filter(Boolean).join(" · ");
+  const meta = [doc.week, doc.concepts ? `${doc.concepts} concepts` : null].filter(Boolean).join(" · ");
 
   let action;
   if (doc.status === "too_small") {
@@ -396,7 +500,9 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
   let sub;
   if (ready) {
     line = `${questions.length} questions`;
-    sub = stats.attempted ? stats.line : (filter === "all" ? "mixed difficulty" : filter);
+    sub = stats.attempted
+      ? `${stats.answered}/${stats.total} questions attempted · ${stats.line}`
+      : (filter === "all" ? "mixed difficulty" : filter);
   } else if (failed) {
     line = "Couldn't create this quiz right now. Try again in a minute.";
     sub = null;

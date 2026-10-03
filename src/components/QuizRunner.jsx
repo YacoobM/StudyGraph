@@ -57,8 +57,14 @@ export default function QuizRunner({
   title, questions, onExit, onFinish, need: needProp,
   passTitle = "Topic passed", passText = "That material is confirmed covered.",
   failText, exitLabel = "Back to topics", backLabel, inline = false,
+  initialProgress = null, onProgress,
 }) {
-  const [run, setRun] = useState(fresh);
+  const [run, setRun] = useState(() => ({
+    ...fresh(),
+    i: Math.min(initialProgress?.currentIndex || 0, Math.max(questions.length - 1, 0)),
+    answers: initialProgress?.answers || [],
+    correct: initialProgress?.correct || 0,
+  }));
   const need = needProp ?? questions.length;
 
   const wrap = (children) => (inline
@@ -97,6 +103,12 @@ export default function QuizRunner({
 
   function nextQuestion() {
     if (run.i + 1 < questions.length) {
+      onProgress?.({
+        currentIndex: run.i + 1,
+        answers: run.answers,
+        correct: run.correct,
+        total: questions.length,
+      });
       setRun((r) => ({ ...r, i: r.i + 1, ...freshQuestion }));
       return;
     }
@@ -114,7 +126,7 @@ export default function QuizRunner({
       <>
         {/* Inline, the host's button closes the quiz, so there is no second close control. */}
         <div className="qz-run-top">
-          {inline ? <span /> : <BackLink onClick={onExit}>{backLabel || title}</BackLink>}
+          {inline ? <span /> : <BackLink onClick={() => onExit?.(run)}>{backLabel || title}</BackLink>}
           <span className="qz-run-prog">Question {run.i + 1} of {questions.length}</span>
         </div>
         <div className="qz-run-bar"><span style={{ width: `${pct}%` }} /></div>
@@ -172,7 +184,7 @@ export default function QuizRunner({
         <div><div className="n">{run.correct}/{total}</div><div className="l">Correct first try</div></div>
       </div>
       <div className="qz-result-actions">
-        {!inline && <button className="btn-primary2" onClick={onExit}>{exitLabel}</button>}
+        {!inline && <button className="btn-primary2" onClick={() => onExit?.(run)}>{exitLabel}</button>}
         <button className={inline ? "btn-primary2" : "btn-secondary"} onClick={() => setRun(fresh())}>Try again</button>
       </div>
     </div>

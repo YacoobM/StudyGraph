@@ -756,6 +756,13 @@ export default function NotesPane({ readyDocs = [], graphId }) {
 
   useEffect(() => {
     let live = true;
+    if (!graphId) {
+      setNotes([]);
+      setLoading(false);
+      return () => {
+        live = false;
+      };
+    }
     listNotes(graphId)
       .then((rows) => live && setNotes(rows))
       .catch((e) => live && setError(e.message))

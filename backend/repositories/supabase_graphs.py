@@ -1,4 +1,5 @@
 import json
+import logging
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import quote
@@ -11,6 +12,7 @@ from services.graph_fusion import normalize_concept
 from services.evolution_data import _call_with_retry, summarize_comparisons_batch, synthesize_overall_evolution
 
 REST_PAGE_SIZE = 1000
+logger = logging.getLogger(__name__)
 
 
 def request_table(
@@ -51,7 +53,28 @@ def request_table(
 			with urlopen(request, timeout=10) as response:
 				body = response.read()
 				response_data = json.loads(body) if body else []
-		except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+		except HTTPError as error:
+			error_body = error.read().decode("utf-8", errors="replace")
+			logger.error(
+				"Supabase request failed method=%s table=%s query=%s status=%s body=%s",
+				method,
+				table,
+				query,
+				error.code,
+				error_body[:1000],
+			)
+			raise HTTPException(
+				status_code=502,
+				detail="Unable to load graph data from Supabase.",
+			) from error
+		except (URLError, TimeoutError, json.JSONDecodeError) as error:
+			logger.error(
+				"Supabase request failed method=%s table=%s query=%s error=%s",
+				method,
+				table,
+				query,
+				error,
+			)
 			raise HTTPException(
 				status_code=502,
 				detail="Unable to load graph data from Supabase.",

@@ -539,6 +539,14 @@ export async function saveQuizProgress(graphId, quizId, currentIndex, answers, c
   });
 }
 
+export async function saveNoteQuizProgress(graphId, sectionId, currentIndex, answers, correct, total, points, completed = false) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/sections/${encodeURIComponent(sectionId)}/quiz-progress`, {
+    method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ section_id: sectionId, current_index: currentIndex, answers, correct, total, points, completed }),
+  });
+}
+
 /**
  * Every section quiz the user has been given, grouped by note title. Read
  * from the server's stored copy, so it is there after a restart even though

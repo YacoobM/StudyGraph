@@ -265,7 +265,7 @@ async def extract_image_ocr(file_bytes):
 
     response = await asyncio.to_thread(
         lambda: get_ai_client().models.generate_content(
-            model="gemini-2.5-flash", contents=[pil_image, prompt]
+            model="gemini-3.8-flash", contents=[pil_image, prompt]
         )
     )
         

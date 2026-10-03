@@ -138,15 +138,15 @@ function toSection(raw, noteId, index) {
 /* -------------------------------------------------------------------- api */
 
 /** Every note, newest first, with enough of each section for the list cards; no bodies. */
-export async function listNotes() {
-  const { notes = [] } = await fetchNotes()
+export async function listNotes(graphId) {
+  const { notes = [] } = await fetchNotes(graphId)
   const adapted = notes.map(toNote)
   adapted.forEach((n) => seen.set(n.id, n))
   return adapted
 }
 
 /** One section, written on first open (the slow call) and stored after, so safe to call again. */
-export async function getSection(noteId, index, { signal } = {}) {
+export async function getSection(graphId, noteId, index, { signal } = {}) {
   let note = seen.get(noteId)
   if (!note) {
     const fetched = await fetchNote(graphId, noteId);
@@ -201,7 +201,7 @@ export function setSectionDone(noteId, index, done) {
 }
 
 /** Plans a note over the picked documents and returns its id; sections come back empty. */
-export async function createNote({ docs, split, days }) {
+export async function createNote(graphId, { docs, split, days }) {
   const ids = (docs || []).map((d) => d?.id).filter((id) => id != null)
   if (!ids.length) return null
 
