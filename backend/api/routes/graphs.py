@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from uuid import UUID
 
@@ -32,6 +33,7 @@ from repositories.supabase_notes import get_note as get_supabase_note, list_grap
 
 
 router = APIRouter(tags=["graphs"])
+logger = logging.getLogger(__name__)
 MAX_GRAPH_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_GRAPH_SUFFIXES = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
@@ -63,6 +65,10 @@ async def post_graph_version(
 	body: GraphVersionCreateRequest,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
+	logger.info(
+		"graph_generation_requested user_id=%s user_email=%s graph_id=%s document_count=%d",
+		identity.auth_user_id, identity.email, graph_id, len(body.document_ids),
+	)
 	return await create_graph_version_from_batch(
 		identity,
 		str(graph_id),
@@ -72,6 +78,22 @@ async def post_graph_version(
 		min_mentions=body.min_mentions,
 	)
 
+def _trim_graph_edges(data, min_confidence=0.75):
+    """Keep only high-confidence edges to reduce visual density."""
+    nodes = data.get('nodes', [])
+    edges = data.get('edges', [])
+    
+    # Filter edges by confidence
+    filtered_edges = [
+        e for e in edges 
+        if e.get('confidence', 1.0) >= min_confidence
+    ]
+    
+    return {
+        **data,
+        'nodes': nodes,
+        'edges': filtered_edges
+    }
 
 @router.get("/api/graphs/{graph_id}/versions/{version_id}")
 def get_graph_version(
@@ -79,7 +101,8 @@ def get_graph_version(
 	version_id: UUID,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
-	return load_graph_version(identity, str(graph_id), str(version_id))
+	data = load_graph_version(identity, str(graph_id), str(version_id))
+	return _trim_graph_edges(data, min_confidence=0.75)
 
 
 @router.get("/api/graphs/{graph_id}/concepts/{concept_name}/evolution")
@@ -165,6 +188,10 @@ def post_graph_query(
 ):
 	if not body.query.strip():
 		raise HTTPException(status_code=422, detail="Ask a question about this graph.")
+	logger.info(
+		"rag_request user_id=%s user_email=%s graph_id=%s",
+		identity.auth_user_id, identity.email, graph_id,
+	)
 	return answer_graph_query(identity, str(graph_id), body.query.strip(), runtime_state.client)
 
 

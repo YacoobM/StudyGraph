@@ -12,7 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, FUSION_DIR, LLM_PROVIDER,
                         NON_RAG_REASONING_EFFORT)
 from services.fusion_log import FusionLog
-from services.llm_gateway import estimate_tokens, limiter
+from services.llm_gateway import estimate_tokens, graph_limiter
 from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 _MODEL = EXTRACTION_MODEL
@@ -622,7 +622,7 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
         try:
             # Reserved from the budget extraction and evolution share, so
             # fusion no longer races them into the provider's per-minute limits.
-            limiter.acquire_sync(estimate_tokens(system) + estimate_tokens(user), max_tokens)
+            graph_limiter.acquire_sync(estimate_tokens(system) + estimate_tokens(user), max_tokens)
         except ValueError as e:
             log(f"{tag} larger than the per-minute token budget ({e}) — not sent")
             return None, "over budget"
@@ -716,10 +716,10 @@ def _verdict_call(client, system, payload, log, tag, failures=None, max_tokens=_
 
 
 def fusion_workers(input_limit=None, output_limit=None):
-    """Verdict calls the limiter budget keeps in flight at once: calls per minute times the call
+    """Verdict calls the graph_limiter budget keeps in flight at once: calls per minute times the call
     time, from 1 to _FUSION_MAX_WORKERS."""
-    input_limit = limiter.input_limit if input_limit is None else input_limit
-    output_limit = limiter.output_limit if output_limit is None else output_limit
+    input_limit = graph_limiter.input_limit if input_limit is None else input_limit
+    output_limit = graph_limiter.output_limit if output_limit is None else output_limit
     per_minute = min(input_limit // _CALL_INPUT_TOKENS, output_limit // _VERDICT_MAX_TOKENS)
     return max(1, min(_FUSION_MAX_WORKERS, int(per_minute * _CALL_SECONDS / 60)))
 

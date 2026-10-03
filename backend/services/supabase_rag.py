@@ -128,7 +128,6 @@ def answer_graph_query(identity: SupabaseIdentity, graph_id: str, query: str, cl
  
 	system_prompt = build_rag_system_prompt(prioritize_graph=use_graph_primarily)
 	user_prompt = build_rag_user_prompt(context_text, query, graph_section)
- 
 	# Call the LLM and parse response
 	try:
 		result = call_rag_llm(client, RAG_MODEL, system_prompt, user_prompt)

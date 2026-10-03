@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, LLM_API_KEY_ENV,
                         NON_RAG_REASONING_EFFORT, OUTPUT_DIR)
 from models.quiz_models import QuizAttempt
-from services.llm_gateway import estimate_tokens, limiter
+from services.llm_gateway import estimate_tokens, graph_limiter
 
 router = APIRouter(tags=["quiz"])
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class QuizConfig:
     MIN_POOL_TO_SHOW_TOPIC = 2
     LLM_TIMEOUT_SECONDS = 45
     LLM_MODEL = EXTRACTION_MODEL
-    # Input cap in tokens: under the limiter's 7,000-a-minute input budget, with room for the
+    # Input cap in tokens: under the graph_limiter's 7,000-a-minute input budget, with room for the
     # prompt and extraction.
     LLM_INPUT_TOKENS = 4000
     # Share of an evidence sentence's content words that must occur in one sentence or short run of
@@ -329,7 +329,7 @@ def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
     finish, text = None, ""
     for attempt in range(2):
         try:
-            limiter.acquire_sync(estimate_tokens(_QUIZ_SYSTEM) + estimate_tokens(user), QuizConfig.LLM_MAX_TOKENS)
+            graph_limiter.acquire_sync(estimate_tokens(_QUIZ_SYSTEM) + estimate_tokens(user), QuizConfig.LLM_MAX_TOKENS)
             resp = client.chat.completions.create(
                 model=QuizConfig.LLM_MODEL,
                 messages=[{"role": "system", "content": _QUIZ_SYSTEM}, {"role": "user", "content": user}],

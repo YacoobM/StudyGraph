@@ -1,10 +1,11 @@
+import asyncio
 import json
-import logging
+import asyncio
 import time
 from datetime import datetime
 
 from app.config import COMPLETION_TOKEN_PARAMETER, NON_RAG_REASONING_EFFORT, OUTPUT_DIR
-from services.llm_gateway import estimate_tokens, limiter
+from services.llm_gateway import estimate_tokens, graph_limiter
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -79,10 +80,12 @@ async def call_llm(client, model, prompt, text_batch, max_tokens=1000):
     estimated_input = estimate_tokens(prompt) + estimate_tokens(text_batch)
     logger.info(
         "llm_request_started model=%s estimated_input_tokens=%d max_output_tokens=%d",
-        model, estimated_input, max_tokens,
+        model,
+        estimated_input,
+        max_tokens,
     )
     try:
-        await limiter.acquire(
+        await graph_limiter.acquire(
             estimated_input,
             max_tokens,
         )
@@ -96,12 +99,16 @@ async def call_llm(client, model, prompt, text_batch, max_tokens=1000):
             COMPLETION_TOKEN_PARAMETER: max_tokens,
             "response_format": {"type": "json_object"},
         }
-        response = client.chat.completions.create(**request)
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            **request,
+        )
         usage = getattr(response, "usage", None)
         choice = response.choices[0] if getattr(response, "choices", None) else None
         logger.info(
             "llm_request_succeeded model=%s duration_ms=%.1f prompt_tokens=%s completion_tokens=%s total_tokens=%s finish_reason=%s",
-            model, (time.perf_counter() - request_started) * 1000,
+            model,
+            (time.perf_counter() - request_started) * 1000,
             getattr(usage, "prompt_tokens", None),
             getattr(usage, "completion_tokens", None),
             getattr(usage, "total_tokens", None),
@@ -111,8 +118,11 @@ async def call_llm(client, model, prompt, text_batch, max_tokens=1000):
     except Exception as error:
         logger.exception(
             "llm_call_failed model=%s duration_ms=%.1f error_type=%s status_code=%s error=%s headers=%s",
-            model, (time.perf_counter() - request_started) * 1000,
-            type(error).__name__, getattr(error, "status_code", None), str(error),
+            model,
+            (time.perf_counter() - request_started) * 1000,
+            type(error).__name__,
+            getattr(error, "status_code", None),
+            str(error),
             getattr(getattr(error, "response", None), "headers", None),
         )
         raise

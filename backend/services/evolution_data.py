@@ -4,7 +4,7 @@ import time
 from collections import Counter, defaultdict
 
 from app.config import EXTRACTION_MODEL, NON_RAG_REASONING_EFFORT
-from services.llm_gateway import estimate_tokens, limiter
+from services.llm_gateway import estimate_tokens, graph_limiter
 from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 from app.logging_config import get_logger
@@ -108,7 +108,7 @@ async def _call_with_retry(client, system_prompt, user_prompt, json_mode=False, 
     estimated_input_tokens = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
     estimated_output_tokens = max_tokens or 1
     
-    await limiter.acquire(estimated_input_tokens, estimated_output_tokens)
+    await graph_limiter.acquire(estimated_input_tokens, estimated_output_tokens)
     async with LLM_CONCURRENCY:
         response = await asyncio.to_thread(lambda: client.chat.completions.create(**kwargs))
     return response.choices[0].message.content
