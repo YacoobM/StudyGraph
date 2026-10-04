@@ -17,18 +17,32 @@ from repositories.supabase_graphs import (
 	list_graph_versions,
 	list_graphs,
 	load_graph_version,
+	update_graph_name,
+)
+from repositories.supabase_library import (
+	create_subject,
+	create_topic,
+	delete_subject,
+	delete_topic,
+	list_library,
+	update_subject,
+	update_topic,
 )
 from repositories.users import SupabaseIdentity, current_supabase_identity
 from services.chunking import build_document_chunks
 from services.document_service import extract_text
 from services.embeddings import encode_texts
 from schemas.graph import GraphCreateRequest, GraphVersionCreateRequest
+from pydantic import BaseModel, field_validator
 from schemas.query import GraphQueryRequest
 from app import state as runtime_state
 from services.supabase_graph_processing import create_graph_version_from_batch
 from services.supabase_graph_processing import delete_graph_document_and_create_version
 from services.supabase_rag import answer_graph_query
-from services.supabase_quiz import get_graph_quiz, save_quiz_progress
+from services.supabase_quiz import get_graph_quiz, regenerate_graph_quiz, save_quiz_progress
+from services.supabase_concept_refresh import refresh_degraded_concept_definitions
+from services.supabase_note_quiz import save_note_quiz_progress
+from repositories.supabase_documents import signed_graph_document_url
 from repositories.supabase_notes import get_note as get_supabase_note, list_graph_notes, mark_graph_notes_stale, plan_graph_note, write_graph_note_section
 
 
@@ -36,6 +50,57 @@ router = APIRouter(tags=["graphs"])
 logger = logging.getLogger(__name__)
 MAX_GRAPH_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_GRAPH_SUFFIXES = {".pdf", ".docx", ".pptx", ".txt", ".md"}
+
+
+class LibraryNameRequest(BaseModel):
+	name: str
+
+	@field_validator("name")
+	@classmethod
+	def normalize_name(cls, name: str) -> str:
+		name = name.strip()
+		if not name:
+			raise ValueError("Name cannot be empty.")
+		return name
+
+
+class TopicCreateRequest(LibraryNameRequest):
+	subject_id: UUID
+
+
+@router.get("/api/library")
+def get_library(identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"subjects": list_library(identity)}
+
+
+@router.post("/api/subjects", status_code=201)
+def post_subject(body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"subject": create_subject(identity, body.name)}
+
+
+@router.patch("/api/subjects/{subject_id}")
+def patch_subject(subject_id: UUID, body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"subject": update_subject(identity, str(subject_id), body.name)}
+
+
+@router.delete("/api/subjects/{subject_id}", status_code=204)
+def remove_subject(subject_id: UUID, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	delete_subject(identity, str(subject_id))
+
+
+@router.post("/api/topics", status_code=201)
+def post_topic(body: TopicCreateRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"topic": create_topic(identity, str(body.subject_id), body.name)}
+
+
+@router.patch("/api/topics/{topic_id}")
+def patch_topic(topic_id: UUID, body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"topic": update_topic(identity, str(topic_id), body.name)}
+
+
+@router.delete("/api/topics/{topic_id}", status_code=204)
+def remove_topic(topic_id: UUID, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	delete_topic(identity, str(topic_id))
 
 
 @router.get("/api/graphs")
@@ -48,7 +113,12 @@ def post_graph(
 	body: GraphCreateRequest,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
-	return {"graph": create_graph(identity, body.name)}
+	return {"graph": create_graph(identity, body.name, body.topic_id)}
+
+
+@router.patch("/api/graphs/{graph_id}")
+def patch_graph(graph_id: UUID, body: LibraryNameRequest, identity: SupabaseIdentity = Depends(current_supabase_identity)):
+	return {"graph": update_graph_name(identity, str(graph_id), body.name)}
 
 
 @router.get("/api/graphs/{graph_id}/versions")
@@ -122,12 +192,29 @@ def get_graph_documents(
 	return {"documents": list_graph_documents(identity, str(graph_id))}
 
 
+@router.get("/api/graphs/{graph_id}/documents/{document_id}/file")
+def get_graph_document_file_url(
+	graph_id: UUID,
+	document_id: UUID,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return {"url": signed_graph_document_url(identity, str(graph_id), str(document_id))}
+
+
 @router.get("/api/graphs/{graph_id}/support")
 def get_graph_support(
 	graph_id: UUID,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	return get_graph_active_support(identity, str(graph_id))
+
+
+@router.post("/api/graphs/{graph_id}/concepts/refresh-degraded")
+async def refresh_degraded_concepts(
+	graph_id: UUID,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return await refresh_degraded_concept_definitions(identity, str(graph_id), runtime_state.client)
 
 
 @router.delete("/api/graphs/{graph_id}/documents/{document_id}")
@@ -181,7 +268,7 @@ async def post_graph_document(
 
 
 @router.post("/api/graphs/{graph_id}/query")
-def post_graph_query(
+async def post_graph_query(
 	graph_id: UUID,
 	body: GraphQueryRequest,
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
@@ -192,7 +279,14 @@ def post_graph_query(
 		"rag_request user_id=%s user_email=%s graph_id=%s",
 		identity.auth_user_id, identity.email, graph_id,
 	)
-	return answer_graph_query(identity, str(graph_id), body.query.strip(), runtime_state.client)
+
+	return await asyncio.to_thread(
+		answer_graph_query,
+		identity,
+		str(graph_id),
+		body.query.strip(),
+		runtime_state.client,
+	)
 
 
 @router.get("/api/graphs/{graph_id}/quiz")
@@ -201,6 +295,14 @@ async def get_graph_quiz_route(
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	return await get_graph_quiz(identity, str(graph_id))
+
+
+@router.post("/api/graphs/{graph_id}/quiz/regenerate")
+async def regenerate_graph_quiz_route(
+	graph_id: UUID,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return await regenerate_graph_quiz(identity, str(graph_id))
 
 
 @router.get("/api/graphs/{graph_id}/notes")
@@ -259,3 +361,23 @@ async def save_graph_quiz_result(
 	identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
 	return save_quiz_progress(identity, str(body.get("quiz_id") or ""), int(body.get("current_index") or 0), body.get("answers") or {}, int(body.get("correct") or 0), int(body.get("total") or 0), int(body.get("points") or 0), bool(body.get("completed")))
+
+
+@router.post("/api/graphs/{graph_id}/notes/sections/{section_id}/quiz-progress")
+async def save_note_quiz_result(
+	graph_id: UUID,
+	section_id: UUID,
+	body: dict,
+	identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+	return save_note_quiz_progress(
+		identity,
+		str(graph_id),
+		str(section_id),
+		int(body.get("current_index") or 0),
+		body.get("answers") or {},
+		int(body.get("correct") or 0),
+		int(body.get("total") or 0),
+		int(body.get("points") or 0),
+		bool(body.get("completed")),
+	)

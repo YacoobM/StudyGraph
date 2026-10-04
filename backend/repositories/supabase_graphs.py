@@ -1,4 +1,5 @@
 import json
+import logging
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import quote
@@ -11,6 +12,7 @@ from services.graph_fusion import normalize_concept
 from services.evolution_data import _call_with_retry, summarize_comparisons_batch, synthesize_overall_evolution
 
 REST_PAGE_SIZE = 1000
+logger = logging.getLogger(__name__)
 
 
 def request_table(
@@ -51,7 +53,28 @@ def request_table(
 			with urlopen(request, timeout=10) as response:
 				body = response.read()
 				response_data = json.loads(body) if body else []
-		except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+		except HTTPError as error:
+			error_body = error.read().decode("utf-8", errors="replace")
+			logger.error(
+				"Supabase request failed method=%s table=%s query=%s status=%s body=%s",
+				method,
+				table,
+				query,
+				error.code,
+				error_body[:1000],
+			)
+			raise HTTPException(
+				status_code=502,
+				detail="Unable to load graph data from Supabase.",
+			) from error
+		except (URLError, TimeoutError, json.JSONDecodeError) as error:
+			logger.error(
+				"Supabase request failed method=%s table=%s query=%s error=%s",
+				method,
+				table,
+				query,
+				error,
+			)
 			raise HTTPException(
 				status_code=502,
 				detail="Unable to load graph data from Supabase.",
@@ -72,21 +95,41 @@ def list_graphs(identity: SupabaseIdentity) -> list[dict]:
 	return request_table(
 		identity,
 		"graphs",
-		"?select=id,name,created_at,updated_at&order=created_at.desc,id.desc",
+		"?select=id,topic_id,name,created_at,updated_at&order=created_at.desc,id.desc",
 	)
 
 
-def create_graph(identity: SupabaseIdentity, name: str) -> dict:
+def create_graph(identity: SupabaseIdentity, name: str, topic_id: str | None = None) -> dict:
+	payload = {"user_id": identity.auth_user_id, "name": name}
+	if topic_id:
+		owned_topic = request_table(identity, "topics", f"?select=id&id=eq.{topic_id}")
+		if not owned_topic:
+			raise HTTPException(status_code=404, detail="Topic not found.")
+		payload["topic_id"] = topic_id
 	rows = request_table(
 		identity,
 		"graphs",
-		"?select=id,name,created_at,updated_at",
+		"?select=id,topic_id,name,created_at,updated_at",
 		method="POST",
-		payload={"user_id": identity.auth_user_id, "name": name},
+		payload=payload,
 		prefer="return=representation",
 	)
 	if len(rows) != 1:
 		raise HTTPException(status_code=502, detail="Supabase did not return the created graph.")
+	return rows[0]
+
+
+def update_graph_name(identity: SupabaseIdentity, graph_id: str, name: str) -> dict:
+	rows = request_table(
+		identity,
+		"graphs",
+		f"?id=eq.{graph_id}&select=id,topic_id,name,created_at,updated_at",
+		method="PATCH",
+		payload={"name": name},
+		prefer="return=representation",
+	)
+	if len(rows) != 1:
+		raise HTTPException(status_code=404, detail="Graph not found.")
 	return rows[0]
 
 
@@ -141,12 +184,16 @@ def load_graph_version(
 		"?select=id,graph_version_id,concept_id,document_id,document_filename,chunk_id,source_name,source_excerpt,page_start,page_end,source_week,created_at"
 		f"&graph_version_id=eq.{version_id}&order=created_at.asc,id.asc",
 	)
+	if not concept_provenance:
+		concept_provenance = snapshot.get("concept_provenance") or []
 	relationship_provenance = request_table(
 		identity,
 		"relationship_provenance",
 		"?select=id,graph_version_id,relationship_id,document_id,document_filename,chunk_id,source_from,source_to,source_relationship_type,summary,context,source_week,created_at"
 		f"&graph_version_id=eq.{version_id}&order=created_at.asc,id.asc",
 	)
+	if not relationship_provenance:
+		relationship_provenance = snapshot.get("relationship_provenance") or []
 	return {
 		"version": version,
 		"concepts": snapshot.get("concepts") or [],
@@ -164,16 +211,15 @@ async def get_graph_concept_evolution(identity: SupabaseIdentity, graph_id: str,
 		return {"comparison": f"{concept_name} appears across 0 graph version(s).", "weeks_data": [], "consecutive_comparisons": []}
 	version = versions[0]
 	version_id = str(version["id"])
-	concepts = request_table(identity, "concepts", f"?select=id,name,normalized_name&graph_version_id=eq.{version_id}")
-	concept = next((row for row in concepts if normalize_concept(row.get("normalized_name") or row.get("name", "")) == target), None)
+	loaded = load_graph_version(identity, graph_id, version_id)
+	concept = next((row for row in loaded["concepts"] if normalize_concept(row.get("normalized_name") or row.get("name", "")) == target), None)
 	if not concept:
 		return {"comparison": f"{concept_name} appears across 0 graph version(s).", "weeks_data": [], "consecutive_comparisons": []}
-	rows = request_table(
-		identity, "concept_provenance",
-		"?select=document_id,document_filename,source_name,source_week,chunk_id"
-		f"&graph_version_id=eq.{version_id}&concept_id=eq.{concept['id']}"
-		"&order=source_week.asc,document_filename.asc,id.asc",
-	)
+	rows = [
+		row for row in loaded["concept_provenance"]
+		if str(row.get("concept_id")) == str(concept["id"])
+	]
+	rows.sort(key=lambda row: (int(row.get("source_week") or version["version_number"]), row.get("document_filename") or "", str(row.get("id") or "")))
 	chunk_by_id = {}
 	chunk_by_document = {}
 	for row in rows:

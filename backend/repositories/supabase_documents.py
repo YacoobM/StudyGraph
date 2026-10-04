@@ -111,6 +111,8 @@ def delete_graph_document_data(identity: SupabaseIdentity, document: dict) -> No
 		f"?document_id=eq.{document['id']}",
 		method="DELETE",
 	)
+
+
 	if document.get("storage_path"):
 		_storage_request(identity, document["storage_path"], "DELETE")
 	request_table(
@@ -119,6 +121,37 @@ def delete_graph_document_data(identity: SupabaseIdentity, document: dict) -> No
 		f"?id=eq.{document['id']}&graph_id=eq.{document['graph_id']}",
 		method="DELETE",
 	)
+
+
+def signed_graph_document_url(identity: SupabaseIdentity, graph_id: str, document_id: str) -> str:
+	rows = request_table(
+		identity,
+		"documents",
+		f"?select=storage_path&graph_id=eq.{graph_id}&id=eq.{document_id}",
+	)
+	if not rows or not rows[0].get("storage_path"):
+		raise HTTPException(status_code=404, detail="Document not found in this graph.")
+	path = rows[0]["storage_path"]
+	request = Request(
+		f"{SUPABASE_URL}/storage/v1/object/sign/{BUCKET}/{quote(path, safe='/')}",
+		data=json.dumps({"expiresIn": 300}).encode(),
+		headers={
+			"Authorization": f"Bearer {identity.access_token}",
+			"apikey": SUPABASE_PUBLISHABLE_KEY,
+			"Content-Type": "application/json",
+			"Accept": "application/json",
+		},
+		method="POST",
+	)
+	try:
+		with urlopen(request, timeout=10) as response:
+			payload = json.loads(response.read())
+	except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+		raise HTTPException(status_code=502, detail="Unable to open document from Supabase Storage.") from error
+	signed = payload.get("signedURL") or payload.get("signedUrl")
+	if not signed:
+		raise HTTPException(status_code=502, detail="Supabase did not return a signed document URL.")
+	return signed if signed.startswith("http") else f"{SUPABASE_URL}/storage/v1{signed}"
 
 
 def create_graph_document(

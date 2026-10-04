@@ -1593,6 +1593,66 @@ a {
   border-radius: 100px;
   margin-left: 8px;
 }
+
+.insp-chip.degraded {
+  color: #8f3f2b;
+  background: #f8dfd2;
+  border-color: #e8b39d;
+}
+
+.gx-degraded-banner {
+  position: absolute;
+  top: 58px;
+  left: 18px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(470px, calc(100% - 36px));
+  padding: 8px 10px 8px 12px;
+  color: #f5d3c4;
+  background: rgba(92, 40, 27, 0.88);
+  border: 1px solid rgba(242, 179, 140, 0.58);
+  border-radius: 9px;
+  backdrop-filter: blur(5px);
+}
+.gx-degraded-banner span { display: grid; gap: 2px; font-size: 11px; }
+.gx-degraded-banner small { color: #e9bda8; font-size: 10px; }
+.gx-degraded-banner button {
+  flex-shrink: 0;
+  border: 1px solid #f2b38c;
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: #f2b38c;
+  color: #5c281b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.gx-degraded-banner button:disabled { opacity: 0.65; cursor: wait; }
+
+.ws-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 30;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 12px 16px;
+  border: 1px solid #d8c9ad;
+  border-radius: 10px;
+  background: #fffaf1;
+  color: #3f3529;
+  box-shadow: 0 12px 28px rgba(30, 24, 15, 0.18);
+  font-size: 13px;
+}
+.ws-toast.success { border-color: #a5c9b5; color: #185b43; }
+.ws-toast.error { border-color: #e5b09a; color: #8f3f2b; }
+
+.qz-mastered.stale {
+  color: var(--orange, #c6532d);
+  background: #f7e8df;
+}
 .qz-list {
   border-top: 1px solid var(--line);
 }
@@ -2429,6 +2489,18 @@ a {
   flex: 1;
   min-width: 0;
 }
+.nt-card-open {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nt-card-regenerate {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .nt-card-top {
   display: flex;
   align-items: center;
@@ -2450,6 +2522,10 @@ a {
 .nt-tag.full {
   background: var(--cream);
   color: var(--ink-soft);
+}
+.nt-tag.stale {
+  background: #f7e3d4;
+  color: #b6532d;
 }
 .nt-card-date {
   font-size: 11.5px;

@@ -31,9 +31,69 @@ export async function listGraphs() {
   });
 }
 
-export async function createGraph(name) {
+export async function listLibrary() {
+  return apiFetch(`${API_BASE_URL}/api/library`, {
+    headers: await authHeaders(),
+  });
+}
+
+export async function createSubject(name) {
+  return apiFetch(`${API_BASE_URL}/api/subjects`, {
+    method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateSubject(subjectId, name) {
+  return apiFetch(`${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`, {
+    method: "PATCH",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteSubject(subjectId) {
+  return apiFetch(`${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
+export async function createTopic(subjectId, name) {
+  return apiFetch(`${API_BASE_URL}/api/topics`, {
+    method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ subject_id: subjectId, name }),
+  });
+}
+
+export async function updateTopic(topicId, name) {
+  return apiFetch(`${API_BASE_URL}/api/topics/${encodeURIComponent(topicId)}`, {
+    method: "PATCH",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteTopic(topicId) {
+  return apiFetch(`${API_BASE_URL}/api/topics/${encodeURIComponent(topicId)}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
+export async function createGraph(name, topicId = null) {
   return apiFetch(`${API_BASE_URL}/api/graphs`, {
     method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, topic_id: topicId }),
+  });
+}
+
+export async function updateGraph(graphId, name) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}`, {
+    method: "PATCH",
     headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
@@ -59,9 +119,10 @@ export async function getGraphActiveSupport(graphId) {
 
 export async function fetchGraphVersion(graphId, versionId) {
   return apiFetch(
-    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/versions/${encodeURIComponent(versionId)}`,
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/versions/${encodeURIComponent(versionId)}?refresh=${Date.now()}`,
     {
       headers: await authHeaders(),
+      cache: "no-store",
     },
   );
 }
@@ -119,6 +180,126 @@ export async function askGraphQuestion(graphId, question) {
       body: JSON.stringify({ query: question }),
     },
   );
+}
+
+export async function regenerateGraph() {
+  return safeFetchJson(`${API_BASE_URL}/api/graph/regenerate`, {
+    method: "POST",
+  });
+}
+
+export function getDocumentFileUrl(filename) {
+  return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`;
+}
+
+export async function refreshDegradedConcepts(graphId) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/concepts/refresh-degraded`,
+    { method: 'POST', headers: await authHeaders() },
+  )
+}
+
+export async function getGraphDocumentSignedUrl(graphId, documentId) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/documents/${encodeURIComponent(documentId)}/file`,
+    { headers: await authHeaders() },
+  );
+}
+
+export async function regenerateConcept(conceptName) {
+  return safeFetchJson(
+    `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+function buildGraphPayload(raw) {
+  if (!raw) return { nodes: [], relationships: [], stats: {} };
+
+  const nodes = Array.isArray(raw.nodes)
+    ? raw.nodes.map((node) => {
+        const {
+          id,
+          name,
+          description,
+          source,
+          is_canonical,
+          color,
+          appears_in_weeks,
+          ...rest
+        } = node;
+        return {
+          id,
+          label: name || "Concept",
+          // Use the color from the backend, with a fallback for older data structures.
+          color: color || (is_canonical ? "#4D7C0F" : "#6D28D9"),
+          properties: {
+            ...rest,
+            ...(name ? { name } : {}),
+            ...(description ? { description } : {}),
+            ...(source ? { source } : {}),
+            ...(appears_in_weeks !== undefined ? { appears_in_weeks } : {}),
+          },
+        };
+      })
+    : [];
+
+  const relationshipsSource = raw.edges || raw.relationships || [];
+  const relationships = Array.isArray(relationshipsSource)
+    ? relationshipsSource.map((rel) => {
+        const {
+          id,
+          source,
+          target,
+          relation,
+          label,
+          summary,
+          context,
+          ...rest
+        } = rel;
+        return {
+          id: id || `${source}_${target}`,
+          source,
+          target,
+          type: relation || label || "RELATED_TO",
+          properties: {
+            ...rest,
+            ...(summary ? { summary } : {}),
+            ...(context ? { context } : {}),
+          },
+        };
+      })
+    : [];
+
+  const stats = raw.stats || {
+    total_nodes: nodes.length,
+    total_relationships: relationships.length,
+  };
+
+  return {
+    nodes,
+    relationships,
+    stats,
+    is_fused: !!raw.is_fused,
+    status: raw.status || "active",
+  };
+}
+
+export async function getGraph() {
+  const rawGraph = await safeFetchJson(`${API_BASE_URL}/api/graph`);
+  return buildGraphPayload(rawGraph);
+}
+
+export async function askQuestion(question) {
+  const response = await safeFetchJson(`${API_BASE_URL}/api/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: question }),
+  })
+  console.log(response)
+  return response
 }
 
 // Cheap tier: one grounded summary from the concept's earliest-appearance
@@ -194,6 +375,13 @@ export async function fetchQuiz(graphId) {
   );
 }
 
+export async function regenerateGraphQuiz(graphId) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/regenerate`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}
+
 // Compatibility endpoint for the older per-document quiz view. The current
 // Supabase graph flow uses fetchQuiz(graphId), which loads or creates the
 // persisted quiz for the latest graph version.
@@ -250,6 +438,14 @@ export async function saveQuizProgress(
       }),
     },
   );
+}
+
+export async function saveNoteQuizProgress(graphId, sectionId, currentIndex, answers, correct, total, points, completed = false) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/sections/${encodeURIComponent(sectionId)}/quiz-progress`, {
+    method: "POST",
+    headers: await authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ section_id: sectionId, current_index: currentIndex, answers, correct, total, points, completed }),
+  });
 }
 
 /**

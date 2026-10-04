@@ -95,7 +95,7 @@ function groupsFor(note) {
 
 /* ============================================================ list view */
 
-function ListView({ notes, loading, error, onOpen, onCreate }) {
+function ListView({ notes, loading, error, planning, onOpen, onCreate, onRegenerate }) {
   return (
     <div className="pane pane-scroll">
       <div className="nt-col">
@@ -122,10 +122,11 @@ function ListView({ notes, loading, error, onOpen, onCreate }) {
           </div>
         ) : (
           notes.map((n) => (
-            <button className="nt-card" key={n.id} onClick={() => onOpen(n.id)}>
-              <div className="nt-card-main">
+            <div className="nt-card" key={n.id}>
+              <button className="nt-card-main nt-card-open" onClick={() => onOpen(n.id)}>
                 <div className="nt-card-top">
                   <span className={`nt-tag ${n.kind}`}>{kindLabel(n)}</span>
+                  {n.status === "stale" && <span className="nt-tag stale">Stale</span>}
                   <span className="nt-card-date">{n.created}</span>
                 </div>
                 <div className="nt-card-name">{n.title}</div>
@@ -133,9 +134,18 @@ function ListView({ notes, loading, error, onOpen, onCreate }) {
                   {n.docCount} document{n.docCount === 1 ? "" : "s"} · {n.done}{" "}
                   of {n.total} sections done
                 </div>
-              </div>
+              </button>
               <Ring pct={pctOf(n.done, n.total)} />
-            </button>
+              {n.status === "stale" && (
+                <button
+                  className="btn-primary2 nt-card-regenerate"
+                  onClick={() => onRegenerate(n)}
+                  disabled={planning}
+                >
+                  {planning ? "Regenerating…" : "Regenerate"}
+                </button>
+              )}
+            </div>
           ))
         )}
       </div>
@@ -515,8 +525,8 @@ function ContextPanel({ section: loaded, open, onClose }) {
   );
 }
 
-function DetailView({ note, index, section, writing, writeError, coolLeft, onRetry,
-                      onBack, onOpenSection, onToggleDone }) {
+function DetailView({ note, index, section, writing, writeError, coolLeft, planning, onRetry,
+                      onBack, onOpenSection, onToggleDone, onRegenerate }) {
   const [railOn, setRailOn] = useState(true)
   const [ctxOn, setCtxOn] = useState(true)
   const center = useRef(null)
@@ -556,8 +566,16 @@ function DetailView({ note, index, section, writing, writeError, coolLeft, onRet
         <button className="nt-back" onClick={onBack}>
           <Arrow /> Notes
         </button>
-        <div className="nt-detail-title">{note.title}</div>
+        <div className="nt-detail-title">
+          {note.title}
+          {note.status === "stale" && <span className="nt-tag stale">Stale</span>}
+        </div>
         <div className="nt-detail-actions">
+          {note.status === "stale" && (
+            <button className="btn-primary2" onClick={onRegenerate} disabled={planning}>
+              {planning ? "Regenerating…" : "Regenerate notes"}
+            </button>
+          )}
           <button
             className={`nt-icon-btn${railOn ? " on" : ""}`}
             onClick={() => setRailOn((v) => !v)}
@@ -756,6 +774,13 @@ export default function NotesPane({ readyDocs = [], graphId }) {
 
   useEffect(() => {
     let live = true;
+    if (!graphId) {
+      setNotes([]);
+      setLoading(false);
+      return () => {
+        live = false;
+      };
+    }
     listNotes(graphId)
       .then((rows) => live && setNotes(rows))
       .catch((e) => live && setError(e.message))
@@ -840,6 +865,21 @@ export default function NotesPane({ readyDocs = [], graphId }) {
     }
   }
 
+  async function regenerate(noteToRegenerate) {
+    const currentIds = new Set(readyDocs.map((doc) => String(doc.id)));
+    const remainingIds = (noteToRegenerate.documentIds || [])
+      .filter((id) => currentIds.has(String(id)));
+    if (!remainingIds.length) {
+      setError("There are no remaining documents to regenerate these notes from.");
+      return;
+    }
+    await generate({
+      docs: remainingIds.map((id) => ({ id })),
+      split: noteToRegenerate.kind === "plan",
+      days: noteToRegenerate.days,
+    });
+  }
+
   if (view === "create") {
     return (
       <CreateView
@@ -861,10 +901,12 @@ export default function NotesPane({ readyDocs = [], graphId }) {
         writing={writing}
         writeError={writeError}
         coolLeft={coolLeft}
+        planning={planning}
         onRetry={() => setRetryTick((n) => n + 1)}
         onBack={() => setView("list")}
         onOpenSection={setIndex}
         onToggleDone={toggleDone}
+        onRegenerate={() => regenerate(note)}
       />
     );
   }
@@ -874,8 +916,10 @@ export default function NotesPane({ readyDocs = [], graphId }) {
       notes={notes}
       loading={loading}
       error={error}
+      planning={planning}
       onOpen={openDetail}
       onCreate={() => setView("create")}
+      onRegenerate={regenerate}
     />
   );
 }

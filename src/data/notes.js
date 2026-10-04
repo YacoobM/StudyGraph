@@ -45,7 +45,9 @@ function toNote(raw) {
     id: raw.id,
     title: raw.title,
     kind: raw.kind,
+    status: raw.status || "current",
     days: raw.days,
+    documentIds: raw.document_ids || [],
     docCount: (raw.documents || []).length,
     created: createdLabel(raw.created_at),
     total: raw.total,
@@ -138,15 +140,15 @@ function toSection(raw, noteId, index) {
 /* -------------------------------------------------------------------- api */
 
 /** Every note, newest first, with enough of each section for the list cards; no bodies. */
-export async function listNotes() {
-  const { notes = [] } = await fetchNotes()
+export async function listNotes(graphId) {
+  const { notes = [] } = await fetchNotes(graphId)
   const adapted = notes.map(toNote)
   adapted.forEach((n) => seen.set(n.id, n))
   return adapted
 }
 
 /** One section, written on first open (the slow call) and stored after, so safe to call again. */
-export async function getSection(noteId, index, { signal } = {}) {
+export async function getSection(graphId, noteId, index, { signal } = {}) {
   let note = seen.get(noteId)
   if (!note) {
     const fetched = await fetchNote(graphId, noteId);
@@ -201,11 +203,18 @@ export function setSectionDone(noteId, index, done) {
 }
 
 /** Plans a note over the picked documents and returns its id; sections come back empty. */
-export async function createNote({ docs, split, days }) {
+export async function createNote(graphId, { docs, split, days }) {
   const ids = (docs || []).map((d) => d?.id).filter((id) => id != null)
   if (!ids.length) return null
 
   const { note } = await planNote(graphId, ids, split ? days : null);
+  // Regeneration replaces the sections under the same note id. Clear the
+  // client-side completion cache so the new sections start at 0% progress.
+  const noteId = String(note.id);
+  const prefix = `${noteId}:`;
+  for (const key of completion.keys()) {
+    if (key.startsWith(prefix)) completion.delete(key);
+  }
   const adapted = toNote(note);
   seen.set(adapted.id, adapted);
   return adapted.id;

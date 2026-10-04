@@ -1161,7 +1161,7 @@ _WRITE_PROMPT_VERSION = "notes-write-v18"
 
 # Pinned, not a '-latest' alias: the alias returned 503 while this model answered, and a moving
 # alias makes cached bodies irreproducible.
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 _WRITE_SYSTEM = (
     "You write one section of a student's revision notes. You are writing for "
@@ -1930,11 +1930,11 @@ def _cached_body(cache_key: str) -> Optional[dict]:
     return cached if isinstance(cached, dict) and cached.get("lead") else None
 
 
-async def _add_material(entry: dict, documents) -> bool:
+async def _add_material(entry: dict, documents, retrieve=None) -> bool:
     """Retrieves a section's extracts and builds its prompt onto `entry`.
     False when nothing was retrieved, so there is nothing to write from."""
     section = entry["section"]
-    chunks = await gather_chunks(section["concepts"], documents)
+    chunks = await gather_chunks(section["concepts"], documents, retrieve=retrieve)
     if not chunks:
         print(f"Notes write: no source text retrieved for section {section['id']} "
               f"({len(section['concepts'])} concepts) — nothing to write from.")
@@ -1945,7 +1945,7 @@ async def _add_material(entry: dict, documents) -> bool:
 
 
 async def write_body(section: dict, documents=None, other_concepts=(),
-                     other_picks=()) -> tuple[Optional[dict], Optional[float]]:
+                     other_picks=(), chunk_retriever=None) -> tuple[Optional[dict], Optional[float]]:
     """Writes one section alone, through the write cache. Returns (body, retry_after); body is
     None on failure."""
     entry = _write_entry(section, other_concepts, other_picks)
@@ -1956,7 +1956,7 @@ async def write_body(section: dict, documents=None, other_concepts=(),
     client = _gemini_client()
     if client is None:
         return None, None
-    if not await _add_material(entry, documents):
+    if not await _add_material(entry, documents, retrieve=chunk_retriever):
         return None, None
 
     body, retry_after = await _generate_body(client, entry["prompt"])

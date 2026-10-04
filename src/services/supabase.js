@@ -3,9 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
-// Keep each browser tab's Supabase session independent. Supabase otherwise
-// uses shared localStorage and auth broadcasts, so signing in as another user
-// in a second tab replaces the first tab's session too.
+// Keep browser tabs independent so signing in as another user in one tab does
+// not replace the active Supabase session in every other tab.
 const tabStorageKey = 'studygraph.tab.id'
 let tabId = sessionStorage.getItem(tabStorageKey)
 if (!tabId) {

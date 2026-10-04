@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException
 
 from repositories.supabase_graphs import request_table
@@ -9,6 +11,9 @@ from repositories.users import SupabaseIdentity
 from services.notes_service import request_titles
 from services.notes_service import write_body
 from repositories.supabase_search import search_graph_chunks
+from services.supabase_note_quiz import latest_note_quiz_progress
+
+logger = logging.getLogger(__name__)
 
 
 def _fallback_section_title(filename: str) -> str:
@@ -65,6 +70,8 @@ def _sections(identity: SupabaseIdentity, note_id: str) -> list[dict]:
 def _with_sections(identity: SupabaseIdentity, rows: list[dict]) -> list[dict]:
     for row in rows:
         row["sections"] = _sections(identity, str(row["id"]))
+        for section in row["sections"]:
+            section["quiz_progress"] = latest_note_quiz_progress(identity, str(section["id"]))
         row["total"] = len(row["sections"])
     return rows
 
@@ -162,7 +169,7 @@ async def plan_graph_note(identity: SupabaseIdentity, graph_id: str, document_id
     if not selected or not selected.issubset(documents):
         raise ValueError("Select documents belonging to this graph.")
     names_by_id = {str(row["id"]): row["name"] for row in loaded["concepts"]}
-    provenance = request_table(identity, "concept_provenance", f"?select=concept_id,document_id,source_week&graph_version_id=eq.{version['id']}")
+    provenance = loaded.get("concept_provenance") or []
     concepts = []
     seen = set()
     for row in provenance:
@@ -201,6 +208,20 @@ async def write_graph_note_section(identity: SupabaseIdentity, graph_id: str, no
     section = next((row for row in note["sections"] if str(row["id"]) == str(section_id)), None)
     if not section:
         return None
+    if section.get("body") is not None:
+        logger.info(
+            "notes_section_cached graph=%s note=%s section=%s source=supabase model_call=false",
+            graph_id,
+            note_id,
+            section_id,
+        )
+        return {"section": section, "generated": False, "retry_after": None}
+    logger.info(
+        "notes_section_generating graph=%s note=%s section=%s source=supabase model_call=true",
+        graph_id,
+        note_id,
+        section_id,
+    )
     other_concepts = [concept for row in note["sections"] if row is not section for concept in (row.get("concepts") or [])]
     documents = set(note.get("documents") or [])
 

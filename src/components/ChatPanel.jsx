@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { askGraphQuestion } from "../services/api";
+import React, { useEffect, useRef, useState } from "react";
+import { askGraphQuestion, askQuestion, getGraphDocumentSignedUrl } from "../services/api";
 import "./ChatPanel.css";
 import { ArrowUp } from "lucide-react";
 
@@ -150,7 +150,7 @@ export default function ChatPanel({
     }
   }, [messages])
 
-  const openCitation = (source) => {
+  const openCitation = async (source, pageNumber) => {
     const filename = source?.fileName || source?.file || "";
     const extension = getFileExtension(filename);
 
@@ -161,7 +161,20 @@ export default function ChatPanel({
       return;
     }
 
-    const url = getDocumentUrl(source);
+    let url = getDocumentUrl(source);
+    if (graphId && source?.document_id) {
+      try {
+        const signed = await getGraphDocumentSignedUrl(graphId, source.document_id);
+        url = signed.url;
+        if (extension === "pdf") {
+          const page = pageNumber || source?.page_number || 1;
+          url = `${url}#page=${page}`;
+        }
+      } catch (error) {
+        window.alert(`Could not open ${filename}: ${error.message}`);
+        return;
+      }
+    }
 
     if (url) {
       window.open(url, "_blank", "noopener,noreferrer");

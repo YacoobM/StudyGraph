@@ -22,6 +22,7 @@ import {
   uploadGraphDocument,
   createGraphVersion,
   deleteGraphDocument,
+  refreshDegradedConcepts,
 } from '../services/api.js'
 
 const TABS = ['graph', 'documents', 'notes', 'quiz']
@@ -30,7 +31,7 @@ const extOf = (n) => (n.split('.').pop() || '').toLowerCase()
 
 function statusClass(s) {
   const v = (s || '').toLowerCase()
-  if (['done', 'ready', 'processed', 'complete', 'completed'].includes(v)) return 'ready'
+  if (['done', 'ready', 'processed', 'chunked', 'complete', 'completed'].includes(v)) return 'ready'
   if (['running', 'processing', 'extracting', 'building graph', 'seeding'].includes(v)) return 'working'
   if (['error', 'failed'].includes(v)) return 'failed'
   return 'queued'
@@ -107,7 +108,7 @@ function graphViewFromSnapshot(snapshot, activeSupport = null, documents = []) {
     return {
       id: String(concept.id),
       name: concept.name,
-      description: '',
+      description: concept.description || '',
       status: concept.status || 'active',
       week: weeks[0] || 1,
       weeks: weeks.length ? weeks : [1],
@@ -177,6 +178,8 @@ export default function Workspace() {
   const [week, setWeek] = useState(1)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [toast, setToast] = useState(null)
+  const [refreshingDegraded, setRefreshingDegraded] = useState(false)
   const setBusyToast = (msg) => { setBusy(msg); setTimeout(() => setBusy(''), 1800) }
 
   // --- Supabase state (loaded on demand per graph) ---
@@ -188,6 +191,7 @@ export default function Workspace() {
   // The upload queue outlives a graph switch, so loops check this ref before
   // refreshing the screen for a graph the user has already left.
   const activeGraphRef = useRef('')
+  const loadRequestRef = useRef(0)
   useEffect(() => { activeGraphRef.current = library.activeGraphId }, [library.activeGraphId])
 
   // --- derived ------------------------------------------------------------
@@ -203,7 +207,10 @@ export default function Workspace() {
 
   // The graph view is what the backend returned; shapeGraph ranks its nodes.
   const view = useMemo(() => shapeGraph(graph.nodes, graph.edges), [graph])
-
+  const degradedCount = useMemo(
+    () => view.nodes.filter((node) => node.status === 'needs_regeneration').length,
+    [view.nodes],
+  )
   const evolutionMaxWeek = Math.max(1, ...docs.map((d) => weekNumber(d.week)))
   const maxWeek = Math.max(
     evolutionMaxWeek,
@@ -218,6 +225,7 @@ export default function Workspace() {
   // --- data: load Supabase graph when library.activeGraphId changes ---
 
   const loadGraphWorkspace = useCallback(async (supabaseGraphId, requestedVersionId = null) => {
+    const requestId = ++loadRequestRef.current
     if (!supabaseGraphId) {
       setDocs([])
       setVersions([])
@@ -230,6 +238,7 @@ export default function Workspace() {
         listGraphDocuments(supabaseGraphId),
         listGraphVersions(supabaseGraphId),
       ])
+      if (requestId !== loadRequestRef.current) return
       setDocs(documents.map(graphDocumentRow))
       setVersions(graphVersions)
       const version = graphVersions.find((item) => item.id === requestedVersionId) || graphVersions[0]
@@ -240,7 +249,9 @@ export default function Workspace() {
         return
       }
       const snapshot = await fetchGraphVersion(supabaseGraphId, version.id)
+      if (requestId !== loadRequestRef.current) return
       const activeSupport = graphVersions[0]?.id === version.id ? await getGraphActiveSupport(supabaseGraphId) : null
+      if (requestId !== loadRequestRef.current) return
       setGraph(graphViewFromSnapshot(snapshot, activeSupport, documents))
       setSelected(null)
     } catch (e) {
@@ -252,14 +263,18 @@ export default function Workspace() {
   useEffect(() => {
   const g = library.findGraph(library.activeGraphId)
   const supabaseId = g?.graph?.supabaseId
+  // Do not leave the previous graph's documents visible while the new graph
+  // is loading. The request guard above also prevents late responses from
+  // putting the old graph's data back into this state.
+  loadRequestRef.current += 1
+  setDocs([])
+  setVersions([])
+  setGraph({ nodes: [], edges: [] })
+  setSelected(null)
   if (supabaseId) {
     setBusy('Loading graph…')
     loadGraphWorkspace(supabaseId).catch(() => {}).finally(() => setBusy(''))
   } else {
-    setDocs([])
-    setVersions([])
-    setGraph({ nodes: [], edges: [] })
-    setSelected(null)
   }
 }, [library.activeGraphId])
 
@@ -279,6 +294,32 @@ export default function Workspace() {
     }
   }
 
+  async function regenerateDegradedConcepts() {
+    const supabaseId = library.findGraph(library.activeGraphId)?.graph?.supabaseId
+    if (!supabaseId || !degradedCount) return
+    if (!window.confirm(
+      `Refresh the definitions for ${degradedCount} degraded concept${degradedCount === 1 ? '' : 's'}?\n\n`
+      + 'Only affected definitions will be updated. The graph structure will not be rebuilt.',
+    )) return
+    setRefreshingDegraded(true)
+    setToast({ message: 'Refreshing affected concept definitions…', kind: 'info' })
+    try {
+      const result = await refreshDegradedConcepts(supabaseId)
+      await loadGraphWorkspace(supabaseId)
+      setToast({
+        message: result.updated
+          ? `Updated ${result.updated} concept definition${result.updated === 1 ? '' : 's'}.`
+          : 'No degraded definitions needed updating.',
+        kind: 'success',
+      })
+    } catch (e) {
+      setToast({ message: `Could not refresh definitions: ${e.message}`, kind: 'error' })
+    } finally {
+      setRefreshingDegraded(false)
+      window.setTimeout(() => setToast(null), 4500)
+    }
+  }
+
   // --- upload -------------------------------------------------------------
   //
   // Files are queued and processed one at a time. When uploading to a local
@@ -288,6 +329,10 @@ export default function Workspace() {
 
   const pending = useRef([])
   const draining = useRef(false)
+  // React state updates are asynchronous. This ref keeps a newly-created
+  // Supabase graph available to the next queued file immediately, even when
+  // several files were selected in the same picker action.
+  const supabaseIds = useRef(new Map())
   const patchItem = (key, patch) =>
     setQueue((q) => q.map((i) => (i.key === key ? { ...i, ...patch } : i)))
 
@@ -299,14 +344,16 @@ export default function Workspace() {
       return
     }
 
-    let supabaseGraphId = g.graph.supabaseId
+    let supabaseGraphId = supabaseIds.current.get(localGraphId) || g.graph.supabaseId
+    if (supabaseGraphId) supabaseIds.current.set(localGraphId, supabaseGraphId)
     patchItem(key, { status: 'uploading', message: '' })
     try {
       // Create the Supabase graph on first upload to this local graph
       if (!supabaseGraphId) {
         patchItem(key, { status: 'uploading', message: 'Creating graph…' })
-        const { graph: created } = await createSupabaseGraph(g.graph.name)
+        const { graph: created } = await createSupabaseGraph(g.graph.name, topicId)
         supabaseGraphId = created.id
+        supabaseIds.current.set(localGraphId, supabaseGraphId)
         library.promoteGraphToSupabase(localGraphId, supabaseGraphId)
       }
 
@@ -351,7 +398,7 @@ export default function Workspace() {
         file,
         name: file.name,
         localGraphId,
-        topicId: null,
+        topicId: library.findGraph(localGraphId)?.topic?.id || null,
         status: ok ? 'queued' : 'failed',
         message: ok ? '' : `.${ext} files aren't supported — use PDF, DOCX, PPTX, TXT or MD.`,
       }
@@ -561,6 +608,9 @@ export default function Workspace() {
                   onWeekChange={setWeek}
                   onSelectNode={setSelected}
                   selectedId={selected?.id}
+                  degradedCount={degradedCount}
+                  onRefreshDegraded={regenerateDegradedConcepts}
+                  refreshingDegraded={refreshingDegraded}
                 />
               )}
               {dropOver && view.nodes.length > 0 && (
@@ -610,6 +660,12 @@ export default function Workspace() {
             }
           }}
         />
+      )}
+
+      {toast && (
+        <div className={`ws-toast ${toast.kind}`} role="status">
+          {toast.message}
+        </div>
       )}
 
       <UploadDialog

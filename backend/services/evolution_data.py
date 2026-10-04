@@ -264,6 +264,44 @@ async def summarize_weeks_batch(client, requests, engine):
     return results
 
 
+async def generate_concept_definitions_batch(client, requests):
+    """Generate first-class concept definitions from grounded document evidence."""
+    if not requests:
+        return {}
+
+    results = {}
+    system_prompt = (
+        "For each concept, write a concise 2-4 sentence definition using only the supplied document evidence. "
+        "Explain what the concept means and its important connections. Do not invent detail. "
+        'Respond: {"items": [{"key": "<KEY>", "text": "<definition>"}, ...]}'
+    )
+    batches = list(_batches(requests, BATCH_SIZE))
+    for index, batch in enumerate(batches, start=1):
+        logger.info(
+            "concept_definition_batch_started batch=%d/%d concepts=%d",
+            index, len(batches), len(batch),
+        )
+        sections = [
+            f'KEY: {request["key"]}\nCONCEPT: {request["concept_name"]}\nEVIDENCE:\n{request.get("evidence", "")}'
+            for request in batch
+        ]
+        data = await _call_and_parse_json(
+            client,
+            system_prompt,
+            "\n\n---\n\n".join(sections),
+            max_tokens=BATCH_TOKEN_OVERHEAD + SUMMARY_TOKENS_PER_ITEM * len(batch),
+        )
+        for request in batch:
+            text = data.get(request["key"])
+            if isinstance(text, str) and text.strip():
+                results[request["key"]] = text.strip()
+        logger.info(
+            "concept_definition_batch_complete batch=%d/%d concepts=%d results=%d",
+            index, len(batches), len(batch), len(data),
+        )
+    return results
+
+
 async def summarize_comparisons_batch(client, requests):
     if not requests:
         return {}
