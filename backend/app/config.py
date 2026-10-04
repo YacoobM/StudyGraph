@@ -52,5 +52,19 @@ EXTRACTION_MAX_COMPLETION_TOKENS = int(
 )
 COMPLETION_TOKEN_PARAMETER = "max_completion_tokens" if LLM_PROVIDER == "openai" else "max_tokens"
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+
+OPENAI_EMBEDDING_MODEL = _model_setting(
+    "OPENAI_EMBEDDING_MODEL",
+    "text-embedding-3-small",
+)
+
+OPENAI_EMBEDDING_DIMENSIONS = int(
+    os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "384")
+)
+
+if OPENAI_EMBEDDING_DIMENSIONS <= 0:
+    raise RuntimeError("OPENAI_EMBEDDING_DIMENSIONS must be positive.")
+
 for directory in (DATA_DIR, OUTPUT_DIR, FUSION_DIR, UPLOADS_DIR):
     directory.mkdir(exist_ok=True)

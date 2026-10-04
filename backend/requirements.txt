@@ -2,7 +2,6 @@ openai
 groq
 google-genai
 PyMuPDF
-sentence-transformers
 fastapi
 python-dotenv
 python-multipart
