@@ -4,15 +4,12 @@ import json
 from collections import Counter, defaultdict
 
 import numpy as np
-from groq import APIStatusError, RateLimitError
 from sklearn.metrics.pairwise import cosine_similarity
 
 from app.config import EXTRACTION_MODEL, RAG_MODEL
 from services import graph_fusion
 from services.graph_runtime import call_llm
-from services.chunking import build_document_chunks
 from services.embeddings import get_embedding_model
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from schemas.extraction import ExtractionResult
@@ -259,9 +256,12 @@ Relationship types: prerequisite, causes, part_of, explains, enables, related_to
 Every relationship must include the chunk_id of the source chunk. Do not reproduce quotes or context text.
 For each relationship, include:
 - summary: a short explanation (one sentence max)
+For each concept, include:
+- name: the specific academic concept
+- description: a concise 1-2 sentence explanation grounded only in the supplied text
 
 Respond with ONLY this exact JSON structure:
-{{"graph_name" : "A short-descriptive title of the graph","concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
+{{"graph_name" : "A short-descriptive title of the graph","concepts": [{{"name": "concept1", "description": "Concise grounded explanation."}}, {{"name": "concept2", "description": "Concise grounded explanation."}}], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
 
         user_text = "\n\n---\n\n".join(
             f"CHUNK_ID: {chunk['chunk_id']}\nTEXT:\n{chunk['text']}" for chunk in chunks
@@ -304,7 +304,13 @@ Respond with ONLY this exact JSON structure:
                 )
             return {
                 "graph_name": validated.graph_name,
-                "concepts": validated.concepts,
+                "concepts": [
+                    {
+                        "name": concept.name,
+                        "description": concept.description,
+                    }
+                    for concept in validated.concepts
+                ],
                 "relationships": [
                     {
                         "from": r.from_,
@@ -359,10 +365,11 @@ Respond with ONLY this exact JSON structure:
             and extracted_name.strip()
         ):
             self.graph_name = extracted_name.strip()
-        for c in raw_data.get("concepts", []):
-            if not isinstance(c, str):
+        for concept in raw_data.get("concepts", []):
+            if not isinstance(concept, dict):
                 continue
-            name = c.lower().strip()
+            name = str(concept.get("name", "")).lower().strip()
+            description = str(concept.get("description", "") or "").strip()
             if not name:
                 continue
             if max_nodes_per_doc is not None:
@@ -377,6 +384,7 @@ Respond with ONLY this exact JSON structure:
                     "source": doc_name,
                     "week": week_key,
                     "pages": pages or [],
+                    "description": description,
                 }
             )
 

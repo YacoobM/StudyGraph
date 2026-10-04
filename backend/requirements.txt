@@ -1,16 +1,12 @@
-spacy
-sentence_transformers
-google.generativeai
 openai
 groq
-PyMuPDF 
+google-genai
+PyMuPDF
 sentence-transformers
 fastapi
-datasets
 python-dotenv
 python-multipart
 uvicorn
-chromadb
 scikit-learn
 numpy
 pydantic
@@ -19,13 +15,6 @@ python-pptx
 easyocr
 opencv-python
 Pillow
-google-genai
-ragas[all]
-langchain-openai
-langchain-core
-langchain-community<0.4.2
-tqdm
-argon2-cffi
-email-validator
 python-magic; sys_platform != "win32"
 python-magic-bin; sys_platform == "win32"
+supabase

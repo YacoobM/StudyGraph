@@ -14,19 +14,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
-from app.logging_config import configure_logging
 
-from api.routes.graphs import router as graphs_router
 from app import state as runtime_state
 from app.config import LLM_API_KEY_ENV
 from services.llm_provider import create_llm_client
 from app.logging_config import get_logger
 
-from app.logging_config import get_logger
+# API routes registration
+from api.routes.graphs import router as graphs_router
+from api.routes.documents import router as documents_router
+from api.routes.query import router as query_router
+from api.routes.quiz import router as quiz_router
+from api.routes.notes import router as notes_router
+
 
 logger = get_logger(__name__)
 load_dotenv()
-configure_logging()
 
 if not os.getenv(LLM_API_KEY_ENV):
     raise RuntimeError(f"{LLM_API_KEY_ENV} is not configured!")
@@ -55,12 +58,14 @@ app.add_middleware(
 )
 
 app.include_router(graphs_router)
+app.include_router(documents_router)
+app.include_router(query_router)
+app.include_router(quiz_router)
+app.include_router(notes_router)
 
 client = create_llm_client(os.environ[LLM_API_KEY_ENV])
 
 runtime_state.configure_runtime(client)
-
-logger = get_logger(__name__)
 
 
 @app.get("/health")

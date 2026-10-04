@@ -139,6 +139,7 @@ def _restore_engine(
 			"source": document_id,
 			"week": week,
 			"pages": sorted(pages),
+			"description": concept_row.get("description") or "",
 		})
 		engine._doc_concept_names.setdefault(document_id, set()).add(name)
 		engine.known_concepts.add(name)
@@ -683,14 +684,30 @@ async def create_graph_version_from_batch(
 		for edge in engine.fused_edges
 		for endpoint in (edge["from"], edge["to"])
 	)
-	description_targets = [{"name": name} for name in sorted(canonical_names) if name]
-	concept_descriptions = await _generate_concept_descriptions(
-		runtime_state.client,
-		description_targets,
-		concept_support,
-		chunks_by_document,
-		engine,
-	)
+	# Descriptions are extracted alongside concepts. Prefer the first grounded
+	# description for each canonical concept and only use the old generation
+	# path as a fallback for concepts with no extracted description.
+	concept_descriptions = {}
+	for concept in engine.concepts:
+		name = _canonical_name(engine, concept["name"])
+		description = (concept.get("description") or "").strip()
+		if name and description and name not in concept_descriptions:
+			concept_descriptions[name] = description[:1000]
+
+	description_targets = [
+		{"name": name}
+		for name in sorted(canonical_names)
+		if name and name not in concept_descriptions
+	]
+	if description_targets:
+		fallback_descriptions = await _generate_concept_descriptions(
+			runtime_state.client,
+			description_targets,
+			concept_support,
+			chunks_by_document,
+			engine,
+		)
+		concept_descriptions.update(fallback_descriptions)
 	# Carry forward definitions for concepts restored from the previous version
 	# when no new chunk evidence was available for them.
 	for previous in (latest_snapshot or {}).get("concepts", []):
