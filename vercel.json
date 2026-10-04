@@ -1,7 +1,0 @@
-{
-  "buildCommand": "npm run build --prefix src",
-  "outputDirectory": "src/dist",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
