@@ -9,7 +9,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from app.config import EXTRACTION_MODEL, RAG_MODEL
 from services import graph_fusion
 from services.graph_runtime import call_llm
-from services.embeddings import get_embedding_model
+from services.embeddings import get_embedding_client
 from sklearn.metrics.pairwise import cosine_similarity
 
 from schemas.extraction import ExtractionResult
@@ -45,7 +45,7 @@ class StudyGraphEngine:
         self.graph_name = ""
         self.concepts = []
         self.edges = []
-        self.model = get_embedding_model()
+        self.model = get_embedding_client()
         self.chunk_store = []
         self.graph = None
         self.graph_status = "active"

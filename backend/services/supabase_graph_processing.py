@@ -21,7 +21,7 @@ from repositories.supabase_graphs import (
 )
 from repositories.users import SupabaseIdentity
 from services import graph_fusion
-from services.embeddings import EMBEDDING_DIMENSIONS
+from app.config import OPENAI_EMBEDDING_DIMENSIONS as EMBEDDING_DIMENSIONS
 from services.graph_engine import StudyGraphEngine
 from services.evolution_data import generate_concept_definitions_batch
 

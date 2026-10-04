@@ -8,7 +8,8 @@ from fastapi import HTTPException
 
 from app.config import SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL
 from repositories.users import SupabaseIdentity
-from services.embeddings import EMBEDDING_DIMENSIONS, encode_texts
+from services.embeddings import encode_texts
+from app.config import OPENAI_EMBEDDING_DIMENSIONS as EMBEDDING_DIMENSIONS
 
 
 RPC_NAME = "search_graph_document_chunks"
