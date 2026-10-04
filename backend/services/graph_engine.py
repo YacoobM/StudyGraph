@@ -9,8 +9,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from app.config import EXTRACTION_MODEL, RAG_MODEL
 from services import graph_fusion
 from services.graph_runtime import call_llm
-from services.embeddings import get_embedding_client
 from sklearn.metrics.pairwise import cosine_similarity
+from services.embeddings import encode_texts
 
 from schemas.extraction import ExtractionResult
 from app.config import (
@@ -45,7 +45,6 @@ class StudyGraphEngine:
         self.graph_name = ""
         self.concepts = []
         self.edges = []
-        self.model = get_embedding_client()
         self.chunk_store = []
         self.graph = None
         self.graph_status = "active"
@@ -108,7 +107,7 @@ class StudyGraphEngine:
         """
         if not seeds:
             return seeds
-        embeddings = self.model.encode(seeds, show_progress_bar=False)
+        embeddings = np.asarray(encode_texts(seeds))
         kept = []
         kept_embeddings = []
         for i, seed in enumerate(seeds):
@@ -199,8 +198,8 @@ class StudyGraphEngine:
         known_concepts changes, before relevant_known_concepts is used."""
         self._known_concepts_list = sorted(self.known_concepts)
         if self._known_concepts_list:
-            self.known_concept_embeddings = self.model.encode(
-                self._known_concepts_list, show_progress_bar=False
+            self.known_concept_embeddings = np.asarray(
+                encode_texts(self._known_concepts_list)
             )
         else:
             self.known_concept_embeddings = None
@@ -210,9 +209,7 @@ class StudyGraphEngine:
         by embedding similarity rather than a flat alphabetical slice."""
         if not self._known_concepts_list or self.known_concept_embeddings is None:
             return []
-        query_embedding = self.model.encode(
-            [text[:2000].lower()], show_progress_bar=False
-        )
+        query_embedding = np.asarray(encode_texts([text[:2000].lower()]))
         sims = cosine_similarity(query_embedding, self.known_concept_embeddings)[0]
         top_idx = np.argsort(sims)[::-1][:top_k]
         return [self._known_concepts_list[i] for i in top_idx]
@@ -477,7 +474,7 @@ Respond with ONLY this exact JSON structure:
             if concept["name"] not in dropped:
                 continue
             cache_key = (concept["name"], doc_name, week_key)
-            embedding = self.model.encode([concept["name"]], show_progress_bar=False)[0]
+            embedding = encode_texts([concept["name"]])[0]
             self.pruned_concept_cache[cache_key] = {
                 "key": cache_key,
                 "name": concept["name"],
@@ -541,7 +538,7 @@ Respond with ONLY this exact JSON structure:
 
         active_names = [concept["name"] for concept in active_concepts]
         active_name_set = set(active_names)
-        active_embeddings = self.model.encode(active_names, show_progress_bar=False)
+        active_embeddings = np.asarray(encode_texts(active_names))
 
         restored = []
         for cache_key, entry in list(self.pruned_concept_cache.items()):
@@ -760,8 +757,8 @@ Respond with ONLY this exact JSON structure:
         if not self.concepts:
             return None
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        node_embeddings = np.asarray(encode_texts(node_names))
+        query_embedding = np.asarray(encode_texts([query.lower()]))
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
         best_idx = np.argmax(similarities)
         if similarities[best_idx] > 0.7:
@@ -833,8 +830,8 @@ Respond with ONLY this exact JSON structure:
             return {"nodes": [], "edges": [], "prompt_text": ""}
 
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        node_embeddings = np.asarray(encode_texts(node_names))
+        query_embedding = np.asarray(encode_texts([query.lower()]))
 
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
 
@@ -893,8 +890,8 @@ Respond with ONLY this exact JSON structure:
         working_edges = self.fused_edges if self.fused_edges else self.edges
 
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        node_embeddings = np.asarray(encode_texts(node_names))
+        query_embedding = np.asarray(encode_texts([query.lower()]))
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
 
         seed_nodes = set()
@@ -978,7 +975,7 @@ Respond with ONLY this exact JSON structure:
         # store into the vector database
         texts = [chunk["text"] for chunk in chunks]
 
-        embeddings = self.model.encode(texts, show_progress_bar=False)
+        embeddings = np.asarray(encode_texts(texts))
 
         ids = [
             chunk.get("chunk_id", f"chunk_{self._chroma_chunk_counter + i}")
@@ -1005,7 +1002,7 @@ Respond with ONLY this exact JSON structure:
 
     def retrieve_chunks(self, query, top_k=5, graph_id=None):
         target_graph_id = self.graph_id if graph_id is None else graph_id
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        query_embedding = np.asarray(encode_texts([query.lower()]))
 
         query_kwargs = {
             "query_embeddings": query_embedding,
@@ -1046,7 +1043,7 @@ Respond with ONLY this exact JSON structure:
         if not texts:
             return
 
-        embeddings = self.model.encode(texts, show_progress_bar=False)
+        embeddings = np.asarray(encode_texts(texts))
         for chunk, text, pages, embedding in zip(chunks, texts, pages_list, embeddings):
             self.chunks_by_week[week_key].append(
                 {
@@ -1062,7 +1059,7 @@ Respond with ONLY this exact JSON structure:
         pool = self.chunks_by_week.get(week_key, [])
         if not pool:
             return []
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        query_embedding = np.asarray(encode_texts([query.lower()]))
         chunk_embeddings = np.array([c["embedding"] for c in pool])
         similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
         top_indices = np.argsort(similarities)[-top_k:][::-1]
