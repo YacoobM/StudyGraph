@@ -25,12 +25,6 @@ async function safeFetchJson(url, options = {}) {
   return handleResponse(response);
 }
 
-export async function listGraphs() {
-  return apiFetch(`${API_BASE_URL}/api/graphs`, {
-    headers: await authHeaders(),
-  });
-}
-
 export async function listLibrary() {
   return apiFetch(`${API_BASE_URL}/api/library`, {
     headers: await authHeaders(),
@@ -46,18 +40,24 @@ export async function createSubject(name) {
 }
 
 export async function updateSubject(subjectId, name) {
-  return apiFetch(`${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`, {
-    method: "PATCH",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ name }),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`,
+    {
+      method: "PATCH",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name }),
+    },
+  );
 }
 
 export async function deleteSubject(subjectId) {
-  return apiFetch(`${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`, {
-    method: "DELETE",
-    headers: await authHeaders(),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/subjects/${encodeURIComponent(subjectId)}`,
+    {
+      method: "DELETE",
+      headers: await authHeaders(),
+    },
+  );
 }
 
 export async function createTopic(subjectId, name) {
@@ -195,8 +195,8 @@ export function getDocumentFileUrl(filename) {
 export async function refreshDegradedConcepts(graphId) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/concepts/refresh-degraded`,
-    { method: 'POST', headers: await authHeaders() },
-  )
+    { method: "POST", headers: await authHeaders() },
+  );
 }
 
 export async function getGraphDocumentSignedUrl(graphId, documentId) {
@@ -287,39 +287,6 @@ function buildGraphPayload(raw) {
   };
 }
 
-export async function getGraph() {
-  const rawGraph = await safeFetchJson(`${API_BASE_URL}/api/graph`);
-  return buildGraphPayload(rawGraph);
-}
-
-export async function askQuestion(question) {
-  const response = await safeFetchJson(`${API_BASE_URL}/api/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: question }),
-  })
-  console.log(response)
-  return response
-}
-
-// Cheap tier: one grounded summary from the concept's earliest-appearance
-// week only. Use this for a plain node click — it's what backs the
-// "DESCRIPTION" text in both the general graph and the Evolution graph.
-export async function fetchConceptDescription(conceptName) {
-  return safeFetchJson(
-    `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/description`,
-  );
-}
-
-// Full tier: every week's summary plus every week-to-week comparison. Costs
-// one LLM call per week/transition, so only call this from an explicit
-// "show concept evolution" action, not on a plain node click.
-export async function fetchConcept(conceptName) {
-  return safeFetchJson(
-    `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}`,
-  );
-}
-
 export async function fetchGraphConceptEvolution(graphId, conceptName) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/concepts/${encodeURIComponent(conceptName)}/evolution`,
@@ -376,10 +343,13 @@ export async function fetchQuiz(graphId) {
 }
 
 export async function regenerateGraphQuiz(graphId) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/regenerate`, {
-    method: "POST",
-    headers: await authHeaders(),
-  });
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/regenerate`,
+    {
+      method: "POST",
+      headers: await authHeaders(),
+    },
+  );
 }
 
 // Compatibility endpoint for the older per-document quiz view. The current
@@ -440,12 +410,32 @@ export async function saveQuizProgress(
   );
 }
 
-export async function saveNoteQuizProgress(graphId, sectionId, currentIndex, answers, correct, total, points, completed = false) {
-  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/sections/${encodeURIComponent(sectionId)}/quiz-progress`, {
-    method: "POST",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ section_id: sectionId, current_index: currentIndex, answers, correct, total, points, completed }),
-  });
+export async function saveNoteQuizProgress(
+  graphId,
+  sectionId,
+  currentIndex,
+  answers,
+  correct,
+  total,
+  points,
+  completed = false,
+) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/sections/${encodeURIComponent(sectionId)}/quiz-progress`,
+    {
+      method: "POST",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        section_id: sectionId,
+        current_index: currentIndex,
+        answers,
+        correct,
+        total,
+        points,
+        completed,
+      }),
+    },
+  );
 }
 
 /**

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import ConceptGraph from '../components/ConceptGraph.jsx'
@@ -604,8 +604,6 @@ export default function Workspace() {
                   onVersionChange={selectVersion}
                   loadingVersion={busy === 'Loading version…'}
                   week={week}
-                  maxWeek={maxWeek}
-                  onWeekChange={setWeek}
                   onSelectNode={setSelected}
                   selectedId={selected?.id}
                   degradedCount={degradedCount}
@@ -679,28 +677,6 @@ export default function Workspace() {
         onClearFinished={() => setQueue((q) => q.filter((i) => ACTIVE.includes(i.status)))}
       />
     </div>
-  )
-}
-
-function TopicSelect({ id, label, subjects = [], value, onChange }) {
-  return (
-    <>
-      {label}
-      <select
-        id={id}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        <option value="">Unassigned</option>
-        {subjects.map((s) => (
-          <optgroup key={s.id} label={s.name}>
-            {(s.topics || []).map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    </>
   )
 }
 
