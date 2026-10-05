@@ -648,14 +648,13 @@ def _llm_client():
     and pacing belong to evolution_data._call_with_retry."""
     global _client
     if _client is None:
-        from app.config import LLM_API_KEY_ENV
+        from app.config import OPENAI_API_KEY
         from services.llm_provider import create_llm_client
-        key = os.getenv(LLM_API_KEY_ENV)
-        if not key:
+        if not OPENAI_API_KEY:
             return None
         # max_retries=1 leaves retrying to _call_with_retry rather than doubling
         # it up at the SDK layer.
-        _client = _low_reasoning(create_llm_client(key, max_retries=1))
+        _client = _low_reasoning(create_llm_client(OPENAI_API_KEY, max_retries=1))
     return _client
 
 

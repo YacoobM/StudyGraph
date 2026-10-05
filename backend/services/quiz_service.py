@@ -17,7 +17,7 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, LLM_API_KEY_ENV,
+from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, OPENAI_API_KEY,
                         NON_RAG_REASONING_EFFORT, OUTPUT_DIR)
 from models.quiz_models import QuizAttempt
 from services.llm_gateway import estimate_tokens, graph_limiter
@@ -193,8 +193,7 @@ Return ONLY a JSON array, no prose and no markdown fences:
 
 
 def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[dict]:
-    key = os.getenv(LLM_API_KEY_ENV)
-    if not key:
+    if not OPENAI_API_KEY:
         return []
     relations = "\n".join(
         f"- {e['from']} {e.get('relation', 'relates to')} {e['to']}"
@@ -207,7 +206,7 @@ def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[
     try:
         from services.llm_provider import create_llm_client
         client = create_llm_client(
-            key,
+            OPENAI_API_KEY,
             timeout=QuizConfig.LLM_TIMEOUT_SECONDS,
             max_retries=1,
         )
@@ -314,10 +313,9 @@ _QUIZ_FIELDS = ("id", "q", "o", "a", "why", "d")
 
 
 def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
-    """One call for a document's quiz from its text, on the configured provider. Questions whose
+    """One call for a document's quiz from its text via OpenAI. Questions whose
     evidence is not in the text, or that fail validate_quiz, are dropped."""
-    key = os.getenv(LLM_API_KEY_ENV)
-    if not key:
+    if not OPENAI_API_KEY:
         return []
     from services import notes_service as ns
     from services.graph_fusion import is_request_too_large, retry_after_seconds
@@ -330,7 +328,9 @@ def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
     excerpt = sample_text(source, QuizConfig.LLM_INPUT_TOKENS * 4)
     user = f"Write {n} questions.\n\nSOURCE TEXT:\n{excerpt}"
 
-    client = create_llm_client(key, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0)
+    client = create_llm_client(
+        OPENAI_API_KEY, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0
+    )
     finish, text = None, ""
     for attempt in range(2):
         try:

@@ -12,11 +12,10 @@ if sys.stderr.encoding != "utf-8":
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 import os
 
 from app import state as runtime_state
-from app.config import LLM_API_KEY_ENV
+from app.config import OPENAI_API_KEY
 from services.llm_provider import create_llm_client
 from app.logging_config import get_logger
 
@@ -29,10 +28,9 @@ from api.routes.notes import router as notes_router
 
 
 logger = get_logger(__name__)
-load_dotenv()
 
-if not os.getenv(LLM_API_KEY_ENV):
-    raise RuntimeError(f"{LLM_API_KEY_ENV} is not configured!")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY is not configured!")
 
 app = FastAPI(
     title="StudyGraph API",
@@ -63,7 +61,7 @@ app.include_router(query_router)
 app.include_router(quiz_router)
 app.include_router(notes_router)
 
-client = create_llm_client(os.environ[LLM_API_KEY_ENV])
+client = create_llm_client(OPENAI_API_KEY)
 
 runtime_state.configure_runtime(client)
 
@@ -76,4 +74,3 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)
-

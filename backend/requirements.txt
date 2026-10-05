@@ -1,5 +1,4 @@
 openai
-groq
 google-genai
 PyMuPDF
 fastapi

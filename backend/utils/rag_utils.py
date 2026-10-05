@@ -97,7 +97,7 @@ def call_rag_llm(
     Make the LLM call for RAG queries.
 
     Args:
-        client: OpenAI/Groq Client
+        client: OpenAI client
         model: Model name
         system_prompt: System prompt text
         user_prompt: user prompt text

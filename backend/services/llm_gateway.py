@@ -1,11 +1,15 @@
 import asyncio
 import logging
-import os
 import threading
 import time
 
 logger = logging.getLogger(__name__)
-from app.config import LLM_PROVIDER
+from app.config import (
+    GRAPH_INPUT_TPM,
+    GRAPH_OUTPUT_TPM,
+    RAG_INPUT_TPM,
+    RAG_OUTPUT_TPM,
+)
 
 
 class SharedTokenLimiter:
@@ -75,29 +79,16 @@ class SharedTokenLimiter:
             await asyncio.sleep(wait_time)
 
 
-# The generic LLM_* settings override provider defaults. Groq preserves the
-# original conservative 7k input / 1k output budget when selected.
-_provider_limits = {
-    "openai": ("60000", "12000"),
-    "groq": ("7000", "2000"),
-}[LLM_PROVIDER]
-_DEFAULT_INPUT_LIMIT = int(
-    os.getenv("LLM_INPUT_TOKENS_PER_MINUTE", _provider_limits[0])
-)
-_DEFAULT_OUTPUT_LIMIT = int(
-    os.getenv("LLM_OUTPUT_TOKENS_PER_MINUTE", _provider_limits[1])
-)
-
 rag_limiter = SharedTokenLimiter(
     workload="rag",
-    input_limit=int(os.getenv("RAG_INPUT_TPM", "100000")),
-    output_limit=int(os.getenv("RAG_OUTPUT_TPM", "50000")),
+    input_limit=RAG_INPUT_TPM,
+    output_limit=RAG_OUTPUT_TPM,
 )
 
 graph_limiter = SharedTokenLimiter(
     workload="graph",
-    input_limit=int(os.getenv("GRAPH_INPUT_TPM", "200000")),
-    output_limit=int(os.getenv("GRAPH_INPUT_TPM", "100000")),
+    input_limit=GRAPH_INPUT_TPM,
+    output_limit=GRAPH_OUTPUT_TPM,
 )
 
 

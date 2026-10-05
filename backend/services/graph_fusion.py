@@ -10,8 +10,12 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from services.embeddings import encode_texts
-from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, FUSION_DIR, LLM_PROVIDER,
-                        NON_RAG_REASONING_EFFORT)
+from app.config import (
+    COMPLETION_TOKEN_PARAMETER,
+    EXTRACTION_MODEL,
+    FUSION_DIR,
+    NON_RAG_REASONING_EFFORT,
+)
 from services.fusion_log import FusionLog
 from services.llm_gateway import estimate_tokens, graph_limiter
 from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
@@ -22,8 +26,8 @@ AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55
 NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "mis")
 
-# Pairs per verdict call (steps 3, 3b and 5): 6 on OpenAI, 4 on Groq.
-_VERDICT_PAIR_BATCH = 6 if LLM_PROVIDER == "openai" else 4
+# Pairs per verdict call (steps 3, 3b and 5).
+_VERDICT_PAIR_BATCH = 6
 # Resends of the same request after malformed JSON. At temperature 0 a resend mostly repeats
 # itself, so one is enough; 429s count separately.
 _VERDICT_MAX_RETRIES = 1
@@ -638,7 +642,7 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
                 response_format={"type": "json_object"},
                 # Accepted by OpenAI only with reasoning_effort "none".
                 temperature=0,
-                # max_tokens on Groq; OpenAI's gpt-5 models reject it for max_completion_tokens.
+                # OpenAI reasoning models use max_completion_tokens.
                 **{COMPLETION_TOKEN_PARAMETER: max_tokens},
             )
             raw = completion.choices[0].message.content or ""

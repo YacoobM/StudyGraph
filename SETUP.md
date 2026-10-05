@@ -124,7 +124,7 @@ samples.
 
 Two generation paths:
 
-- **With `GROQ_API_KEY` set**, an LLM writes the questions from the extracted
+- **With `OPENAI_API_KEY` set**, an LLM writes the questions from the extracted
   concepts and relations. Better prose, better distractors.
 - **Without a key**, questions are built straight from the graph's relations by
   template — "what does X *begins with*?" — with wrong options drawn from other
@@ -168,18 +168,11 @@ from your own PDFs:
 ```bash
 cd backend && source .venv/bin/activate
 pip install -r requirements.txt     # spacy, chromadb, torch — several GB
-echo "GROQ_API_KEY=gsk_your_key" > .env
+echo "OPENAI_API_KEY=your_openai_api_key" > .env
 uvicorn app.main:app --port 8000 --reload
 ```
 
-Free Groq key, no card: https://console.groq.com — `GEMINI_VISION_API_KEY` is
-optional, needed only to read images and handwriting.
-
-**Groq shut down `llama-3.3-70b-versatile` and `llama-3.1-8b-instant` on
-16 August 2026.** The backend called both, in `main.py`, `graph_fusion.py` and
-`evolution_data.py`. They are replaced with `openai/gpt-oss-120b` and
-`openai/gpt-oss-20b`, Groq's own recommended replacements, both on the free
-tier.
+`GEMINI_API_KEY` is optional and is needed only to read images and handwriting.
 
 ## 8. Known limits
 
