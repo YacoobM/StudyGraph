@@ -314,6 +314,40 @@ export function useLibrary(userKey) {
     }))
   }, [])
 
+  // Old cached libraries may still contain local sub_/top_ IDs. Resolve those
+  // IDs before a new graph is created so Supabase only receives UUIDs.
+  const ensureTopicSupabase = useCallback(async (localGraphId) => {
+    let found = null
+    for (const subject of lib.subjects) {
+      for (const topic of subject.topics) {
+        if (topic.graphs.some((graph) => graph.id === localGraphId)) {
+          found = { subject, topic }
+          break
+        }
+      }
+      if (found) break
+    }
+    if (!found) return null
+
+    let subjectId = found.subject.id
+    if (String(subjectId).startsWith('sub_')) {
+      const { subject } = await createRemoteSubject(found.subject.name)
+      subjectId = String(subject.id)
+      setLib(mapSubjects((item) => item.id === found.subject.id ? { ...item, id: subjectId } : item))
+    }
+
+    if (!String(found.topic.id).startsWith('top_')) return String(found.topic.id)
+    const { topic } = await createRemoteTopic(subjectId, found.topic.name)
+    const topicId = String(topic.id)
+    setLib(mapSubjects((item) => ({
+      ...item,
+      topics: item.topics.map((current) => current.id === found.topic.id
+        ? { ...current, id: topicId }
+        : current),
+    })))
+    return topicId
+  }, [lib])
+
   const topicOfDoc = useCallback((docId) => {
     for (const s of lib.subjects) {
       for (const t of s.topics) {
@@ -333,6 +367,6 @@ export function useLibrary(userKey) {
     addTopic, renameTopic, toggleTopic, deleteTopic,
     addGraph, renameGraph, deleteGraph,
     setActiveGraph, assignDocs, findGraph, findGraphBySupabaseId, graphOfDoc, topicOfDoc,
-    promoteGraphToSupabase,
+    promoteGraphToSupabase, ensureTopicSupabase,
   }
 }

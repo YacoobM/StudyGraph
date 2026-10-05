@@ -336,7 +336,7 @@ export default function Workspace() {
   const patchItem = (key, patch) =>
     setQueue((q) => q.map((i) => (i.key === key ? { ...i, ...patch } : i)))
 
-  async function processItem({ key, file, name, localGraphId, topicId }) {
+  async function processItem({ key, file, name, localGraphId }) {
     const g = library.findGraph(localGraphId)
     if (!g) {
       patchItem(key, { status: 'failed', message: 'Graph not found' })
@@ -351,6 +351,7 @@ export default function Workspace() {
       // Create the Supabase graph on first upload to this local graph
       if (!supabaseGraphId) {
         patchItem(key, { status: 'uploading', message: 'Creating graph…' })
+        const topicId = await library.ensureTopicSupabase(localGraphId)
         const { graph: created } = await createSupabaseGraph(g.graph.name, topicId)
         supabaseGraphId = created.id
         supabaseIds.current.set(localGraphId, supabaseGraphId)
@@ -398,7 +399,6 @@ export default function Workspace() {
         file,
         name: file.name,
         localGraphId,
-        topicId: library.findGraph(localGraphId)?.topic?.id || null,
         status: ok ? 'queued' : 'failed',
         message: ok ? '' : `.${ext} files aren't supported — use PDF, DOCX, PPTX, TXT or MD.`,
       }
@@ -679,28 +679,6 @@ export default function Workspace() {
         onClearFinished={() => setQueue((q) => q.filter((i) => ACTIVE.includes(i.status)))}
       />
     </div>
-  )
-}
-
-function TopicSelect({ id, label, subjects = [], value, onChange }) {
-  return (
-    <>
-      {label}
-      <select
-        id={id}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        <option value="">Unassigned</option>
-        {subjects.map((s) => (
-          <optgroup key={s.id} label={s.name}>
-            {(s.topics || []).map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    </>
   )
 }
 

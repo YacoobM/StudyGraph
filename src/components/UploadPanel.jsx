@@ -65,20 +65,91 @@ export function UploadQueue({ items }) {
   )
 }
 
-/** Destination picker: "No topic" plus every topic, grouped by subject. */
-export function TopicSelect({ subjects, value, onChange, label = 'Add to', id }) {
+function TreeIcon({ kind }) {
+  if (kind === 'graph') {
+    return <svg className="up-tree-icon graph" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l5 5m5-5l-5 5m0 0v6" /><circle cx="7" cy="7" r="2" /><circle cx="17" cy="7" r="2" /><circle cx="12" cy="18" r="2" /></svg>
+  }
+  return <svg className="up-tree-icon folder" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l1.8 2h9.2v8.5a1.5 1.5 0 0 1-1.5 1.5h-14a1.5 1.5 0 0 1-1.5-1.5z" /><path d="M3.5 7.5v-1a1.5 1.5 0 0 1 1.5-1.5h4l1.8 2" /></svg>
+}
+
+/** Destination picker: every graph, grouped by subject and labelled by topic. */
+export function GraphSelect({ subjects, value, onChange, label = 'Add to', id }) {
+  const [open, setOpen] = useState(false)
+  const [collapsedSubjects, setCollapsedSubjects] = useState(() => new Set())
+  const [collapsedTopics, setCollapsedTopics] = useState(() => new Set())
+  const picker = useRef(null)
+  const selected = subjects
+    .flatMap((subject) => (subject.topics || []).flatMap((topic) => (topic.graphs || []).map((graph) => ({
+      subject, topic, graph,
+    }))))
+    .find((entry) => String(entry.graph.id) === String(value))
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => {
+      if (!picker.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
   return (
-    <label className="up-dest" htmlFor={id}>
+    <div className="up-dest" ref={picker}>
       <span>{label}</span>
-      <select id={id} value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
-        <option value="">No topic (All documents)</option>
-        {subjects.map((s) => (
-          <optgroup key={s.id} label={s.name}>
-            {s.topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </optgroup>
-        ))}
-      </select>
-    </label>
+      <button
+        id={id}
+        type="button"
+        className={`up-dest-trigger${open ? ' open' : ''}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {selected ? selected.graph.name : 'Choose a graph'}
+        <span aria-hidden="true">⌄</span>
+      </button>
+      {open && (
+        <div className="up-dest-menu" role="listbox" aria-label="Choose a graph">
+          {subjects.map((subject) => (
+            <div className="up-tree-subject" key={subject.id}>
+              <div className="up-tree-subject-name">
+                <button type="button" className="up-tree-toggle" aria-label={`${collapsedSubjects.has(String(subject.id)) ? 'Expand' : 'Collapse'} ${subject.name}`} onClick={() => setCollapsedSubjects((current) => {
+                  const next = new Set(current)
+                  const key = String(subject.id)
+                  if (next.has(key)) next.delete(key); else next.add(key)
+                  return next
+                })}>{collapsedSubjects.has(String(subject.id)) ? '›' : '⌄'}</button>
+                {subject.name}
+              </div>
+              {!collapsedSubjects.has(String(subject.id)) && (subject.topics || []).map((topic) => (
+                <div className="up-tree-topic" key={topic.id}>
+                  <div className="up-tree-topic-name">
+                    <button type="button" className="up-tree-toggle" aria-label={`${collapsedTopics.has(String(topic.id)) ? 'Expand' : 'Collapse'} ${topic.name}`} onClick={() => setCollapsedTopics((current) => {
+                      const next = new Set(current)
+                      const key = String(topic.id)
+                      if (next.has(key)) next.delete(key); else next.add(key)
+                      return next
+                    })}>{collapsedTopics.has(String(topic.id)) ? '›' : '⌄'}</button>
+                    <TreeIcon kind="folder" /><span>{topic.name}</span><span className="up-tree-count">{topic.graphs?.length || 0}</span>
+                  </div>
+                  {!collapsedTopics.has(String(topic.id)) && (topic.graphs || []).map((graph) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={String(graph.id) === String(value)}
+                        className={`up-tree-graph${String(graph.id) === String(value) ? ' selected' : ''}`}
+                        key={graph.id}
+                        onClick={() => { onChange(graph.id); setOpen(false) }}
+                      >
+                        <TreeIcon kind="graph" />{graph.name}<span className="up-tree-count">{graph.docIds?.length || 0}</span>
+                      </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -107,7 +178,7 @@ export default function UploadDialog({
           <button type="button" className="up-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
 
-        <TopicSelect id="up-dest" subjects={subjects} value={destination} onChange={onDestination} />
+        <GraphSelect id="up-dest" subjects={subjects} value={destination} onChange={onDestination} />
 
         <UploadDrop onFiles={onFiles} />
 
