@@ -188,10 +188,10 @@ export default function Workspace() {
   const [docs, setDocs] = useState([])
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
 
-  // The upload queue outlives a graph switch, so loops check this ref before
-  // refreshing the screen for a graph the user has already left.
   const activeGraphRef = useRef('')
   const loadRequestRef = useRef(0)
+  const graphMetadataRef = useRef(new Map())
+  const graphSnapshotsRef = useRef(new Map())
   useEffect(() => { activeGraphRef.current = library.activeGraphId }, [library.activeGraphId])
 
   // --- derived ------------------------------------------------------------
@@ -224,7 +224,11 @@ export default function Workspace() {
 
   // --- data: load Supabase graph when library.activeGraphId changes ---
 
-  const loadGraphWorkspace = useCallback(async (supabaseGraphId, requestedVersionId = null) => {
+  const loadGraphWorkspace = useCallback(async (
+    supabaseGraphId,
+    requestedVersionId = null,
+    { refreshMetadata = true } = {},
+  ) => {
     const requestId = ++loadRequestRef.current
     if (!supabaseGraphId) {
       setDocs([])
@@ -234,13 +238,21 @@ export default function Workspace() {
       return
     }
     try {
-      const [{ documents = [] }, { versions: graphVersions = [] }] = await Promise.all([
-        listGraphDocuments(supabaseGraphId),
-        listGraphVersions(supabaseGraphId),
-      ])
+      let metadata = graphMetadataRef.current.get(supabaseGraphId)
+      if (refreshMetadata || !metadata) {
+        const [{ documents = [] }, { versions: graphVersions = [] }] = await Promise.all([
+          listGraphDocuments(supabaseGraphId),
+          listGraphVersions(supabaseGraphId),
+        ])
+        metadata = { documents, versions: graphVersions }
+        graphMetadataRef.current.set(supabaseGraphId, metadata)
+        graphSnapshotsRef.current.delete(`${supabaseGraphId}:${graphVersions[0]?.id}`)
+        if (graphVersions[0]) graphSnapshotsRef.current.delete(`${supabaseGraphId}:${graphVersions[0].id}:support`)
+        setDocs(documents.map(graphDocumentRow))
+        setVersions(graphVersions)
+      }
       if (requestId !== loadRequestRef.current) return
-      setDocs(documents.map(graphDocumentRow))
-      setVersions(graphVersions)
+      const { documents, versions: graphVersions } = metadata
       const version = graphVersions.find((item) => item.id === requestedVersionId) || graphVersions[0]
       setSelectedVersionId(version?.id || '')
       if (!version) {
@@ -248,9 +260,22 @@ export default function Workspace() {
         setSelected(null)
         return
       }
-      const snapshot = await fetchGraphVersion(supabaseGraphId, version.id)
-      if (requestId !== loadRequestRef.current) return
-      const activeSupport = graphVersions[0]?.id === version.id ? await getGraphActiveSupport(supabaseGraphId) : null
+      const cacheKey = `${supabaseGraphId}:${version.id}`
+      let snapshot = graphSnapshotsRef.current.get(cacheKey)
+      if (!snapshot) {
+        snapshot = await fetchGraphVersion(supabaseGraphId, version.id)
+        if (requestId !== loadRequestRef.current) return
+        graphSnapshotsRef.current.set(cacheKey, snapshot)
+      }
+      let activeSupport = null
+      if (graphVersions[0]?.id === version.id) {
+        const supportKey = `${cacheKey}:support`
+        activeSupport = graphSnapshotsRef.current.get(supportKey)
+        if (!activeSupport) {
+          activeSupport = await getGraphActiveSupport(supabaseGraphId)
+          graphSnapshotsRef.current.set(supportKey, activeSupport)
+        }
+      }
       if (requestId !== loadRequestRef.current) return
       setGraph(graphViewFromSnapshot(snapshot, activeSupport, documents))
       setSelected(null)
@@ -286,7 +311,7 @@ export default function Workspace() {
     setBusy('Loading version…')
     setTab('graph')
     try {
-      await loadGraphWorkspace(supabaseId, versionId)
+      await loadGraphWorkspace(supabaseId, versionId, { refreshMetadata: false })
     } catch (e) {
       setError(e.message)
     } finally {
@@ -446,6 +471,7 @@ export default function Workspace() {
 
   const fileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
   const canUpload = Boolean(library.activeGraphId) && viewingLatestVersion
+  const graphLoading = busy === 'Loading graph…'
 
   return (
     <div className="ws">
@@ -538,7 +564,9 @@ export default function Workspace() {
           </div>
         </header>
 
-        {busy && <div className="ws-banner">{busy}</div>}
+        {busy && !graphLoading && busy !== 'Loading version…' && (
+          <div className="ws-banner">{busy}</div>
+        )}
         {error && (
           <div className="ws-banner err">
             <span>{error}</span>
@@ -562,7 +590,20 @@ export default function Workspace() {
                 }
               }}
             >
-              {view.nodes.length === 0 ? (
+              {graphLoading ? (
+                <div className="graph-loading" role="status" aria-live="polite">
+                  <svg className="graph-loading-art" viewBox="0 0 96 72" fill="none" aria-hidden="true">
+                    <path className="graph-loading-link" d="M21 48 42 22l29 12-16 23-34-9Z" />
+                    <circle className="graph-loading-node graph-loading-node-a" cx="21" cy="48" r="6" />
+                    <circle className="graph-loading-node graph-loading-node-b" cx="42" cy="22" r="7" />
+                    <circle className="graph-loading-node graph-loading-node-c" cx="71" cy="34" r="5" />
+                    <circle className="graph-loading-node graph-loading-node-d" cx="55" cy="57" r="6" />
+                  </svg>
+                  <h2>{busy === 'Loading version…' ? 'Opening graph version' : 'Loading your graph'}</h2>
+                  <p>Gathering concepts and connections</p>
+                  <span className="graph-loading-track" aria-hidden="true"><i /></span>
+                </div>
+              ) : view.nodes.length === 0 ? (
                 <div className="empty-state">
                   {!library.activeGraphId ? (
                     <>
@@ -596,7 +637,7 @@ export default function Workspace() {
                 </div>
               ) : (
                 <ConceptGraph
-                  key={viewKey}
+                  key={library.activeGraphId}
                   nodes={view.nodes}
                   edges={view.edges}
                   versions={versions}

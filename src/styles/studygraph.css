@@ -506,6 +506,9 @@ a {
   opacity: 0;
   transition: opacity 0.12s ease;
 }
+.node-tip.show {
+  opacity: 1;
+}
 
 .inspector {
   width: 330px;
@@ -1271,13 +1274,13 @@ a {
 
 /* ---------- canvas ---------- */
 
-#wsGraphSvg {
+.gx-svg {
   width: 100%;
   height: 100%;
   display: block;
   cursor: grab;
 }
-#wsGraphSvg:active {
+.gx-svg:active {
   cursor: grabbing;
 }
 .gx-node {
