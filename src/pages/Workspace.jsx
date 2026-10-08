@@ -169,7 +169,9 @@ export default function Workspace() {
   // --- UI state ---
   const [tab, setTab] = useState('graph')
   const [chatOpen, setChatOpen] = useState(false)
+  const [chatWidth, setChatWidth] = useState(380)
   const [sideOpen, setSideOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadDest, setUploadDest] = useState(null)
   const [queue, setQueue] = useState([])
@@ -474,7 +476,7 @@ export default function Workspace() {
   const graphLoading = busy === 'Loading graph…'
 
   return (
-    <div className="ws">
+    <div className={`ws${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sideOpen ? ' sidebar-drawer-open' : ''}`}>
       <SubjectSidebar
         library={library}
         docs={docs}
@@ -484,18 +486,31 @@ export default function Workspace() {
         user={user}
         onSignOut={signOut}
       />
+      <button
+        type="button"
+        className="sidebar-edge-toggle"
+        aria-label="Toggle sidebar"
+        title="Toggle sidebar"
+        onClick={() => {
+          const isMobile = window.matchMedia('(max-width: 900px)').matches
+          const isOpen = isMobile ? sideOpen : !sidebarCollapsed
+          if (isOpen) {
+            setSideOpen(false)
+            setSidebarCollapsed(true)
+          } else {
+            setSidebarCollapsed(false)
+            setSideOpen(true)
+          }
+        }}
+      >
+        <span className="sidebar-toggle-open" aria-hidden="true">›</span>
+        <span className="sidebar-toggle-close" aria-hidden="true">‹</span>
+      </button>
 
       {/* ---------------- main ---------------- */}
       <main className="ws-main">
         <header className="ws-top">
           <div className="ws-top-left">
-            <button type="button" className="ws-menu" aria-label="Show subjects and topics"
-                    onClick={() => setSideOpen(true)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                <path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" />
-              </svg>
-            </button>
             <div className="ws-head">
               {found && (
                 <div className="ws-crumb">
@@ -538,7 +553,7 @@ export default function Workspace() {
                   <span className="ws-upload-short">Add</span></>
               )}
             </button>
-            <nav className="ws-tabs">
+            <nav className="ws-tabs" aria-label="Workspace views">
               {TABS.map((x) => (
                 <button
                   key={x}
@@ -686,19 +701,29 @@ export default function Workspace() {
       </main>
 
       {chatOpen && library.activeGraphId && (
-        <ChatPanel
-          graphId={found?.graph?.supabaseId}
-          onClose={() => setChatOpen(false)}
-          onConceptClick={(conceptName) => {
-            const node = view.nodes.find(
-              (item) => item.name?.toLowerCase() === conceptName?.toLowerCase(),
-            )
-            if (node) {
-              setSelected(node)
-              setTab('graph')
-            }
-          }}
-        />
+        <>
+          <button
+            type="button"
+            className="chat-backdrop"
+            aria-label="Close StudyGraph chat"
+            onClick={() => setChatOpen(false)}
+          />
+          <ChatPanel
+            graphId={found?.graph?.supabaseId}
+            width={chatWidth}
+            onResize={setChatWidth}
+            onClose={() => setChatOpen(false)}
+            onConceptClick={(conceptName) => {
+              const node = view.nodes.find(
+                (item) => item.name?.toLowerCase() === conceptName?.toLowerCase(),
+              )
+              if (node) {
+                setSelected(node)
+                setTab('graph')
+              }
+            }}
+          />
+        </>
       )}
 
       {toast && (

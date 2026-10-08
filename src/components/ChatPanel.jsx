@@ -115,6 +115,8 @@ export default function ChatPanel({
   embedded = false,
   onConceptClick,
   graphId = null,
+  width = 380,
+  onResize,
 }) {
   const [messages, setMessages] = useState([
     {
@@ -127,6 +129,32 @@ export default function ChatPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const endRef = useRef(null);
+  const resizeStart = useRef(null);
+  const maxChatWidth = () => Math.max(
+    320,
+    Math.min(640, window.innerWidth - (window.innerWidth > 900 ? 272 : 0) - 280),
+  );
+  const effectiveWidth = Math.max(320, Math.min(maxChatWidth(), width));
+
+  const startResize = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizeStart.current = {
+      x: event.clientX,
+      width: event.currentTarget.parentElement.getBoundingClientRect().width,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const resize = (event) => {
+    if (!resizeStart.current) return;
+    onResize?.(Math.max(320, Math.min(
+      maxChatWidth(),
+      resizeStart.current.width + resizeStart.current.x - event.clientX,
+    )));
+  };
+  const stopResize = () => {
+    resizeStart.current = null;
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -224,7 +252,33 @@ export default function ChatPanel({
   };
 
   return (
-    <aside className="chat-panel" role="complementary" aria-label="StudyGraph chat">
+    <aside className="chat-panel" role="complementary" aria-label="StudyGraph chat" style={{ "--chat-width": `${effectiveWidth}px` }}>
+      {!embedded && (
+        <div
+          className="chat-resize"
+          role="separator"
+          aria-label="Resize chat panel"
+          aria-orientation="vertical"
+          aria-valuemin={320}
+          aria-valuemax={maxChatWidth()}
+          aria-valuenow={effectiveWidth}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onPointerMove={resize}
+          onPointerUp={stopResize}
+          onPointerCancel={stopResize}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              onResize?.(Math.min(maxChatWidth(), effectiveWidth + 16));
+            }
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              onResize?.(Math.max(320, effectiveWidth - 16));
+            }
+          }}
+        />
+      )}
       <div className="chat-head">
         <div className="chat-head-title">
           <svg
