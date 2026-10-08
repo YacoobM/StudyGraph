@@ -228,48 +228,51 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ---------------- features ---------------- */}
-        <section className="lp-section lp-section-alt" id="lp-features">
-          <div className="lp-section-head">
-            <span className="lp-eyebrow">Inside StudyGraph</span>
-            <h2>From your documents to your next study session.</h2>
-            <p>
-              One workspace to explore your material, make sense of it, and
-              practice what you have learned.
-            </p>
-          </div>
+                {/* ---------------- finale: one gradient behind features, CTA and footer ---------------- */}
+        <div className="lp-finale">
+          <section className="lp-section lp-section-alt" id="lp-features">
+            <div className="lp-feature-card">
+              <div className="lp-section-head">
+                <span className="lp-eyebrow">Inside StudyGraph</span>
+                <h2>From your documents to your next study session.</h2>
+                <p>
+                  One workspace to explore your material, make sense of it, and
+                  practice what you have learned.
+                </p>
+              </div>
 
-          <div className="lp-benefits">
-            {FEATURES.map((feature) => (
-              <article className="lp-benefit" key={feature.title}>
-                <div className="lp-feature-top">
-                  <span className="lp-feature-icon"><StepIcon>{feature.icon}</StepIcon></span>
-                  <span className="lp-feature-label">{feature.label}</span>
-                </div>
-                <h3>{feature.title}</h3>
-                <p>{feature.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+              <div className="lp-benefits">
+                {FEATURES.map((feature) => (
+                  <article className="lp-benefit" key={feature.title}>
+                    <div className="lp-feature-top">
+                      <span className="lp-feature-icon"><StepIcon>{feature.icon}</StepIcon></span>
+                      <span className="lp-feature-label">{feature.label}</span>
+                    </div>
+                    <h3>{feature.title}</h3>
+                    <p>{feature.body}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
 
-        {/* ---------------- final CTA ---------------- */}
-        <section className="lp-cta">
-          <h2>Build your knowledge graph</h2>
-          <p>Turn your course materials into connected knowledge.</p>
-          <button type="button" className="lp-btn lp-btn-solid lp-btn-lg"
-                  onClick={() => navigate('/login')}>Upload your first document</button>
-        </section>
-      </main>
+          <section className="lp-cta">
+            <h2>Build your knowledge graph</h2>
+            <p>Turn your course materials into connected knowledge.</p>
+            <button type="button" className="lp-btn lp-btn-solid lp-btn-lg"
+                    onClick={() => navigate('/login')}>Upload your first document</button>
+          </section>
 
-      <footer className="lp-foot">
-        <div className="lp-foot-line">
-          <span className="lp-wordmark lp-wordmark-sm">StudyGraph</span>
-          <span className="lp-foot-sep" aria-hidden="true">·</span>
-          <span>A knowledge graph for the way you actually study.</span>
+          <footer className="lp-foot">
+            <div className="lp-foot-line">
+              <span className="lp-wordmark lp-wordmark-sm">StudyGraph</span>
+              <span className="lp-foot-sep" aria-hidden="true">·</span>
+              <span>A knowledge graph for the way you actually study.</span>
+            </div>
+            <div className="lp-foot-credit">Developed by MCS03</div>
+          </footer>
         </div>
-        <div className="lp-foot-credit">Developed by MCS03</div>
-      </footer>
+      </main>
     </div>
   )
 }
