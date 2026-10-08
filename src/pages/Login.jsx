@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { useAuth } from '../auth.jsx'
-import './Login.css'
+import React, { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth.jsx";
+import "./Login.css";
 
 /**
  * One screen for both signing in and creating an account.
@@ -14,116 +14,128 @@ import './Login.css'
 
 const COPY = {
   signin: {
-    heading: 'Welcome back',
-    sub: 'Your graphs, documents, and quiz progress are tied to your account.',
-    submit: 'Sign in',
-    pending: 'Signing in…',
-    autocomplete: 'current-password',
+    heading: "Welcome back",
+    sub: "Your graphs, documents, and quiz progress are tied to your account.",
+    submit: "Sign in",
+    pending: "Signing in…",
+    autocomplete: "current-password",
   },
   signup: {
-    heading: 'Start your first graph',
-    sub: 'Upload a lecture PDF and StudyGraph maps the concepts inside it.',
-    submit: 'Create account',
-    pending: 'Creating account…',
-    autocomplete: 'new-password',
+    heading: "Start your first graph",
+    sub: "Upload a lecture PDF and StudyGraph maps the concepts inside it.",
+    submit: "Create account",
+    pending: "Creating account…",
+    autocomplete: "new-password",
   },
-}
+};
 
-const EMAIL_OK = (v) => /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(v)
+const EMAIL_OK = (v) => /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(v);
 
 export default function Login() {
-  const [mode, setMode] = useState('signin')
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [reveal, setReveal] = useState(false)
-  const [errors, setErrors] = useState({})
-  const [formError, setFormError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [mode, setMode] = useState("signin");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [reveal, setReveal] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const { signIn, signUp } = useAuth()
-  const navigate = useNavigate()
-  const location = useLocation()
-  const from = location.state?.from?.pathname || '/workspace'
+  const { signIn, signUp } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname || "/workspace";
 
-  const copy = COPY[mode]
-  const isSignup = mode === 'signup'
+  const copy = COPY[mode];
+  const isSignup = mode === "signup";
 
   function switchMode(next) {
-    setMode(next)
-    setErrors({})       // errors belong to the mode that produced them
-    setFormError('')
+    setMode(next);
+    setErrors({}); // errors belong to the mode that produced them
+    setFormError("");
   }
 
   function validate() {
-    const next = {}
-    if (!EMAIL_OK(email.trim())) next.email = 'Enter a valid email address.'
+    const next = {};
+    if (!EMAIL_OK(email.trim())) next.email = "Enter a valid email address.";
     if (isSignup) {
-      if (password.length < 8) next.password = 'Use at least 8 characters.'
+      if (password.length < 8) next.password = "Use at least 8 characters.";
     } else if (!password) {
-      next.password = 'Enter your password.'
+      next.password = "Enter your password.";
     }
-    setErrors(next)
-    return Object.keys(next).length === 0
+    setErrors(next);
+    return Object.keys(next).length === 0;
   }
 
   async function submit(event) {
-    event.preventDefault()
-    setFormError('')
-    if (!validate()) return
+    event.preventDefault();
+    setFormError("");
+    if (!validate()) return;
 
-    setBusy(true)
+    setBusy(true);
     try {
       const { data, error } = isSignup
         ? await signUp(email.trim(), password, name.trim())
-        : await signIn(email.trim(), password)
+        : await signIn(email.trim(), password);
 
-      if (error) throw error
+      if (error) throw error;
       if (isSignup && !data.session) {
-        setFormError('Check your email to confirm your account before signing in.')
-        return
+        setFormError(
+          "Check your email to confirm your account before signing in.",
+        );
+        return;
       }
-      navigate(from, { replace: true })
+      navigate(from, { replace: true });
     } catch (err) {
-      if (err.message?.toLowerCase().includes('already registered')) {
+      if (err.message?.toLowerCase().includes("already registered")) {
         // Their account exists — move them to the mode that works, keeping
         // the email so they do not retype it.
-        setErrors({ email: 'That email already has an account. Sign in instead.' })
-        setMode('signin')
+        setErrors({
+          email: "That email already has an account. Sign in instead.",
+        });
+        setMode("signin");
       } else {
-        setFormError(err.message || 'Something went wrong. Try again.')
+        setFormError(err.message || "Something went wrong. Try again.");
       }
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   return (
     <div className="sg-auth">
       <form className={`auth-card mode-${mode}`} onSubmit={submit} noValidate>
-        <button type="button" className="auth-mark" onClick={() => navigate('/')}>
+        <button
+          type="button"
+          className="auth-mark"
+          onClick={() => navigate("/")}
+        >
           StudyGraph
         </button>
 
         <h1>{copy.heading}</h1>
         <p className="auth-sub">{copy.sub}</p>
 
-        <div className="seg" role="tablist" aria-label="Sign in or create an account">
+        <div
+          className="seg"
+          role="tablist"
+          aria-label="Sign in or create an account"
+        >
           <button
             type="button"
             role="tab"
-            aria-selected={mode === 'signin'}
-            className={mode === 'signin' ? 'on' : ''}
-            onClick={() => switchMode('signin')}
+            aria-selected={mode === "signin"}
+            className={mode === "signin" ? "on" : ""}
+            onClick={() => switchMode("signin")}
           >
             Sign in
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={mode === 'signup'}
-            className={mode === 'signup' ? 'on' : ''}
-            onClick={() => switchMode('signup')}
+            aria-selected={mode === "signup"}
+            className={mode === "signup" ? "on" : ""}
+            onClick={() => switchMode("signup")}
           >
             Create account
           </button>
@@ -153,7 +165,7 @@ export default function Login() {
               type="email"
               autoComplete="email"
               placeholder="you@university.edu"
-              className={errors.email ? 'bad' : ''}
+              className={errors.email ? "bad" : ""}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={Boolean(errors.email)}
@@ -166,10 +178,12 @@ export default function Login() {
             <div className="pw-wrap">
               <input
                 id="authPassword"
-                type={reveal ? 'text' : 'password'}
+                type={reveal ? "text" : "password"}
                 autoComplete={copy.autocomplete}
-                placeholder={isSignup ? 'At least 8 characters' : 'Your password'}
-                className={errors.password ? 'bad' : ''}
+                placeholder={
+                  isSignup ? "At least 8 characters" : "Your password"
+                }
+                className={errors.password ? "bad" : ""}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={Boolean(errors.password)}
@@ -178,19 +192,26 @@ export default function Login() {
                 type="button"
                 className="pw-toggle"
                 onClick={() => setReveal((r) => !r)}
-                aria-label={reveal ? 'Hide password' : 'Show password'}
+                aria-label={reveal ? "Hide password" : "Show password"}
               >
-                {reveal ? 'Hide' : 'Show'}
+                {reveal ? "Hide" : "Show"}
               </button>
             </div>
             {isSignup && !errors.password && (
               <div className="hint">8 characters or more.</div>
             )}
-            {errors.password && <div className="err show">{errors.password}</div>}
+            {errors.password && (
+              <div className="err show">{errors.password}</div>
+            )}
           </div>
         </div>
 
-        <button className="auth-submit" type="submit" disabled={busy}>
+        {/* disable the button till the user has inputted both fields */}
+        <button
+          className="auth-submit"
+          type="submit"
+          disabled={busy || !email.trim() || !password}
+        >
           {busy ? copy.pending : copy.submit}
         </button>
 
@@ -201,5 +222,5 @@ export default function Login() {
         </p>
       </form>
     </div>
-  )
+  );
 }

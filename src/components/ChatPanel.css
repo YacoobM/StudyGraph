@@ -7,8 +7,8 @@
   width: 420px; 
   z-index: 100; 
   overflow: hidden;
-  background: #faf8f3;
-  border-left: 1px solid #e4dccd;
+  background: var(--bg-0);
+  border-left: 1px solid var(--border);
   border-radius: 0;
   display: flex;
   flex-direction: column;
@@ -20,8 +20,8 @@
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  background: #faf8f3;
-  border-bottom: 1px solid #e4dccd;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border);
 }
 
 .chat-head-title {
@@ -31,7 +31,7 @@
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 16px;
-  color: #171717;
+  color: var(--text-0);
 }
 
 .chat-close {
@@ -39,7 +39,7 @@
   height: 28px;
   border-radius: 6px;
   font-size: 22px;
-  color: #171717;
+  color: var(--text-0);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -47,13 +47,13 @@
 }
 
 .chat-close:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--bg-2);
 }
 
 .chat-body {
   flex: 1;
   overflow-y: auto;
-  background: #faf8f3;
+  background: var(--bg-0);
   padding: 16px 16px;
   display: flex;
   flex-direction: column;
@@ -72,33 +72,33 @@
 
 .bubble-assistant {
   align-self: flex-start;
-  background: #e8ddd0;
-  color: #171717;
+  background: var(--bg-2);
+  color: var(--text-0);
   border-radius: 16px;
 }
 
 .bubble-user {
   align-self: flex-end;
-  background: #1d1b18;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   border-radius: 16px;
 }
 
 .bubble-assistant .md-line strong {
-  color: #171717;
+  color: var(--text-0);
   font-weight: 700;
 }
 
 .bubble-sources {
-  border-top: 1px solid #ddd2bf;
+  border-top: 1px solid var(--border);
   margin-top: 12px;
   padding-top: 10px;
 }
 
 .src-item {
-  background: #fffdf9;
-  border: 1px solid #e4dccd;
-  color: #171717;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text-0);
   border-radius: 8px;
   padding: 8px 10px;
   margin-bottom: 6px;
@@ -108,7 +108,7 @@
 .src-title {
   font-size: 10px;
   font-weight: 700;
-  color: #8a8174;
+  color: var(--text-2);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   margin-bottom: 8px;
@@ -116,19 +116,19 @@
 
 .src-file {
   font-weight: 600;
-  color: #1d1b18;
+  color: var(--text-1);
   margin-right: 6px;
 }
 
 .src-page {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #8a8174;
+  color: var(--text-2);
 }
 
 .src-snip {
   margin-top: 4px;
-  color: #171717;
+  color: var(--text-0);
   font-style: italic;
   line-height: 1.5;
 }
@@ -138,17 +138,17 @@
   display: flex;
   gap: 10px;
   padding: 12px 16px 16px;
-  background: #faf8f3;
-  border-top: 1px solid #e4dccd;
+  background: var(--bg-0);
+  border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .chat-input {
   flex: 1;
-  background: #fffdf9;
-  border: 1px solid #ddd2bf;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
   border-radius: 18px;
-  color: #171717;
+  color: var(--text-0);
   font-size: 14px;
   padding: 12px 16px;
   resize: none;
@@ -158,12 +158,12 @@
 }
 
 .chat-input::placeholder {
-  color: #a89e95;
+  color: var(--text-3);
 }
 
 .chat-input:focus {
   outline: none;
-  border-color: #c9bda8;
+  border-color: var(--accent);
 }
 
 .chat-send {
@@ -179,8 +179,8 @@
   align-items: center;
   justify-content: center;
 
-  background: #1d1b18 !important;
-  color: #ffffff !important;
+  background: var(--action-primary) !important;
+  color: var(--text-on-accent) !important;
   cursor: pointer;
   pointer-events: auto;
 }
@@ -189,17 +189,17 @@
   width: 20px !important;
   height: 20px !important;
   display: block !important;
-  filter: brightness(0) invert(1);
+  color: inherit;
 }
 
 .chat-send:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  background: #1d1b18 !important;
+  background: var(--action-primary) !important;
 }
 
 .chat-send:not(:disabled):hover {
-  background: #39342d !important;
+  background: var(--action-primary-hover) !important;
 }
 
 .md-line {
@@ -208,7 +208,7 @@
 
 .md-line strong {
   font-weight: 700;
-  color: #171717;
+  color: var(--text-0);
 }
 
 .bubble-user .md-line strong {
@@ -220,10 +220,10 @@
   align-items: center;
   margin: 0 2px;
   padding: 1px 6px;
-  border: 1px solid rgba(120, 203, 255, 0.35);
+  border: 1px solid var(--accent-strong);
   border-radius: 999px;
-  background: rgba(120, 203, 255, 0.14);
-  color: #1d1b18;
+  background: var(--accent-soft);
+  color: var(--accent-hover);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
@@ -233,7 +233,7 @@
 .citation-chip:hover,
 .citation-link:hover {
   transform: translateY(-1px);
-  background: rgba(120, 203, 255, 0.22);
+  background: var(--accent-strong);
 }
 
 .src-item-clickable {
@@ -243,7 +243,7 @@
 
 .src-item-clickable:hover {
   transform: translateY(-1px);
-  background: rgba(120, 203, 255, 0.08);
+  background: var(--accent-soft);
 }
 
 .typing {
@@ -256,7 +256,7 @@
 .typing span {
   width: 7px;
   height: 7px;
-  background: #8a8174;
+  background: var(--text-2);
   border-radius: 50%;
   animation: blink 1.2s infinite ease-in-out both;
 }
@@ -284,10 +284,10 @@
 
 /*concept tagging in the rag part*/
 .concept-tag {
-  background: var(--tag-bg, #f0ebe3);
-  border: 1px solid var(--tag-border, #d4cabe);
+  background: var(--tag-bg, var(--bg-2));
+  border: 1px solid var(--tag-border, var(--border-strong));
   border-radius: 16px;
-  color: var(--tag-text, #171717);
+  color: var(--tag-text, var(--text-0));
   text-decoration: none;
   cursor: pointer;
   padding: 6px 12px;
@@ -311,10 +311,10 @@
 }
 
 .concept-tag:hover {
-  background: var(--tag-bg-hover, #e8ddd0);
-  border-color: var(--tag-border-hover, #c9bda8);
+  background: var(--tag-bg-hover, var(--bg-3));
+  border-color: var(--tag-border-hover, var(--accent));
 }
 
 .concept-tag:active {
-  background: var(--tag-bg-active, #ddd2bf);
+  background: var(--tag-bg-active, var(--border));
 }
