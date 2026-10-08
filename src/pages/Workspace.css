@@ -2,12 +2,14 @@
    Reads the tokens in global.css so a palette change flows through. */
 
 .ws {
+  --workspace-side-width: 272px;
   display: flex;
   height: 100vh;
   background: var(--bg-0);
   color: var(--text-0);
   font-family: var(--font-body);
 }
+.ws.sidebar-collapsed > .ws-side { display: none; }
 
 /* ---------------- sidebar: Subject → Topic → Graph ---------------- */
 .ws-side { width: 272px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0;
@@ -16,7 +18,6 @@
 .side-brand { align-self: flex-start; margin: 0 0 18px 6px; padding: 0; border: none;
   background: none; font: inherit; font-size: 16px; font-weight: 800; letter-spacing: -0.01em;
   color: var(--text-0); cursor: pointer; }
-
 .side-new { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%;
   padding: 10px; margin-bottom: 12px; border: none; border-radius: var(--radius-sm);
   background: var(--action-primary); color: var(--action-primary-text); font: inherit; font-size: 13.5px; font-weight: 600;
@@ -406,9 +407,33 @@
 .ws-side-backdrop {
   display: none;
 }
-.ws-menu {
-  display: none;
+.sidebar-edge-toggle {
+  position: fixed;
+  z-index: 72;
+  top: 41%;
+  left: 272px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 54px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: 4px 2px 12px rgba(var(--brand-ink-rgb), 0.08);
+  transform: translateX(-1px);
+  transition: left 180ms ease, background 120ms ease, color 120ms ease;
 }
+.sidebar-edge-toggle:hover { background: var(--bg-1); color: var(--text-0); }
+.sidebar-toggle-open { display: none; }
+.sidebar-collapsed .sidebar-edge-toggle { left: 0; }
+.sidebar-collapsed .sidebar-toggle-open { display: inline; }
+.sidebar-collapsed .sidebar-toggle-close { display: none; }
 
 .sr-only {
   position: absolute;
@@ -431,10 +456,18 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  container-type: inline-size;
 }
 
-.ws-top { flex: 0 0 auto; display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 20px; padding: 16px 24px 0; border-bottom: 1px solid var(--border); }
+.ws-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 24px 0;
+  border-bottom: 1px solid var(--border);
+}
 .ws-top-left { display: flex; align-items: center; gap: 10px; min-width: 0; padding-bottom: 10px; }
 .ws-head { min-width: 0; }
 .ws-crumb { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; min-width: 0;
@@ -500,11 +533,18 @@
    scrubber currently sits. */
 .ws-facts {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px 14px;
   margin-top: 4px;
   font-size: 12.5px;
   color: var(--text-2);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ws-facts::-webkit-scrollbar,
+.ws-tabs::-webkit-scrollbar {
+  display: none;
 }
 .ws-facts b {
   font-family: var(--font-mono);
@@ -515,6 +555,7 @@
 .ws-tabs {
   display: flex;
   gap: 2px;
+  min-width: 0;
 }
 .ws-tab {
   padding: 9px 15px;
@@ -1025,24 +1066,28 @@
 .graph-canvas-wrap.is-empty .empty-state { overflow-y: auto; }
 
 @media (max-width: 900px) {
+  .ws { --workspace-side-width: 0px; }
   .node-card { display: none; }
 
-  /* the subject panel becomes a drawer behind the menu button */
-  .ws-menu { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-    width: 36px; height: 36px; border: 1px solid var(--border); border-radius: var(--radius-sm);
-    background: var(--bg-1); color: var(--text-0); cursor: pointer; }
+  /* the subject panel becomes a drawer on narrow screens */
   .ws-side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 70; width: min(290px, 86vw);
     transform: translateX(-100%); transition: transform 200ms ease;
     box-shadow: 0 0 40px rgba(20, 16, 8, 0.25); }
   .ws-side.open { transform: none; }
+  .ws.sidebar-collapsed .ws-side { display: flex; }
   .ws-side-backdrop.on { display: block; position: fixed; inset: 0; z-index: 65;
     background: rgba(23, 19, 9, 0.4); }
+  .ws-top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "heading actions" "tabs tabs";
+    column-gap: 10px;
+    padding: 10px 16px 0;
+  }
 
-  .ws-top { flex-wrap: wrap; align-items: center; padding: 12px 16px 0; gap: 8px 10px; }
-  .ws-top-left { flex: 1 1 0; min-width: 0; padding-bottom: 0; }
-  .ws-top-right { display: contents; }
+  .ws-top-left { min-width: 0; padding-bottom: 8px; }
+  .ws-top-right { display: flex; padding-bottom: 8px; }
   .ws-upload { flex-shrink: 0; margin: 0; padding: 8px 11px; }
-  .ws-tabs { flex: 1 0 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .ws-tabs { width: 100%; min-width: 0; }
   .ws-tab { padding: 9px 11px; }
 }
 .drop.over {
@@ -1604,20 +1649,7 @@
     display: none;
   }
 
-  /* the subject panel becomes a drawer behind the menu button */
-  .ws-menu {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
-    color: var(--text-0);
-    cursor: pointer;
-  }
+  /* the subject panel becomes a drawer on narrow screens */
   .ws-side {
     position: fixed;
     top: 0;
@@ -1677,6 +1709,64 @@
     display: inline;
   }
 }
+
+@container (max-width: 900px) {
+  .ws-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "heading actions" "tabs tabs";
+    align-items: center;
+    justify-content: normal;
+    column-gap: 8px;
+    row-gap: 0;
+    padding: 10px 16px 0;
+  }
+  .ws-top-left {
+    grid-area: heading;
+    padding-bottom: 8px;
+  }
+  .ws-top-right {
+    display: contents;
+  }
+  .ws-upload {
+    grid-area: actions;
+    justify-self: end;
+    margin: 0;
+  }
+  .ws-tabs {
+    grid-area: tabs;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ws-tab {
+    flex: 0 0 auto;
+    padding: 9px 11px;
+  }
+}
+
+@container (max-width: 640px) {
+  .ws-top {
+    column-gap: 8px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+  .ws-crumb { display: none; }
+  .ws-title { font-size: 16px; }
+  .ws-facts { gap: 4px 10px; font-size: 11.5px; }
+  .ws-facts span:nth-child(n + 3) { display: none; }
+}
+
+@media (max-width: 900px) {
+  .sidebar-edge-toggle { left: 0; }
+  .sidebar-drawer-open .sidebar-edge-toggle { left: min(290px, 86vw); }
+  .sidebar-drawer-open .sidebar-toggle-open { display: none; }
+  .sidebar-drawer-open .sidebar-toggle-close { display: inline; }
+  .ws:not(.sidebar-drawer-open) .sidebar-toggle-open { display: inline; }
+  .ws:not(.sidebar-drawer-open) .sidebar-toggle-close { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ws-side,
   .st-chev {
@@ -1688,9 +1778,6 @@
 }
 
 @media (max-width: 900px) {
-  .ws-side {
-    display: none;
-  }
   .node-card {
     display: none;
   }
