@@ -5,6 +5,10 @@ class QueryRequest(BaseModel):
     query: str
 
 
+class GraphQueryRequest(BaseModel):
+    query: str
+
+
 class RAGResponse(BaseModel):
     answer: str
     citations: list[int]

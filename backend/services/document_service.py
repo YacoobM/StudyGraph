@@ -1,6 +1,5 @@
 import asyncio
 import cv2
-import easyocr
 import numpy as np
 from io import BytesIO
 from pathlib import Path
@@ -10,10 +9,46 @@ from pptx import Presentation
 from google import genai
 import fitz
 import os
-
+import asyncio
+import time
 from app.logging_config import get_logger
+from services.llm_gateway import estimate_tokens
+from services.llm_provider import RATE_LIMIT_ERRORS
+
+MAX_INPUT_TOKENS_PER_CALL = 4200
+MAX_CHUNKS_PER_BATCH = 4
 
 logger = get_logger(__name__)
+
+def make_extraction_batches(chunks):
+    batches, current, current_tokens = [], [], 0
+    for chunk in chunks:
+        chunk_tokens = estimate_tokens(chunk["text"])
+        if current and (len(current) >= MAX_CHUNKS_PER_BATCH or current_tokens + chunk_tokens > MAX_INPUT_TOKENS_PER_CALL):
+            batches.append(current)
+            current, current_tokens = [], 0
+        current.append(chunk)
+        current_tokens += chunk_tokens
+    if current:
+        batches.append(current)
+    return batches
+
+
+async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None, batch_index=None, total_batches=None, retries=5):
+    delay = 5
+    started = time.perf_counter()
+    for attempt in range(1, retries + 1):
+        try:
+            data = await engine.extract_knowledge_batch(chunks, known_concepts_by_chunk=known_concepts_by_chunk)
+            logger.info("extraction_batch_complete batch=%s/%s chunks=%d chars=%d concepts=%d relationships=%d attempts=%d duration_ms=%.1f", batch_index, total_batches, len(chunks), sum(len(chunk["text"]) for chunk in chunks), len(data.get("concepts", [])), len(data.get("relationships", [])), attempt, (time.perf_counter() - started) * 1000)
+            return data
+        except RATE_LIMIT_ERRORS:
+            logger.warning("extraction_batch_rate_limited batch=%s/%s attempt=%d/%d", batch_index, total_batches, attempt, retries)
+            if attempt == retries:
+                break
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise Exception("Maximum retries exceeded!")
 
 # Initialize EasyOCR reader (better for handwriting than Paddle)
 reader = None
@@ -52,7 +87,7 @@ async def extract_text(file_bytes, filename=None):
         return extract_pptx(file_bytes)
 
     elif suffix in [".txt", ".md"]:
-        return [{"page": 1, "text": file_bytes.decode("utf-8")}]
+        return [{"page": 1, "text": file_bytes.decode("utf-8-sig")}]
 
     elif suffix in [".png", ".jpg", ".jpeg"]:
         return await extract_image_ocr(file_bytes)
@@ -230,8 +265,15 @@ async def extract_image_ocr(file_bytes):
 
     response = await asyncio.to_thread(
         lambda: get_ai_client().models.generate_content(
-            model="gemini-2.5-flash", contents=[pil_image, prompt]
+            model="gemini-3.8-flash", contents=[pil_image, prompt]
         )
     )
+        
+    return [
+        {
+            "page": 1,
+            "text": response.text.strip(),
+            "source": "gemini-flash"
+        }
+    ]
 
-    return [{"page": 1, "text": response.text.strip(), "source": "gemini-flash"}]

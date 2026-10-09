@@ -25,32 +25,32 @@ def _model_setting(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
 
 
-# Single provider switch. Set LLM_PROVIDER=groq in backend/.env to move the
-# extraction, fusion, RAG, quiz, and evolution calls to Groq. The provider
-# controls the matching API key, model defaults, request parameters, and
-# token-budget defaults below.
-LLM_PROVIDER = _model_setting("LLM_PROVIDER", "openai").lower()
-if LLM_PROVIDER not in {"openai", "groq"}:
-    raise RuntimeError("LLM_PROVIDER must be either 'openai' or 'groq'")
-
-LLM_API_KEY_ENV = "OPENAI_API_KEY" if LLM_PROVIDER == "openai" else "GROQ_API_KEY"
-_PROVIDER_DEFAULTS = {
-    "openai": {"extraction": "gpt-5.6-luna", "rag": "gpt-5.6-luna", "budget": "2000"},
-    "groq": {"extraction": "qwen/qwen3.8-27b", "rag": "openai/gpt-oss-20b", "budget": "2000"},
-}
-_defaults = _PROVIDER_DEFAULTS[LLM_PROVIDER]
-
-# Provider-specific overrides keep model selection in one place.
-EXTRACTION_MODEL = _model_setting(
-    f"{LLM_PROVIDER.upper()}_EXTRACTION_MODEL", _defaults["extraction"]
-)
-RAG_MODEL = _model_setting(f"{LLM_PROVIDER.upper()}_RAG_MODEL", _defaults["rag"])
+EXTRACTION_MODEL = _model_setting("OPENAI_EXTRACTION_MODEL", "gpt-5.6-luna")
+RAG_MODEL = _model_setting("OPENAI_RAG_MODEL", "gpt-5.6-luna")
 NON_RAG_REASONING_EFFORT = "none"
-RAG_REASONING_EFFORT = "medium" if LLM_PROVIDER == "openai" else "medium"
+RAG_REASONING_EFFORT = "medium"
 EXTRACTION_MAX_COMPLETION_TOKENS = int(
-    os.getenv(f"{LLM_PROVIDER.upper()}_EXTRACTION_MAX_COMPLETION_TOKENS", _defaults["budget"])
+    os.getenv("OPENAI_EXTRACTION_MAX_COMPLETION_TOKENS", "2000")
 )
-COMPLETION_TOKEN_PARAMETER = "max_completion_tokens" if LLM_PROVIDER == "openai" else "max_tokens"
+COMPLETION_TOKEN_PARAMETER = "max_completion_tokens"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+RAG_INPUT_TPM = int(os.getenv("RAG_INPUT_TPM", "100000"))
+RAG_OUTPUT_TPM = int(os.getenv("RAG_OUTPUT_TPM", "50000"))
+GRAPH_INPUT_TPM = int(os.getenv("GRAPH_INPUT_TPM", "200000"))
+GRAPH_OUTPUT_TPM = int(os.getenv("GRAPH_OUTPUT_TPM", "100000"))
+
+OPENAI_EMBEDDING_MODEL = _model_setting(
+    "OPENAI_EMBEDDING_MODEL",
+    "text-embedding-3-small",
+)
+
+OPENAI_EMBEDDING_DIMENSIONS = int(
+    os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "384")
+)
+
+if OPENAI_EMBEDDING_DIMENSIONS <= 0:
+    raise RuntimeError("OPENAI_EMBEDDING_DIMENSIONS must be positive.")
 
 for directory in (DATA_DIR, OUTPUT_DIR, FUSION_DIR, UPLOADS_DIR):
     directory.mkdir(exist_ok=True)

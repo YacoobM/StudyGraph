@@ -4,8 +4,13 @@ import json
 from collections import Counter, defaultdict
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+
+from app.config import EXTRACTION_MODEL, RAG_MODEL
+from services import graph_fusion
+from services.graph_runtime import call_llm
+from sklearn.metrics.pairwise import cosine_similarity
+from services.embeddings import encode_texts
 
 from schemas.extraction import ExtractionResult
 from app.config import (
@@ -32,22 +37,21 @@ PRUNED_REACTIVATION_SIMILARITY = 0.85
 
 
 class StudyGraphEngine:
-    def __init__(
-        self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL
-    ):
+    def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL, graph_id=None):
         self.client = client
         self.llm_model = llm_model
         self.rag_model = rag_model
+        self.graph_id = graph_id
+        self.graph_name = ""
         self.concepts = []
         self.edges = []
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.chunk_store = []
         self.graph = None
-        self.graph_name = ""
-        self.canonical_nodes = {}  # Map from variants to canonical names (post-fusion)
-        self.fused_edges = []  # Edges after conflict resolution (post-fusion)
-        self.inferred_edges = []  # Transitive edges inferred during fusion
-        self.upload_latency = None  # float, total time for entire upload endpoint
+        self.graph_status = "active"
+        self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
+        self.fused_edges = []           # Edges after conflict resolution (post-fusion)
+        self.inferred_edges = []        # Transitive edges inferred during fusion
+        self.upload_latency = None              # float, total time for entire upload endpoint
         self.collections = collections
         self._doc_concept_names = (
             {}
@@ -103,7 +107,7 @@ class StudyGraphEngine:
         """
         if not seeds:
             return seeds
-        embeddings = self.model.encode(seeds, show_progress_bar=False)
+        embeddings = np.asarray(encode_texts(seeds))
         kept = []
         kept_embeddings = []
         for i, seed in enumerate(seeds):
@@ -194,8 +198,8 @@ class StudyGraphEngine:
         known_concepts changes, before relevant_known_concepts is used."""
         self._known_concepts_list = sorted(self.known_concepts)
         if self._known_concepts_list:
-            self.known_concept_embeddings = self.model.encode(
-                self._known_concepts_list, show_progress_bar=False
+            self.known_concept_embeddings = np.asarray(
+                encode_texts(self._known_concepts_list)
             )
         else:
             self.known_concept_embeddings = None
@@ -205,9 +209,7 @@ class StudyGraphEngine:
         by embedding similarity rather than a flat alphabetical slice."""
         if not self._known_concepts_list or self.known_concept_embeddings is None:
             return []
-        query_embedding = self.model.encode(
-            [text[:2000].lower()], show_progress_bar=False
-        )
+        query_embedding = np.asarray(encode_texts([text[:2000].lower()]))
         sims = cosine_similarity(query_embedding, self.known_concept_embeddings)[0]
         top_idx = np.argsort(sims)[::-1][:top_k]
         return [self._known_concepts_list[i] for i in top_idx]
@@ -251,9 +253,12 @@ Relationship types: prerequisite, causes, part_of, explains, enables, related_to
 Every relationship must include the chunk_id of the source chunk. Do not reproduce quotes or context text.
 For each relationship, include:
 - summary: a short explanation (one sentence max)
+For each concept, include:
+- name: the specific academic concept
+- description: a concise 1-2 sentence explanation grounded only in the supplied text
 
 Respond with ONLY this exact JSON structure:
-{{"graph_name" : "A short-descriptive title of the graph","concepts": ["concept1", "concept2"], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
+{{"graph_name" : "A short-descriptive title of the graph","concepts": [{{"name": "concept1", "description": "Concise grounded explanation."}}, {{"name": "concept2", "description": "Concise grounded explanation."}}], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
 
         user_text = "\n\n---\n\n".join(
             f"CHUNK_ID: {chunk['chunk_id']}\nTEXT:\n{chunk['text']}" for chunk in chunks
@@ -296,7 +301,13 @@ Respond with ONLY this exact JSON structure:
                 )
             return {
                 "graph_name": validated.graph_name,
-                "concepts": validated.concepts,
+                "concepts": [
+                    {
+                        "name": concept.name,
+                        "description": concept.description,
+                    }
+                    for concept in validated.concepts
+                ],
                 "relationships": [
                     {
                         "from": r.from_,
@@ -331,11 +342,19 @@ Respond with ONLY this exact JSON structure:
             )
             return {"concepts": [], "relationships": []}
 
+    def _mark_graph_dirty(self, reason=None):
+        """Graph evidence changed; rebuild before treating the graph as current."""
+        if self.graph_status == "active":
+            self.graph_status = "needs_regeneration"
+        if reason:
+            logger.info("graph_marked_dirty reason=%s graph_id=%s", reason, self.graph_id)
+        
     def add_to_graph(
         self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None
     ):
         if not raw_data:
             return
+        mutated = False
         extracted_name = raw_data.get("graph_name", "")
         if (
             not self.graph_name
@@ -343,10 +362,11 @@ Respond with ONLY this exact JSON structure:
             and extracted_name.strip()
         ):
             self.graph_name = extracted_name.strip()
-        for c in raw_data.get("concepts", []):
-            if not isinstance(c, str):
+        for concept in raw_data.get("concepts", []):
+            if not isinstance(concept, dict):
                 continue
-            name = c.lower().strip()
+            name = str(concept.get("name", "")).lower().strip()
+            description = str(concept.get("description", "") or "").strip()
             if not name:
                 continue
             if max_nodes_per_doc is not None:
@@ -361,6 +381,7 @@ Respond with ONLY this exact JSON structure:
                     "source": doc_name,
                     "week": week_key,
                     "pages": pages or [],
+                    "description": description,
                 }
             )
 
@@ -381,6 +402,10 @@ Respond with ONLY this exact JSON structure:
                         "chunk_id": chunk_id,
                     }
                 )
+                mutated = True
+
+        if mutated:
+            self._mark_graph_dirty("graph evidence changed")
 
     def deduplicate_extracted_edges(self):
         """Remove exact duplicate extracted edges without making an LLM call."""
@@ -449,7 +474,7 @@ Respond with ONLY this exact JSON structure:
             if concept["name"] not in dropped:
                 continue
             cache_key = (concept["name"], doc_name, week_key)
-            embedding = self.model.encode([concept["name"]], show_progress_bar=False)[0]
+            embedding = encode_texts([concept["name"]])[0]
             self.pruned_concept_cache[cache_key] = {
                 "key": cache_key,
                 "name": concept["name"],
@@ -484,6 +509,9 @@ Respond with ONLY this exact JSON structure:
         if doc_name in self._doc_concept_names:
             self._doc_concept_names[doc_name] -= dropped
 
+        if dropped:
+            self._mark_graph_dirty("concepts pruned")
+
         logger.info(
             "concepts_pruned document=%s week=%s dropped=%d",
             doc_name,
@@ -510,7 +538,7 @@ Respond with ONLY this exact JSON structure:
 
         active_names = [concept["name"] for concept in active_concepts]
         active_name_set = set(active_names)
-        active_embeddings = self.model.encode(active_names, show_progress_bar=False)
+        active_embeddings = np.asarray(encode_texts(active_names))
 
         restored = []
         for cache_key, entry in list(self.pruned_concept_cache.items()):
@@ -598,6 +626,8 @@ Respond with ONLY this exact JSON structure:
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(
             self, self.client
         )
+        
+        self.graph_status = "active"
 
         logger.info(
             "graph_fusion_complete canonical_nodes=%d fused_edges=%d inferred_edges=%d",
@@ -727,8 +757,8 @@ Respond with ONLY this exact JSON structure:
         if not self.concepts:
             return None
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        node_embeddings = np.asarray(encode_texts(node_names))
+        query_embedding = np.asarray(encode_texts([query.lower()]))
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
         best_idx = np.argmax(similarities)
         if similarities[best_idx] > 0.7:
@@ -800,8 +830,8 @@ Respond with ONLY this exact JSON structure:
             return {"nodes": [], "edges": [], "prompt_text": ""}
 
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        node_embeddings = np.asarray(encode_texts(node_names))
+        query_embedding = np.asarray(encode_texts([query.lower()]))
 
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
 
@@ -860,8 +890,8 @@ Respond with ONLY this exact JSON structure:
         working_edges = self.fused_edges if self.fused_edges else self.edges
 
         node_names = [c["name"] for c in self.concepts]
-        node_embeddings = self.model.encode(node_names, show_progress_bar=False)
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        node_embeddings = np.asarray(encode_texts(node_names))
+        query_embedding = np.asarray(encode_texts([query.lower()]))
         similarities = cosine_similarity(query_embedding, node_embeddings)[0]
 
         seed_nodes = set()
@@ -924,11 +954,28 @@ Respond with ONLY this exact JSON structure:
             "total_count": len(visited),
         }
 
+    def set_graph(self, graph_id):
+        self.graph_id = graph_id
+
+    def mark_graph_for_regeneration(self, reason=None):
+        self.graph_status = "needs_regeneration"
+        if reason:
+            logger.info("graph_marked_for_regeneration reason=%s graph_id=%s", reason, self.graph_id)
+
+    def clear_graph_support(self):
+        """Clear graph-derived state so the graph can be rebuilt from the remaining evidence."""
+        self.concepts = []
+        self.edges = []
+        self.canonical_nodes = {}
+        self.fused_edges = []
+        self.inferred_edges = []
+        self.graph_status = "needs_regeneration"
+
     def index_chunks(self, chunks, week_key=None):
         # store into the vector database
         texts = [chunk["text"] for chunk in chunks]
 
-        embeddings = self.model.encode(texts, show_progress_bar=False)
+        embeddings = np.asarray(encode_texts(texts))
 
         ids = [
             chunk.get("chunk_id", f"chunk_{self._chroma_chunk_counter + i}")
@@ -943,6 +990,8 @@ Respond with ONLY this exact JSON structure:
                 "pages": chunk["pages"],
                 "source": chunk.get("source", "unknown"),
             }
+            if self.graph_id is not None:
+                meta["graph_id"] = self.graph_id
             if week_key is not None:
                 meta["week"] = week_key
             metadatas.append(meta)
@@ -951,12 +1000,18 @@ Respond with ONLY this exact JSON structure:
             ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas
         )
 
-    def retrieve_chunks(self, query, top_k=3):
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+    def retrieve_chunks(self, query, top_k=5, graph_id=None):
+        target_graph_id = self.graph_id if graph_id is None else graph_id
+        query_embedding = np.asarray(encode_texts([query.lower()]))
 
-        results = self.collections.query(
-            query_embeddings=query_embedding, n_results=top_k
-        )
+        query_kwargs = {
+            "query_embeddings": query_embedding,
+            "n_results": top_k,
+        }
+        if target_graph_id is not None:
+            query_kwargs["where"] = {"graph_id": target_graph_id}
+
+        results = self.collections.query(**query_kwargs)
 
         if not results["documents"] or not results["documents"][0]:
             return []  # case of failed chunk retrieval
@@ -988,7 +1043,7 @@ Respond with ONLY this exact JSON structure:
         if not texts:
             return
 
-        embeddings = self.model.encode(texts, show_progress_bar=False)
+        embeddings = np.asarray(encode_texts(texts))
         for chunk, text, pages, embedding in zip(chunks, texts, pages_list, embeddings):
             self.chunks_by_week[week_key].append(
                 {
@@ -1004,7 +1059,7 @@ Respond with ONLY this exact JSON structure:
         pool = self.chunks_by_week.get(week_key, [])
         if not pool:
             return []
-        query_embedding = self.model.encode([query.lower()], show_progress_bar=False)
+        query_embedding = np.asarray(encode_texts([query.lower()]))
         chunk_embeddings = np.array([c["embedding"] for c in pool])
         similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
         top_indices = np.argsort(similarities)[-top_k:][::-1]

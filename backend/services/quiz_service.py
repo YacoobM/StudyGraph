@@ -17,12 +17,10 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, LLM_API_KEY_ENV,
+from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, OPENAI_API_KEY,
                         NON_RAG_REASONING_EFFORT, OUTPUT_DIR)
-from api.routes.auth import current_user
 from models.quiz_models import QuizAttempt
-from repositories.database import connect
-from services.llm_gateway import estimate_tokens, limiter
+from services.llm_gateway import estimate_tokens, graph_limiter
 
 router = APIRouter(tags=["quiz"])
 logger = logging.getLogger(__name__)
@@ -31,12 +29,17 @@ logger = logging.getLogger(__name__)
 class QuizConfig:
     # Six questions measured 583 output tokens; the model's output limit is 1,000 a minute.
     POOL_SIZE_PER_TOPIC = 6
+    DISTRACTOR_COUNT = 3
+    HUB_DEGREE_EASY = 4
+    HUB_DEGREE_MEDIUM = 2
     LLM_MAX_TOKENS = 900
+    LLM_MAX_CONCEPTS = 40
+    LLM_MAX_RELATIONS = 40
     MIN_CONCEPTS_PER_TOPIC = 4
     MIN_POOL_TO_SHOW_TOPIC = 2
     LLM_TIMEOUT_SECONDS = 45
     LLM_MODEL = EXTRACTION_MODEL
-    # Input cap in tokens: under the limiter's 7,000-a-minute input budget, with room for the
+    # Input cap in tokens: under the graph_limiter's 7,000-a-minute input budget, with room for the
     # prompt and extraction.
     LLM_INPUT_TOKENS = 4000
     # Share of an evidence sentence's content words that must occur in one sentence or short run of
@@ -44,6 +47,7 @@ class QuizConfig:
     EVIDENCE_OVERLAP = 0.8
     POLL_HINT_SECONDS = 4
 
+PTS = {"easy": 10, "medium": 20, "hard": 30}
 
 DIFFICULTIES = ("easy", "medium", "hard")
 
@@ -98,6 +102,136 @@ def pass_mark(total: int, kind: str = "section") -> int:
     if kind == "section":
         return total - 1 if total >= 3 else total
     return -(-2 * total // 3)
+
+def _distractors(answer: str, pool: list[str], exclude: set[str] | None = None) -> list[str]:
+    blocked = {answer} | (exclude or set())
+    others = [c for c in pool if c not in blocked]
+    random.shuffle(others)
+    return others[:QuizConfig.DISTRACTOR_COUNT]
+
+
+def _mcq(question: str, answer: str, pool: list[str], why: str, diff: str,
+         exclude: set[str] | None = None) -> Optional[dict]:
+    wrong = _distractors(answer, pool, exclude)
+    if len(wrong) < 2:
+        return None
+    options = wrong + [answer]
+    random.shuffle(options)
+    return {"q": question, "o": options, "a": options.index(answer), "why": why, "d": diff}
+
+def _difficulty(degree: int) -> str:
+    if degree >= QuizConfig.HUB_DEGREE_EASY:
+        return "easy"
+    if degree >= QuizConfig.HUB_DEGREE_MEDIUM:
+        return "medium"
+    return "hard"
+
+def _questions_from_graph(concepts: list[dict], edges: list[dict], week: str) -> list[dict]:
+    names = sorted({c["name"] for c in concepts if c.get("week") == week})
+    if len(names) < QuizConfig.MIN_CONCEPTS_PER_TOPIC:
+        names = sorted({c["name"] for c in concepts})
+    if len(names) < QuizConfig.MIN_CONCEPTS_PER_TOPIC:
+        return []
+
+    degree = defaultdict(int)
+    for e in edges:
+        degree[e["from"]] += 1
+        degree[e["to"]] += 1
+
+    week_edges = [e for e in edges if e["from"] in names and e["to"] in names] or edges
+    out: list[dict] = []
+
+    for e in week_edges:
+        rel = (e.get("relation") or "relates to").strip()
+        src, tgt = e["from"], e["to"]
+
+        q = _mcq(f"According to your sources, what does {src} {rel}?", tgt, names,
+                 f"Your material records: {src} {rel} {tgt}.", _difficulty(degree[tgt]), {src})
+        if q:
+            out.append(q)
+
+        q2 = _mcq(f"Which concept {rel} {tgt}?", src, names,
+                  f"Your material records: {src} {rel} {tgt}.", _difficulty(degree[src]), {tgt})
+        if q2:
+            out.append(q2)
+
+        if len(out) >= QuizConfig.POOL_SIZE_PER_TOPIC:
+            break
+
+    if degree:
+        hub = max(names, key=lambda n: degree[n], default=None)
+        if hub:
+            q3 = _mcq("Which concept is the most connected in this part of your material?",
+                      hub, names,
+                      f"{hub} appears in {degree[hub]} of the relationships extracted from your document.",
+                      "medium")
+            if q3:
+                out.append(q3)
+
+    random.shuffle(out)
+    return out[:QuizConfig.POOL_SIZE_PER_TOPIC]
+
+
+LLM_PROMPT = """You are writing revision questions for a student, using ONLY the
+concepts and relationships extracted from their own lecture material below.
+
+Concepts: {concepts}
+
+Relationships:
+{relations}
+
+Write {n} multiple-choice questions. Rules:
+- Ask only about the concepts and relationships given. Invent nothing.
+- Exactly 4 options each, one correct.
+- Wrong options must be other concepts from the list, so they are plausible.
+- "d" is the difficulty: "easy", "medium" or "hard".
+- "why" explains the answer in one sentence.
+
+Return ONLY a JSON array, no prose and no markdown fences:
+[{{"q":"...","o":["...","...","...","..."],"a":0,"why":"...","d":"easy"}}]
+"""
+
+
+def _questions_from_llm(concepts: list[str], edges: list[dict], n: int) -> list[dict]:
+    if not OPENAI_API_KEY:
+        return []
+    relations = "\n".join(
+        f"- {e['from']} {e.get('relation', 'relates to')} {e['to']}"
+        for e in edges[:QuizConfig.LLM_MAX_RELATIONS]
+    )
+    prompt = LLM_PROMPT.format(
+        concepts=", ".join(concepts[:QuizConfig.LLM_MAX_CONCEPTS]), relations=relations, n=n,
+    )
+
+    try:
+        from services.llm_provider import create_llm_client
+        client = create_llm_client(
+            OPENAI_API_KEY,
+            timeout=QuizConfig.LLM_TIMEOUT_SECONDS,
+            max_retries=1,
+        )
+        resp = client.chat.completions.create(
+            model=QuizConfig.LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            reasoning_effort=NON_RAG_REASONING_EFFORT,
+        )
+        text = resp.choices[0].message.content.strip()
+        text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
+        items = json.loads(text)
+    except Exception:
+        return []
+
+    good = []
+    for it in items if isinstance(items, list) else []:
+        if (
+            isinstance(it, dict)
+            and isinstance(it.get("o"), list) and len(it["o"]) >= 3
+            and isinstance(it.get("a"), int) and 0 <= it["a"] < len(it["o"])
+            and it.get("q") and it.get("why")
+        ):
+            it["d"] = it.get("d") if it.get("d") in PTS else "medium"
+            good.append(it)
+    return good
 
 
 # --- document quiz, from the document's text: graph labels turned reversed edges into facts ---
@@ -179,10 +313,9 @@ _QUIZ_FIELDS = ("id", "q", "o", "a", "why", "d")
 
 
 def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
-    """One call for a document's quiz from its text, on the configured provider. Questions whose
+    """One call for a document's quiz from its text via OpenAI. Questions whose
     evidence is not in the text, or that fail validate_quiz, are dropped."""
-    key = os.getenv(LLM_API_KEY_ENV)
-    if not key:
+    if not OPENAI_API_KEY:
         return []
     from services import notes_service as ns
     from services.graph_fusion import is_request_too_large, retry_after_seconds
@@ -195,11 +328,13 @@ def _questions_from_document(filename: str, quiz_id: str, n: int) -> list[dict]:
     excerpt = sample_text(source, QuizConfig.LLM_INPUT_TOKENS * 4)
     user = f"Write {n} questions.\n\nSOURCE TEXT:\n{excerpt}"
 
-    client = create_llm_client(key, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0)
+    client = create_llm_client(
+        OPENAI_API_KEY, timeout=QuizConfig.LLM_TIMEOUT_SECONDS, max_retries=0
+    )
     finish, text = None, ""
     for attempt in range(2):
         try:
-            limiter.acquire_sync(estimate_tokens(_QUIZ_SYSTEM) + estimate_tokens(user), QuizConfig.LLM_MAX_TOKENS)
+            graph_limiter.acquire_sync(estimate_tokens(_QUIZ_SYSTEM) + estimate_tokens(user), QuizConfig.LLM_MAX_TOKENS)
             resp = client.chat.completions.create(
                 model=QuizConfig.LLM_MODEL,
                 messages=[{"role": "system", "content": _QUIZ_SYSTEM}, {"role": "user", "content": user}],
@@ -278,17 +413,6 @@ async def _generate_topic(topic_id: str, week: str, members: list[dict],
         _TOPIC_CACHE[topic_id] = {"fingerprint": fingerprint, "topic": topic}
     finally:
         _GENERATING.discard(topic_id)
-
-
-def _user_documents(user_id) -> list:
-    """The user's document rows, oldest week first. A seam for tests."""
-    with connect() as conn:
-        rows = conn.execute(
-            "SELECT id, filename, week, status FROM documents WHERE user_id = ? "
-            "ORDER BY uploaded_at", (user_id,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
 
 # A title line: a short run of words, not a page number, URL, date or copyright notice.
 _TITLE_MAX_CHARS = 90
@@ -380,212 +504,3 @@ def _document_quiz(doc: dict, concepts: list[dict]) -> dict:
     elif topic_id in _GENERATING:
         entry["status"] = "generating"
     return entry
-
-
-@router.get("/api/quiz")
-async def get_quiz(user=Depends(current_user)):
-    """Every document with its quiz state. Generation waits for POST
-    /api/quiz/documents/{id}/generate."""
-    concepts, _edges = _graph()
-    documents = [_document_quiz(d, concepts) for d in _user_documents(user["id"])]
-    reason = None
-    if not documents:
-        reason = "No documents yet. Upload one and it will be listed here."
-    elif not concepts:
-        reason = "No documents have been processed yet."
-    return {
-        "documents": documents,
-        "reason": reason,
-        "poll_after_seconds": QuizConfig.POLL_HINT_SECONDS,
-    }
-
-
-@router.post("/api/quiz/documents/{doc_id}/generate")
-async def generate_document_quiz(doc_id: int, user=Depends(current_user)):
-    """Starts a document's quiz in the background unless cached or running. Poll GET /api/quiz
-    until status leaves 'generating'."""
-    doc = next((d for d in _user_documents(user["id"]) if d["id"] == doc_id), None)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="That document is not in your library.")
-
-    concepts, _edges = _graph()
-    entry = _document_quiz(doc, concepts)
-    if entry["status"] == "too_small":
-        raise HTTPException(status_code=422,
-                            detail="This document has too few concepts for a quiz.")
-    if entry["status"] in ("idle", "failed"):
-        members = [c for c in concepts if c.get("source") == doc["filename"]]
-        names = sorted({c["name"] for c in members})
-        topic_id = entry["quiz_id"]
-        _TOPIC_CACHE.pop(topic_id, None)
-        _GENERATING.add(topic_id)
-        task = asyncio.create_task(_generate_topic(
-            topic_id, members[0].get("week") or "Week 1", members, names,
-            _topic_fingerprint(names), doc["filename"], title=entry["title"],
-        ))
-        _TASKS.add(task)
-        task.add_done_callback(_TASKS.discard)
-        entry = {**entry, "status": "generating", "topic": None}
-    return {"document": entry, "poll_after_seconds": QuizConfig.POLL_HINT_SECONDS}
-
-
-@router.get("/api/documents/stats")
-async def document_stats(user=Depends(current_user)):
-    concepts, edges = _graph()
-    if not concepts:
-        return {"stats": {}}
-
-    by_source: dict[str, dict] = {}
-    names_by_source: dict[str, set] = defaultdict(set)
-
-    for c in concepts:
-        src = c.get("source") or "unknown"
-        names_by_source[src].add(c["name"])
-        entry = by_source.setdefault(src, {"concepts": 0, "edges": 0, "week": c.get("week")})
-        entry["week"] = entry["week"] or c.get("week")
-
-    for src, names in names_by_source.items():
-        by_source[src]["concepts"] = len(names)
-        by_source[src]["edges"] = sum(1 for e in edges if e["from"] in names and e["to"] in names)
-
-    return {"stats": by_source}
-
-
-# --- results: every attempt per user in one JSON file; summaries are computed on read ---
-
-RESULTS_FILE = OUTPUT_DIR / "quiz_results.json"
-_RESULTS_LOCK = threading.Lock()
-
-
-def _load_results() -> dict:
-    try:
-        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def _append_attempt(user_id, attempt: dict) -> list[dict]:
-    """Adds an attempt and returns the user's attempts at that quiz. Re-read under the lock so
-    concurrent saves both survive."""
-    with _RESULTS_LOCK:
-        data = _load_results()
-        attempts = data.setdefault(str(user_id), [])
-        attempts.append(attempt)
-        RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = RESULTS_FILE.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, RESULTS_FILE)
-    return [a for a in attempts if a["quiz_id"] == attempt["quiz_id"]]
-
-
-def summarise_attempts(attempts: list[dict]) -> dict:
-    """One quiz's attempts as the Quiz tab lists them: best share correct (later wins ties) and
-    the latest. Old 'points' fields are ignored."""
-    best = max(attempts, key=lambda a: (a["correct"] / a["total"], a["at"]))
-    last = max(attempts, key=lambda a: a["at"])
-    return {
-        "quiz_id": last["quiz_id"],
-        "kind": last["kind"],
-        "title": last.get("title"),
-        "group": last.get("group"),
-        "attempts": len(attempts),
-        "best": {"correct": best["correct"], "total": best["total"]},
-        "passed": any(a["passed"] for a in attempts),
-        "last_at": last["at"],
-        "last": {"correct": last["correct"], "total": last["total"],
-                 "answers": last["answers"]},
-    }
-
-
-@router.post("/api/quiz/results")
-async def save_result(body: QuizAttempt, user=Depends(current_user)):
-    if body.total <= 0:
-        raise HTTPException(status_code=422, detail="A quiz needs at least one question.")
-    if body.correct > body.total or len(body.answers) > body.total:
-        raise HTTPException(status_code=422, detail="That score does not fit the quiz.")
-
-    passed = body.correct >= pass_mark(body.total, body.kind)
-    attempt = {
-        "quiz_id": body.quiz_id, "kind": body.kind, "title": body.title, "group": body.group,
-        "answers": list(body.answers), "correct": body.correct, "total": body.total,
-        "passed": passed, "at": time.time(),
-    }
-    mine = await asyncio.to_thread(_append_attempt, user["id"], attempt)
-    return {"result": summarise_attempts(mine), "passed": passed}
-
-
-@router.get("/api/quiz/results")
-async def list_results(user=Depends(current_user)):
-    by_quiz: dict[str, list[dict]] = defaultdict(list)
-    for attempt in _load_results().get(str(user["id"]), []):
-        by_quiz[attempt["quiz_id"]].append(attempt)
-    return {"results": {qid: summarise_attempts(a) for qid, a in by_quiz.items()}}
-
-
-def passed_quiz_ids(user_id, kind: str = "section") -> set[str]:
-    """Quiz ids of that kind the user has passed; notes tick sections from it across restarts."""
-    return {a["quiz_id"] for a in _load_results().get(str(user_id), [])
-            if a.get("kind") == kind and a.get("passed")}
-
-
-# --- section quizzes: kept per user so the Quiz tab lists them after the in-memory notes are gone ---
-
-SECTION_QUIZ_FILE = OUTPUT_DIR / "section_quizzes.json"
-_SECTION_QUIZ_LOCK = threading.Lock()
-
-
-def _load_section_quizzes() -> dict:
-    try:
-        with open(SECTION_QUIZ_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def register_section_quiz(user_id, quiz_id: str, note_title: str, section_title: str,
-                          index: int, questions: list[dict]) -> None:
-    """Records a section quiz for a user, skipping unchanged writes. Never raises: a failed
-    record must not fail the section."""
-    entry = {"quiz_id": quiz_id, "note_title": note_title, "section_title": section_title,
-             "index": index, "questions": questions}
-    try:
-        with _SECTION_QUIZ_LOCK:
-            data = _load_section_quizzes()
-            mine = data.setdefault(str(user_id), {})
-            old = mine.get(quiz_id)
-            if old and {k: v for k, v in old.items() if k != "saved_at"} == entry:
-                return
-            mine[quiz_id] = {**entry, "saved_at": time.time()}
-            SECTION_QUIZ_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp = SECTION_QUIZ_FILE.with_suffix(".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, SECTION_QUIZ_FILE)
-    except OSError as exc:
-        print(f"Quiz: section quiz {quiz_id} could not be recorded — {exc}")
-
-
-@router.get("/api/quiz/sections")
-async def list_section_quizzes(user=Depends(current_user)):
-    """The user's section quizzes by note title in section order, from SECTION_QUIZ_FILE so they
-    survive a restart."""
-    by_note: dict[str, list[dict]] = defaultdict(list)
-    for entry in _load_section_quizzes().get(str(user["id"]), {}).values():
-        by_note[entry.get("note_title") or "Revision notes"].append(entry)
-    notes = []
-    for title, entries in by_note.items():
-        entries.sort(key=lambda e: (e.get("index", 0), e.get("section_title") or ""))
-        notes.append({
-            "title": title,
-            "latest": max(e.get("saved_at", 0) for e in entries),
-            # Questions were stored already shuffled by register_section_quiz.
-            "sections": [{"quiz_id": e["quiz_id"], "title": e.get("section_title"),
-                          "questions": e.get("questions") or [],
-                          "pass_mark": pass_mark(len(e.get("questions") or []))} for e in entries],
-        })
-    notes.sort(key=lambda n: -n["latest"])
-    return {"notes": notes}

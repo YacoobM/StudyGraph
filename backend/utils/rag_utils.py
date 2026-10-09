@@ -6,6 +6,8 @@ from app.logging_config import get_logger
 from app.config import (
     RAG_REASONING_EFFORT,
 )
+from services.llm_gateway import estimate_tokens, rag_limiter
+
 import json
 
 logger = get_logger(__name__)
@@ -95,7 +97,7 @@ def call_rag_llm(
     Make the LLM call for RAG queries.
 
     Args:
-        client: OpenAI/Groq Client
+        client: OpenAI client
         model: Model name
         system_prompt: System prompt text
         user_prompt: user prompt text
@@ -108,6 +110,13 @@ def call_rag_llm(
         AttributeError, KeyError, ValueError: Response parsing errors
         Exception: API or other errors
     """
+    estimated_input = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
+    
+    rag_limiter.acquire_sync(
+        estimated_input,
+        2000,
+    )
+    
     response = client.chat.completions.create(
         messages=[
             {"role": "system", "content": system_prompt},

@@ -5,63 +5,10 @@
    text, a forest-green accent and copper for in-progress states. Every
    component reads these tokens, so the whole app follows from this block.
    ========================================================================= */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap');
+@import './theme.css';
 
-:root {
-  /* core surfaces — bg-0 is the page, higher numbers sit closer to the reader */
-  --bg-0: #FBF8F2;
-  --bg-1: #FFFFFF;
-  --bg-2: #F7F3E9;
-  --bg-3: #F1EAD9;
-  --bg-elev: #FFFFFF;
-  --border: #E4DAC2;
-  --border-strong: #D2C4A4;
-
-  /* text — text-0 is primary, text-3 the faintest still-legible grey */
-  --text-0: #1C1A16;
-  --text-1: #3B372F;
-  --text-2: #5C5648;
-  --text-3: #736D5E;
-
-  /* accent */
-  --accent: #22503C;
-  --accent-hover: #173A2B;
-  --accent-soft: rgba(34, 80, 60, 0.09);
-  --accent-strong: rgba(34, 80, 60, 0.28);
-
-  --warn: #B25A28;   /* copper, darkened to clear AA on paper */
-  --danger: #B3402A;
-  --success: #2E7D4F;
-
-  /* node label palette — darkened from the dark-theme originals so they keep
-     their contrast against a light background */
-  --n-chunk: #B85C8A;
-  --n-document: #0E7490;
-  --n-algorithm: #B45309;
-  --n-concept: #4D7C0F;
-  --n-course: #BE185D;
-  --n-lecture: #C2410C;
-  --n-organization: #A16207;
-  --n-phase: #6D28D9;
-  --n-problem: #C2410C;
-  --n-rule: #B91C1C;
-  --n-software: #1D4ED8;
-  --n-string: #3F6212;
-  --n-term: #A16207;
-  --n-tool: #7E22CE;
-  --n-university: #9D174D;
-  --n-week: #4D7C0F;
-
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-
-  --font-display: 'Inter', system-ui, sans-serif;
-  --font-body: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-* { box-sizing: border-box; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; margin: 0; }
 
 body {
@@ -69,6 +16,7 @@ body {
   color: var(--text-0);
   font-family: var(--font-body);
   font-size: 14px;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -111,10 +59,10 @@ input, textarea, select {
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: #0a2724;
+  background: var(--action-primary);
+  color: var(--text-on-accent);
 }
-.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:hover { background: var(--action-primary-hover); }
 .btn-primary:disabled {
   background: var(--bg-3);
   color: var(--text-3);
@@ -137,7 +85,7 @@ input, textarea, select {
   color: var(--text-1);
 }
 .btn-danger:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--danger-soft);
   border-color: var(--danger);
   color: var(--danger);
 }
@@ -178,7 +126,7 @@ input, textarea, select {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  color: #1a1f29;
+  color: var(--text-0);
 }
 
 /* status dots */

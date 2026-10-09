@@ -9,10 +9,15 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from app.config import (COMPLETION_TOKEN_PARAMETER, EXTRACTION_MODEL, FUSION_DIR, LLM_PROVIDER,
-                        NON_RAG_REASONING_EFFORT)
+from services.embeddings import encode_texts
+from app.config import (
+    COMPLETION_TOKEN_PARAMETER,
+    EXTRACTION_MODEL,
+    FUSION_DIR,
+    NON_RAG_REASONING_EFFORT,
+)
 from services.fusion_log import FusionLog
-from services.llm_gateway import estimate_tokens, limiter
+from services.llm_gateway import estimate_tokens, graph_limiter
 from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 _MODEL = EXTRACTION_MODEL
@@ -21,8 +26,8 @@ AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55
 NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "mis")
 
-# Pairs per verdict call (steps 3, 3b and 5): 6 on OpenAI, 4 on Groq.
-_VERDICT_PAIR_BATCH = 6 if LLM_PROVIDER == "openai" else 4
+# Pairs per verdict call (steps 3, 3b and 5).
+_VERDICT_PAIR_BATCH = 6
 # Resends of the same request after malformed JSON. At temperature 0 a resend mostly repeats
 # itself, so one is enough; 429s count separately.
 _VERDICT_MAX_RETRIES = 1
@@ -622,7 +627,7 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
         try:
             # Reserved from the budget extraction and evolution share, so
             # fusion no longer races them into the provider's per-minute limits.
-            limiter.acquire_sync(estimate_tokens(system) + estimate_tokens(user), max_tokens)
+            graph_limiter.acquire_sync(estimate_tokens(system) + estimate_tokens(user), max_tokens)
         except ValueError as e:
             log(f"{tag} larger than the per-minute token budget ({e}) — not sent")
             return None, "over budget"
@@ -637,7 +642,7 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
                 response_format={"type": "json_object"},
                 # Accepted by OpenAI only with reasoning_effort "none".
                 temperature=0,
-                # max_tokens on Groq; OpenAI's gpt-5 models reject it for max_completion_tokens.
+                # OpenAI reasoning models use max_completion_tokens.
                 **{COMPLETION_TOKEN_PARAMETER: max_tokens},
             )
             raw = completion.choices[0].message.content or ""
@@ -716,10 +721,10 @@ def _verdict_call(client, system, payload, log, tag, failures=None, max_tokens=_
 
 
 def fusion_workers(input_limit=None, output_limit=None):
-    """Verdict calls the limiter budget keeps in flight at once: calls per minute times the call
+    """Verdict calls the graph_limiter budget keeps in flight at once: calls per minute times the call
     time, from 1 to _FUSION_MAX_WORKERS."""
-    input_limit = limiter.input_limit if input_limit is None else input_limit
-    output_limit = limiter.output_limit if output_limit is None else output_limit
+    input_limit = graph_limiter.input_limit if input_limit is None else input_limit
+    output_limit = graph_limiter.output_limit if output_limit is None else output_limit
     per_minute = min(input_limit // _CALL_INPUT_TOKENS, output_limit // _VERDICT_MAX_TOKENS)
     return max(1, min(_FUSION_MAX_WORKERS, int(per_minute * _CALL_SECONDS / 60)))
 
@@ -787,7 +792,6 @@ class _EvidencePool:
         self._missing_logged = False
         self.missing = 0
         self._name_vecs = name_vecs
-        self._model = engine.model
         self._sentence_cache = {}       # id(chunk) -> (sentences, vectors)
         by_doc = {}
         for chunks in engine.chunks_by_week.values():
@@ -845,7 +849,7 @@ class _EvidencePool:
                 part = _WS.sub(" ", part).strip()[:_EVIDENCE_SENTENCE_CHARS]
                 if len(part.split()) >= 3 and part not in sentences:
                     sentences.append(part)
-            vectors = (np.asarray(self._model.encode(sentences, show_progress_bar=False))
+            vectors = (np.asarray(encode_texts(sentences))
                        if sentences else None)
             cached = (sentences, vectors)
             self._sentence_cache[id(chunk)] = cached
@@ -952,7 +956,7 @@ def merge_graph(engine, client, log=print):
     llm_candidates = []
     auto_merged = blocked = 0
     if len(unique_names) >= 2:
-        name_embeddings = engine.model.encode(unique_names)
+        name_embeddings = np.asarray(encode_texts(unique_names))
         sim_matrix = cosine_similarity(name_embeddings)
         for i in range(len(unique_names)):
             for j in range(i + 1, len(unique_names)):
@@ -995,7 +999,7 @@ def merge_graph(engine, client, log=print):
     step3_new_edges = []
     if llm_candidates:
         ask_names = sorted({n for (a, b, _s) in llm_candidates for n in (a, b)})
-        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names))}
+        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, encode_texts(ask_names))}
         
         merges, step3_new_edges, canonical_votes = _llm_evaluate_pairs(
             llm_candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log, run)
@@ -1495,7 +1499,7 @@ def _verify_clusters(dsu, nodes, engine, client, log, run):
 
     if to_ask:
         cluster_names = sorted({m for (_ci, members) in to_ask for m in members})
-        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(cluster_names, engine.model.encode(cluster_names))}
+        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(cluster_names, encode_texts(cluster_names))}
         evidence = _EvidencePool(engine, log, name_vecs)
 
         batches = [to_ask[i:i + _CLUSTER_BATCH] for i in range(0, len(to_ask), _CLUSTER_BATCH)]
@@ -1616,7 +1620,7 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log, run):
     log(f"Fusion step 5: {len(resolved)} cache hits, {len(to_ask)} LLM calls")
 
     ask_names = sorted({n for (a, b, _c) in to_ask for n in (a, b)})
-    name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, engine.model.encode(ask_names))} if ask_names else {}
+    name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, encode_texts(ask_names))} if ask_names else {}
     evidence = _EvidencePool(engine, log, name_vecs)
 
     batches = [to_ask[i:i + _VERDICT_PAIR_BATCH] for i in range(0, len(to_ask), _VERDICT_PAIR_BATCH)]

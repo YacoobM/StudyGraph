@@ -125,7 +125,7 @@ export default function SubjectSidebar({
           {is('new-subject') && (
             <div className="st-editrow">
               <InlineInput placeholder="Subject name, e.g. FIT3143" label="New subject name"
-                           onSubmit={(name) => { addSubject(name); stop() }} onCancel={stop} />
+                           onSubmit={async (name) => { await addSubject(name); stop() }} onCancel={stop} />
             </div>
           )}
 
@@ -241,8 +241,8 @@ export default function SubjectSidebar({
                       <li className="st-editrow st-lvl-1">
                         <InlineInput placeholder="Topic name, e.g. Week 2 — Threads"
                                      label={`New topic in ${s.name}`}
-                                     onSubmit={(name) => {
-                                       const id = addTopic(s.id, name)
+                                     onSubmit={async (name) => {
+                                       const id = await addTopic(s.id, name)
                                        // go straight on to naming its first graph
                                        setEditing({ kind: 'new-graph', id })
                                      }}

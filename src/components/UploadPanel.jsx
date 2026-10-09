@@ -65,21 +65,18 @@ export function UploadQueue({ items }) {
   )
 }
 
-/**
- * Destination picker: "No graph" plus every graph, grouped under
- * "Subject · Topic" (a <select> cannot nest groups two deep).
- */
-export function GraphSelect({ subjects, value, onChange, label = 'Add to', id }) {
+/** Destination picker: "No topic" plus every topic, grouped by subject. */
+export function TopicSelect({ subjects, value, onChange, label = 'Add to', id }) {
   return (
     <label className="up-dest" htmlFor={id}>
       <span>{label}</span>
       <select id={id} value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
-        <option value="">No graph (All documents)</option>
-        {subjects.flatMap((s) => s.topics.filter((t) => t.graphs.length).map((t) => (
-          <optgroup key={t.id} label={`${s.name} · ${t.name}`}>
-            {t.graphs.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+        <option value="">No topic (All documents)</option>
+        {subjects.map((s) => (
+          <optgroup key={s.id} label={s.name}>
+            {s.topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </optgroup>
-        )))}
+        ))}
       </select>
     </label>
   )
@@ -110,7 +107,7 @@ export default function UploadDialog({
           <button type="button" className="up-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
 
-        <GraphSelect id="up-dest" subjects={subjects} value={destination} onChange={onDestination} />
+        <TopicSelect id="up-dest" subjects={subjects} value={destination} onChange={onDestination} />
 
         <UploadDrop onFiles={onFiles} />
 

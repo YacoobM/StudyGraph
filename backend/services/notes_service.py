@@ -19,9 +19,7 @@ from typing import Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from api.routes.auth import current_user
 from app.config import OUTPUT_DIR
-from repositories.database import connect
 from services import evolution_data, key_sentences
 
 router = APIRouter(tags=["notes"])
@@ -650,14 +648,13 @@ def _llm_client():
     and pacing belong to evolution_data._call_with_retry."""
     global _client
     if _client is None:
-        from app.config import LLM_API_KEY_ENV
+        from app.config import OPENAI_API_KEY
         from services.llm_provider import create_llm_client
-        key = os.getenv(LLM_API_KEY_ENV)
-        if not key:
+        if not OPENAI_API_KEY:
             return None
         # max_retries=1 leaves retrying to _call_with_retry rather than doubling
         # it up at the SDK layer.
-        _client = _low_reasoning(create_llm_client(key, max_retries=1))
+        _client = _low_reasoning(create_llm_client(OPENAI_API_KEY, max_retries=1))
     return _client
 
 
@@ -1103,20 +1100,6 @@ async def measure_coverage(picks: list[str], body: dict) -> Optional[dict]:
     }
 
 
-def _document_order(user_id: int, document_ids: list[int]) -> list[str]:
-    """The note's filenames in teaching order: by week, then by filename read
-    naturally, so Lecture 5 comes before Lecture 6 and Lecture 10."""
-    unique = list(dict.fromkeys(document_ids))
-    placeholders = ",".join("?" for _ in unique)
-    with connect() as conn:
-        rows = conn.execute(
-            f"SELECT filename, week FROM documents WHERE user_id = ? AND id IN ({placeholders})",
-            (user_id, *unique),
-        ).fetchall()
-    rows = sorted(rows, key=lambda r: (_week_number(r["week"]), _natural_key(r["filename"])))
-    return list(dict.fromkeys(r["filename"] for r in rows))
-
-
 def build_note(user_id, title, document_ids, filenames, sections,
                sources_by_concept, edges, days):
     """Assembles the note and its sections; bodies stay empty until written."""
@@ -1163,27 +1146,6 @@ def build_note(user_id, title, document_ids, filenames, sections,
     }
 
 
-def _resolve_documents(user_id: int, document_ids: list[int]) -> dict[int, str]:
-    """Document ids to filenames for the signed-in user; the engine keys concepts by filename."""
-    unique = list(dict.fromkeys(document_ids))
-    placeholders = ",".join("?" for _ in unique)
-    with connect() as conn:
-        rows = conn.execute(
-            f"SELECT id, filename FROM documents WHERE user_id = ? AND id IN ({placeholders})",
-            (user_id, *unique),
-        ).fetchall()
-
-    found = {r["id"]: r["filename"] for r in rows}
-    missing = [i for i in unique if i not in found]
-    if missing:
-        listed = ", ".join(str(i) for i in missing)
-        raise HTTPException(
-            status_code=404,
-            detail=f"Not in your library: document {listed}.",
-        )
-    return found
-
-
 def _title_for(filenames: list[str]) -> str:
     if len(filenames) == 1:
         return Path(filenames[0]).stem
@@ -1198,7 +1160,7 @@ _WRITE_PROMPT_VERSION = "notes-write-v18"
 
 # Pinned, not a '-latest' alias: the alias returned 503 while this model answered, and a moving
 # alias makes cached bodies irreproducible.
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 _WRITE_SYSTEM = (
     "You write one section of a student's revision notes. You are writing for "
@@ -1484,13 +1446,13 @@ def _write_key(section: dict, other_concepts=(), other_picks=()) -> str:
     return f"{_WRITE_PROMPT_VERSION}|{GEMINI_MODEL}|section:{digest}"
 
 
-async def gather_chunks(concept_names, documents=None) -> list[dict]:
+async def gather_chunks(concept_names, documents=None, retrieve=None) -> list[dict]:
     """Source text behind a section, one retrieval per concept, deduplicated and kept whole.
     `documents` keeps other lectures out."""
-    engine = _engine()
-    retrieve = getattr(engine, "retrieve_chunks", None)
     if retrieve is None:
-        return []
+        engine = _engine()
+        retrieve = getattr(engine, "retrieve_chunks", None)
+
 
     def collect():
         found, seen = [], set()
@@ -1967,11 +1929,11 @@ def _cached_body(cache_key: str) -> Optional[dict]:
     return cached if isinstance(cached, dict) and cached.get("lead") else None
 
 
-async def _add_material(entry: dict, documents) -> bool:
+async def _add_material(entry: dict, documents, retrieve=None) -> bool:
     """Retrieves a section's extracts and builds its prompt onto `entry`.
     False when nothing was retrieved, so there is nothing to write from."""
     section = entry["section"]
-    chunks = await gather_chunks(section["concepts"], documents)
+    chunks = await gather_chunks(section["concepts"], documents, retrieve=retrieve)
     if not chunks:
         print(f"Notes write: no source text retrieved for section {section['id']} "
               f"({len(section['concepts'])} concepts) — nothing to write from.")
@@ -1982,7 +1944,7 @@ async def _add_material(entry: dict, documents) -> bool:
 
 
 async def write_body(section: dict, documents=None, other_concepts=(),
-                     other_picks=()) -> tuple[Optional[dict], Optional[float]]:
+                     other_picks=(), chunk_retriever=None) -> tuple[Optional[dict], Optional[float]]:
     """Writes one section alone, through the write cache. Returns (body, retry_after); body is
     None on failure."""
     entry = _write_entry(section, other_concepts, other_picks)
@@ -1993,7 +1955,7 @@ async def write_body(section: dict, documents=None, other_concepts=(),
     client = _gemini_client()
     if client is None:
         return None, None
-    if not await _add_material(entry, documents):
+    if not await _add_material(entry, documents, retrieve=chunk_retriever):
         return None, None
 
     body, retry_after = await _generate_body(client, entry["prompt"])
@@ -2294,259 +2256,3 @@ async def _generate_group(client, prompt: str, labels: list[str]):
 class PlanRequest(BaseModel):
     document_ids: list[int] = Field(min_length=1)
     days: Optional[int] = Field(default=None, ge=1, le=30)
-
-
-@router.post("/api/notes/plan", status_code=201)
-async def plan_note(body: PlanRequest, user=Depends(current_user)):
-    """Plans a note: sections by document range, must-cover picks assigned, a thin section
-    merged, one call for titles. Bodies stay empty."""
-    documents = _resolve_documents(user["id"], body.document_ids)
-    filenames = set(documents.values())
-
-    names_by_source, sources_by_concept, edges = filter_graph_to_documents(filenames)
-    concept_names = sorted(sources_by_concept)
-
-    if not concept_names:
-        raise HTTPException(
-            status_code=400,
-            detail="Nothing has been extracted from those documents yet. "
-                   "Wait for processing to finish, then try again.",
-        )
-    # Diagnostics only: grouping no longer uses the relations, but a corpus
-    # whose labels this classifier cannot read is still worth reporting.
-    ordering, cohesion = derive_constraints(edges)
-
-    # Report labels the vocabulary cannot read: without them the plan has no order, which looks
-    # like all-symmetric relations.
-    unrecognised = unrecognised_labels(edges)
-    if not ordering:
-        print(f"Notes plan: no ordering constraints from {len(edges)} edges — "
-              f"sections will not be sequenced. Unrecognised labels: "
-              f"{list(unrecognised) or 'none'}")
-    elif unrecognised:
-        print(f"Notes plan: {sum(unrecognised.values())} of {len(edges)} edges carry a "
-              f"label the classifier does not know: {list(unrecognised)[:8]}")
-
-    source_cap = source_section_cap(filenames)
-    logger.info("notes_plan concepts=%d sections_by_length=%s",
-                len(concept_names), source_cap if source_cap is not None else "unknown")
-
-    doc_order = _document_order(user["id"], body.document_ids)
-    texts = document_texts(filenames)
-    occurrences = concept_occurrences(concept_names, sources_by_concept, doc_order, texts)
-    positions = concept_positions(occurrences)
-
-    sections = group_by_document(concept_names, sources_by_concept, doc_order, positions, texts,
-                                 edges=edges, encode=_encoder())
-    if not sections:
-        raise HTTPException(
-            status_code=400,
-            detail="None of those documents' concepts could be placed in their text.",
-        )
-
-    must_cover = await assign_must_cover(sections, doc_order, occurrences, texts)
-    sections, merged = merge_thin_section(sections, must_cover, positions)
-    if merged:
-        logger.info("notes_plan_merge merged=%r into=%r picks=%d",
-                    merged["merged"], merged["into"], merged["picks"])
-        must_cover = await assign_must_cover(sections, doc_order, occurrences, texts)
-
-    # The one model call, titles only; on failure sections are named after their documents.
-    titles_key = _call_key(_plan_key(_PLAN_PROMPT_VERSION, body.document_ids, body.days),
-                           "titles", ["\x01".join(s["concepts"]) for s in sections])
-    titles = await request_titles(sections, titles_key)
-    if titles is None:
-        print("Notes plan: titles call unavailable — naming sections after their documents.")
-    sections = name_sections(sections, titles)
-
-    for section, picks in zip(sections, must_cover):
-        section["must_cover"] = picks
-        # Grouping already fixed each section's document; a merge keeps the
-        # neighbour's. section_document is the check for anything spanning two.
-        section["document"] = (section.get("document")
-                               or section_document(section["concepts"], positions, doc_order))
-    logger.info("notes_plan sections=%d must_cover=%d per_section=%s",
-                len(sections), sum(len(p) for p in must_cover),
-                [len(p) for p in must_cover])
-
-    note = build_note(
-        user_id=user["id"],
-        title=_title_for(sorted(filenames)),
-        document_ids=list(dict.fromkeys(body.document_ids)),
-        filenames=filenames,
-        sections=sections,
-        sources_by_concept=sources_by_concept,
-        edges=edges,
-        days=body.days,
-    )
-    _save_note(user["id"], note)
-
-    # Describes this run, not the plan; ordering 0 with unrecognised labels means sequencing was
-    # lost.
-    return {
-        "note": _note_public(note),
-        "constraints": {
-            "edges": len(edges),
-            "ordering": len(ordering),
-            "cohesion": len(cohesion),
-            "unrecognised_edges": sum(unrecognised.values()),
-            "unrecognised_labels": unrecognised,
-        },
-        "plan": {"grouping": "per document", "sections": len(sections),
-                 "titles": "model" if titles is not None else "fallback",
-                 "merged": merged},
-    }
-
-
-# Writes in flight by section id; a group's sections share one task. Starlette does not cancel a
-# handler when the client leaves, so a reopen joins it.
-_WRITES_IN_FLIGHT: dict[int, asyncio.Task] = {}
-
-
-def section_sources(note: dict, section: dict) -> set[str]:
-    """Documents a section's extracts come from: its own, else all of the note's."""
-    home = section.get("document")
-    return {home} if home in note["documents"] else set(note["documents"])
-
-
-def write_groups(sections: list[dict]) -> list[list[dict]]:
-    """A note's sections in write groups: consecutive, same document, at most
-    _GROUP_MAX_SECTIONS, within the output budget. Fixed by section order."""
-    groups: list[list[dict]] = []
-    for section in sections:
-        current = groups[-1] if groups else None
-        if (current and section.get("document")
-                and section.get("document") == current[-1].get("document")
-                and len(current) < _GROUP_MAX_SECTIONS
-                and _group_output_estimate(len(current) + 1) <= _GROUP_OUTPUT_BUDGET):
-            current.append(section)
-        else:
-            groups.append([section])
-    return groups
-
-
-def _others_of(note: dict, section: dict) -> tuple[list[str], list[str]]:
-    """What the note's other sections cover: their concepts and their
-    must-cover sentences, which the write prompt asks to be left out."""
-    others = [c for s in note["sections"] if s is not section for c in s["concepts"]]
-    picks = [p for s in note["sections"] if s is not section for p in s.get("must_cover") or []]
-    return others, picks
-
-
-def _job_members(note: dict, section: dict) -> list[dict]:
-    """The sections a write of `section` takes along: the unwritten rest of its group, or itself
-    alone if marked so or already cached."""
-    own_key = _write_entry(section, *_others_of(note, section))["key"]
-    if section.get("_write_alone") or _cached_body(own_key):
-        return [section]
-    group = next(g for g in write_groups(note["sections"]) if any(s is section for s in g))
-    return [s for s in group if s is section or (
-        s["body"] is None and not s.get("_write_alone") and s["id"] not in _WRITES_IN_FLIGHT)]
-
-
-async def _write_job(note: dict, members: list[dict]) -> dict:
-    """Writes `members` and stores each body on its section; an invalid member is marked to be
-    written alone."""
-    results = await write_group([(s, section_sources(note, s), *_others_of(note, s)) for s in members])
-    for s in members:
-        body, _, status = results.get(s["id"], (None, None, "failed"))
-        if body is not None:
-            s["body"] = body
-        elif status == "invalid":
-            s["_write_alone"] = True
-    return results
-
-
-def _start_write(note: dict, section: dict) -> asyncio.Task:
-    members = _job_members(note, section)
-    task = asyncio.create_task(_write_job(note, members))
-    ids = [s["id"] for s in members]
-    for section_id in ids:
-        _WRITES_IN_FLIGHT[section_id] = task
-
-    def done(finished):
-        for section_id in ids:
-            if _WRITES_IN_FLIGHT.get(section_id) is finished:
-                _WRITES_IN_FLIGHT.pop(section_id, None)
-
-    task.add_done_callback(done)
-    return task
-
-
-def _register_quiz(user_id, note: dict, section: dict) -> None:
-    """Records a written section's quiz with its note and section titles, so
-    the Quiz tab can list it after the in-memory note is gone."""
-    body = section.get("body") or {}
-    if not body.get("quiz") or not body.get("quiz_id"):
-        return
-    from services.quiz_service import register_section_quiz, shuffle_quiz
-    # Stored in the order the section serves it, so the Quiz tab and the
-    # Notes pane show the same options in the same places.
-    register_section_quiz(user_id, body["quiz_id"], note["title"], section["title"],
-                          section["index"], shuffle_quiz(body["quiz"]))
-
-
-@router.post("/api/notes/sections/{section_id}/write", status_code=201)
-async def write_section(section_id: int, user=Depends(current_user)):
-    """Writes a section, and the unwritten rest of its group, when a reader opens it.
-    `generated` says whether anything was written."""
-    note, section = _load_section(user["id"], section_id)
-    if section is None:
-        raise HTTPException(status_code=404, detail="That section no longer exists.")
-
-    if section["body"] is not None:
-        _register_quiz(user["id"], note, section)
-        return {"section": _section_public(section, _passed_quizzes(user["id"])),
-                "note_id": note["id"], "generated": False}
-
-    if _gemini_client() is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Note writing is not configured. Set GEMINI_API_KEY in backend/.env.",
-        )
-
-    for _pass in range(2):
-        task = _WRITES_IN_FLIGHT.get(section_id) or _start_write(note, section)
-        # Awaiting a Task does not tie its life to this request: if this caller
-        # is cancelled the generation carries on for whoever else is waiting.
-        try:
-            results = await task
-        except DailyLimitReached:
-            # No Retry-After: the wait is hours and the client counts it in seconds; later requests
-            # are refused without a call.
-            raise HTTPException(status_code=503, detail=DAILY_LIMIT_MESSAGE)
-        body, retry_after, status = results.get(section_id, (None, None, "failed"))
-        # An invalid section in a group answer is written alone on the second pass; a failed call
-        # is not retried.
-        if body is not None or status != "invalid":
-            break
-
-    if body is None:
-        detail = "Could not write this section just now. Please try again."
-        headers = None
-        if retry_after:
-            wait = int(retry_after) + 1
-            detail = (f"The note writer is out of quota just now. "
-                      f"Try again in {wait} seconds.")
-            # Standard header, so the client waits the time the model server named.
-            headers = {"Retry-After": str(wait)}
-        raise HTTPException(status_code=503, detail=detail, headers=headers)
-
-    section["body"] = body
-    _register_quiz(user["id"], note, section)
-    return {"section": _section_public(section, _passed_quizzes(user["id"])),
-            "note_id": note["id"], "generated": True}
-
-
-@router.get("/api/notes")
-async def list_notes(user=Depends(current_user)):
-    """Notes planned in this process, newest first."""
-    return {"notes": [_note_public(n) for n in _load_notes(user["id"])]}
-
-
-@router.get("/api/notes/{note_id}")
-async def get_note(note_id: int, user=Depends(current_user)):
-    note = _load_note(user["id"], note_id)
-    if note is None:
-        raise HTTPException(status_code=404, detail="That note no longer exists.")
-    return {"note": _note_public(note)}

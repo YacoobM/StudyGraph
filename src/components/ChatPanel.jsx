@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { askQuestion } from "../services/api";
+import { useEffect, useRef, useState } from "react";
+import { askGraphQuestion, getGraphDocumentSignedUrl } from "../services/api";
 import "./ChatPanel.css";
 import { ArrowUp } from "lucide-react";
 
@@ -110,7 +110,14 @@ function TaggedAnswer({ answer, concepts_mentioned, onConceptClick }) {
   return <p>{parts}</p>
 }
 
-export default function ChatPanel({ onClose, embedded = false, onConceptClick}) {
+export default function ChatPanel({
+  onClose,
+  embedded = false,
+  onConceptClick,
+  graphId = null,
+  width = 380,
+  onResize,
+}) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -122,6 +129,32 @@ export default function ChatPanel({ onClose, embedded = false, onConceptClick}) 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const endRef = useRef(null);
+  const resizeStart = useRef(null);
+  const maxChatWidth = () => Math.max(
+    320,
+    Math.min(640, window.innerWidth - (window.innerWidth > 900 ? 272 : 0) - 280),
+  );
+  const effectiveWidth = Math.max(320, Math.min(maxChatWidth(), width));
+
+  const startResize = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizeStart.current = {
+      x: event.clientX,
+      width: event.currentTarget.parentElement.getBoundingClientRect().width,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const resize = (event) => {
+    if (!resizeStart.current) return;
+    onResize?.(Math.max(320, Math.min(
+      maxChatWidth(),
+      resizeStart.current.width + resizeStart.current.x - event.clientX,
+    )));
+  };
+  const stopResize = () => {
+    resizeStart.current = null;
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -145,7 +178,7 @@ export default function ChatPanel({ onClose, embedded = false, onConceptClick}) 
     }
   }, [messages])
 
-  const openCitation = (source) => {
+  const openCitation = async (source, pageNumber) => {
     const filename = source?.fileName || source?.file || "";
     const extension = getFileExtension(filename);
 
@@ -156,7 +189,20 @@ export default function ChatPanel({ onClose, embedded = false, onConceptClick}) 
       return;
     }
 
-    const url = getDocumentUrl(source);
+    let url = getDocumentUrl(source);
+    if (graphId && source?.document_id) {
+      try {
+        const signed = await getGraphDocumentSignedUrl(graphId, source.document_id);
+        url = signed.url;
+        if (extension === "pdf") {
+          const page = pageNumber || source?.page_number || 1;
+          url = `${url}#page=${page}`;
+        }
+      } catch (error) {
+        window.alert(`Could not open ${filename}: ${error.message}`);
+        return;
+      }
+    }
 
     if (url) {
       window.open(url, "_blank", "noopener,noreferrer");
@@ -170,7 +216,8 @@ export default function ChatPanel({ onClose, embedded = false, onConceptClick}) 
     setInput("");
     setBusy(true);
     try {
-      const data = await askQuestion(q);
+      const data = await askGraphQuestion(graphId, q)
+      console.log('API response:', data);
       setMessages((m) => [
         ...m,
         {
@@ -205,7 +252,33 @@ export default function ChatPanel({ onClose, embedded = false, onConceptClick}) 
   };
 
   return (
-    <aside className="chat-panel" role="complementary" aria-label="StudyGraph chat">
+    <aside className="chat-panel" role="complementary" aria-label="StudyGraph chat" style={{ "--chat-width": `${effectiveWidth}px` }}>
+      {!embedded && (
+        <div
+          className="chat-resize"
+          role="separator"
+          aria-label="Resize chat panel"
+          aria-orientation="vertical"
+          aria-valuemin={320}
+          aria-valuemax={maxChatWidth()}
+          aria-valuenow={effectiveWidth}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onPointerMove={resize}
+          onPointerUp={stopResize}
+          onPointerCancel={stopResize}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              onResize?.(Math.min(maxChatWidth(), effectiveWidth + 16));
+            }
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              onResize?.(Math.max(320, effectiveWidth - 16));
+            }
+          }}
+        />
+      )}
       <div className="chat-head">
         <div className="chat-head-title">
           <svg

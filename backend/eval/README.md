@@ -5,7 +5,7 @@ This directory contains scripts and utilities for evaluating the StudyGraph RAG 
 ## Prerequisites
 
 - Python 3.10+ (type‑union syntax `float | None` is used).
-- An OpenAI (or compatible) API key set in your environment as defined by `LLM_API_KEY_ENV` (usually `OPENAI_API_KEY`).
+- `OPENAI_API_KEY` set in your environment.
 - All project dependencies installed, including the newly added `ragas[all]` and `tqdm`:
 
 ```bash

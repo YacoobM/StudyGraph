@@ -20,6 +20,8 @@ class PrunedReactivationTests(unittest.TestCase):
         # Bypass model loading so this test only exercises cache behavior.
         engine = object.__new__(StudyGraphEngine)
         engine.model = FakeEmbeddingModel()
+        engine.graph_status = "active"
+        engine.graph_id = None
         engine.concepts = [
             {"name": "concept_alpha", "source": "A", "week": "Week 1", "pages": [1]},
             {"name": "support", "source": "A", "week": "Week 1", "pages": [1]},

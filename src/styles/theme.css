@@ -1,0 +1,104 @@
+:root {
+  color-scheme: light;
+
+  --bg-0: #fbf8f2;
+  --bg-1: #fff;
+  --bg-2: #f7f3e9;
+  --bg-3: #f1ead9;
+  --bg-elev: #fff;
+  --border: #e4dac2;
+  --border-strong: #d2c4a4;
+
+  --text-0: #1c1a16;
+  --text-1: #3b372f;
+  --text-2: #5c5648;
+  --text-3: #736d5e;
+  --text-on-accent: #fff;
+  --brand-ink: #2a1a10;
+  --brand-ink-rgb: 42, 26, 16;
+  --brand-muted: #6f6458;
+  --brand-fill: rgba(var(--brand-ink-rgb), 0.055);
+  --brand-hover-fill: rgba(var(--brand-ink-rgb), 0.07);
+  --brand-focus-fill: rgba(var(--brand-ink-rgb), 0.08);
+  --brand-card: #fbf6ef;
+  --brand-inset: #fffdf9;
+
+  --accent: #22503c;
+  --accent-hover: #173a2b;
+  --accent-soft: rgba(34, 80, 60, 0.09);
+  --accent-strong: rgba(34, 80, 60, 0.28);
+  --action-primary: var(--brand-ink);
+  --action-primary-hover: #45301f;
+  --action-primary-text: #fff;
+  --warn: #b25a28;
+  --warn-soft: rgba(178, 90, 40, 0.13);
+  --danger: #b3402a;
+  --danger-soft: rgba(179, 64, 42, 0.08);
+  --danger-tint: rgba(179, 64, 42, 0.1);
+  --danger-border: rgba(179, 64, 42, 0.25);
+  --success: #2e7d4f;
+
+  --night: #171309;
+  --night-2: #1f1a10;
+  --night-line: rgba(255, 255, 255, 0.08);
+  --night-text: #f3eedd;
+  --night-muted: #96897a;
+  --night-green: #8fc2a3;
+  --night-copper: #e8995e;
+  --night-danger: #f08a78;
+  --night-success: #8fd1a8;
+  --copper: var(--warn);
+  --copper-soft: var(--warn-soft);
+  --copper-border: rgba(178, 90, 40, 0.35);
+  --copper-strong: rgba(178, 90, 40, 0.28);
+  --scrim: rgba(23, 19, 9, 0.55);
+  --wash-apricot: #f9c98f;
+  --wash-sky: #8fb8d6;
+  --wash-coral: #f1a67f;
+  --wash-base: #efd9c0;
+  --hero-gradient:
+    radial-gradient(60% 80% at 20% 90%, var(--wash-apricot) 0%, transparent 60%),
+    radial-gradient(55% 70% at 85% 10%, var(--wash-sky) 0%, transparent 62%),
+    radial-gradient(40% 50% at 55% 50%, var(--wash-coral) 0%, transparent 70%),
+    var(--wash-base);
+
+  --n-chunk: #b85c8a;
+  --n-document: #0e7490;
+  --n-algorithm: #b45309;
+  --n-concept: #4d7c0f;
+  --n-course: #be185d;
+  --n-lecture: #c2410c;
+  --n-organization: #a16207;
+  --n-phase: #6d28d9;
+  --n-problem: #c2410c;
+  --n-rule: #b91c1c;
+  --n-software: #1d4ed8;
+  --n-string: #3f6212;
+  --n-term: #a16207;
+  --n-tool: #7e22ce;
+  --n-university: #9d174d;
+  --n-week: #4d7c0f;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --font-display: "Inter", system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    "Segoe UI Symbol", "DejaVu Sans", Arial, sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-body: var(--font-display);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono-stack: "JetBrains Mono", ui-monospace, "Cascadia Mono",
+    "DejaVu Sans Mono", Consolas, monospace;
+
+  /* Compatibility aliases for the existing workspace component styles. */
+  --ink: var(--text-0);
+  --ink-soft: var(--text-2);
+  --paper: var(--bg-0);
+  --cream: var(--bg-3);
+  --line: var(--border);
+  --night-slate: var(--night-muted);
+  --accent-dark: var(--accent-hover);
+  --accent-tint: var(--accent-soft);
+  --copper-tint: var(--copper-soft);
+  --orange: var(--warn);
+}

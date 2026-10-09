@@ -12,7 +12,12 @@ class Relationship(BaseModel):
         populate_by_name = True
 
 
+class Concept(BaseModel):
+    name: str
+    description: str = ""
+
+
 class ExtractionResult(BaseModel):
     graph_name: str = ""
-    concepts: list[str]
+    concepts: list[Concept]
     relationships: list[Relationship]

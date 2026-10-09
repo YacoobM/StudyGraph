@@ -9,7 +9,6 @@ from pathlib import Path
 import httpx
 from chromadb import Client as ChromaClient
 from datasets import Dataset
-from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from ragas import evaluate
@@ -24,7 +23,7 @@ from ragas.metrics import (
 from ragas.testset import TestsetGenerator
 from tqdm import tqdm
 
-from app.config import LLM_API_KEY_ENV, RAG_MODEL
+from app.config import OPENAI_API_KEY, RAG_MODEL
 from app.state import configure_runtime, get_engine
 from services.document_service import extract_text
 from services.llm_provider import create_llm_client
@@ -105,9 +104,6 @@ def load_questions() -> list[dict]:
 
 def generate_questions(docs: list[Path], api_key: str) -> list[dict]:
     """Generate a synthetic Ragas test set from the evaluation documents."""
-    if os.getenv("LLM_PROVIDER", "openai").lower() != "openai":
-        raise RuntimeError("Synthetic generation currently requires LLM_PROVIDER=openai")
-
     logger.info("Preparing document pages for synthetic question generation")
     
     documents = []
@@ -153,10 +149,9 @@ def generate_questions(docs: list[Path], api_key: str) -> list[dict]:
 
 def main() -> None:
     logger.info("Starting Ragas evaluation")
-    load_dotenv()
-    api_key = os.getenv(LLM_API_KEY_ENV)
+    api_key = OPENAI_API_KEY
     if not api_key:
-        raise RuntimeError(f"{LLM_API_KEY_ENV} not set in environment")
+        raise RuntimeError("OPENAI_API_KEY not set in environment")
 
     logger.info("Initializing StudyGraph runtime and embedding model")
     configure_runtime(create_llm_client(api_key), ChromaClient())

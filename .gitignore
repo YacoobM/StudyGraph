@@ -53,6 +53,21 @@ uploads/
 
 # Fusion run logs and verdict cache (regenerated every run)
 backend/data/outputs/fusion/
+supabase/.branches/_current_branch
+supabase/.temp/cli-latest
+supabase/.temp/pooler-url
+supabase/.temp/project-ref
+supabase/.temp/postgres-version
+supabase/.temp/rest-version
+supabase/.temp/gotrue-version
+supabase/.temp/storage-migration
+supabase/.temp/storage-version
+StudyGraph-conversation.md
+backend/tests/test_graph_persistence.py
+backend/tests/test_supabase_graphs.py
+SUPABASE_PORT_HANDOFF.md
+backend/supabase_live_smoke.py
+backend/tests/test_pruned_reactivation.py
 
 # Frontend test harness build output
 .harness-dist/
