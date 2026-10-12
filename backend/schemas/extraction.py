@@ -19,5 +19,5 @@ class Concept(BaseModel):
 
 class ExtractionResult(BaseModel):
     graph_name: str = ""
-    concepts: list[Concept]
-    relationships: list[Relationship]
+    concepts: list[Concept] = Field(default_factory=list)
+    relationships: list[Relationship] = Field(default_factory=list)

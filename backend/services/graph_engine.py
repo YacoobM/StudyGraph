@@ -19,7 +19,13 @@ from app.config import (
     RAG_MODEL,
 )
 
-from utils.rag_utils import build_rag_system_prompt, build_rag_user_prompt, call_rag_llm, filter_sources_by_chunks_used, prioritize_graph
+from utils.rag_utils import (
+    build_rag_system_prompt,
+    build_rag_user_prompt,
+    call_rag_llm,
+    filter_sources_by_chunks_used,
+    prioritize_graph,
+)
 
 
 from app.logging_config import get_logger
@@ -35,9 +41,33 @@ logger = get_logger(__name__)
 
 PRUNED_REACTIVATION_SIMILARITY = 0.85
 
+RELATIONS = {
+    "part_of",
+    "instance_of",
+    "precedes",
+    "contrasts_with",
+    "prerequisite",
+    "causes",
+    "enables",
+    "addresses",
+    "related_to",
+}
+
+
+def _clean_relation(value):
+    v = str(value).lower().strip().replace(" ", "_")
+    return v if v in RELATIONS else "related_to"
+
 
 class StudyGraphEngine:
-    def __init__(self, collections, client, llm_model=EXTRACTION_MODEL, rag_model=RAG_MODEL, graph_id=None):
+    def __init__(
+        self,
+        collections,
+        client,
+        llm_model=EXTRACTION_MODEL,
+        rag_model=RAG_MODEL,
+        graph_id=None,
+    ):
         self.client = client
         self.llm_model = llm_model
         self.rag_model = rag_model
@@ -48,10 +78,10 @@ class StudyGraphEngine:
         self.chunk_store = []
         self.graph = None
         self.graph_status = "active"
-        self.canonical_nodes = {}       # Map from variants to canonical names (post-fusion)
-        self.fused_edges = []           # Edges after conflict resolution (post-fusion)
-        self.inferred_edges = []        # Transitive edges inferred during fusion
-        self.upload_latency = None              # float, total time for entire upload endpoint
+        self.canonical_nodes = {}  # Map from variants to canonical names (post-fusion)
+        self.fused_edges = []  # Edges after conflict resolution (post-fusion)
+        self.inferred_edges = []  # Transitive edges inferred during fusion
+        self.upload_latency = None  # float, total time for entire upload endpoint
         self.collections = collections
         self._doc_concept_names = (
             {}
@@ -230,10 +260,13 @@ class StudyGraphEngine:
 
         priority_line = (
             "Extract specific academic concepts and direct relationships from the text.\n"
-            "CRITICAL RULES FOR ENTITY SELECTION:\n"
-            "1. Do NOT extract overly broad umbrella terms, document titles, chapter headers, or meta-categories "
-            "(e.g., 'introduction', 'overview', 'fundamentals', 'key concepts', 'main subjects', or the overall topic name of the document itself).\n"
-            "2. Extract ONLY specific, granular concepts (e.g., specific algorithms, mechanisms, core functions, formal theories, or distinct components).\n"
+            "RULES FOR ENTITY SELECTION:\n"
+            "1. Do NOT extract the overall title or topic of the document itself, or generic words "
+            "such as 'introduction', 'overview', or 'key concepts'.\n"
+            "2. DO extract a section heading or framework name when it groups other concepts "
+            "(for example, a heading above a numbered list), because those items need a parent to belong to.\n"
+            "3. Prefer specific, granular concepts: named algorithms, mechanisms, functions, theories, "
+            "components, stages.\n"
         )
 
         known_lines = []
@@ -246,19 +279,40 @@ class StudyGraphEngine:
                 )
         known_line = "\n".join(known_lines)
 
-        prompt = f"""You are a JSON-only extraction engine. You must respond with ONLY a valid JSON object and absolutely nothing else — no explanation, no markdown, no code fences.
+        prompt = f"""You are a JSON-only extraction engine. Respond with ONLY a valid JSON object. No explanation, no markdown, no code fences.
 
 {priority_line}{known_line}
-Relationship types: prerequisite, causes, part_of, explains, enables, related_to
-Every relationship must include the chunk_id of the source chunk. Do not reproduce quotes or context text.
-For each relationship, include:
-- summary: a short explanation (one sentence max)
-For each concept, include:
-- name: the specific academic concept
-- description: a concise 1-2 sentence explanation grounded only in the supplied text
 
-Respond with ONLY this exact JSON structure:
-{{"graph_name" : "A short-descriptive title of the graph","concepts": [{{"name": "concept1", "description": "Concise grounded explanation."}}, {{"name": "concept2", "description": "Concise grounded explanation."}}], "relationships": [{{"from": "concept1", "to": "concept2", "relation": "enables", "chunk_id": "source:chunk:0:hash", "summary": "Short explanation."}}]}}"""
+CONCEPTS
+- A concept is a reusable named idea, mechanism, method, component, theory, or framework that the text explains or lists.
+- Keep multi-word terms intact (for example "Intervention Evaluation" is one concept, not "Intervention" and "Evaluation").
+- Items in a numbered or bulleted list, and the labeled levels or stages of a framework, are concepts. The heading or framework they belong to is also a concept, even if it looks like a title.
+- Put specific dates, statistics, and example organizations or events into the description of the concept they illustrate. Do not make them separate concepts. Do NOT extract figures or charts, or generic words.
+- Use the term the text uses. Never create two concepts for the same idea, and never repeat a concept name.
+- description: 1-2 sentences, grounded only in the supplied text.
+
+RELATIONSHIPS
+Use exactly one of these labels for "relation":
+- part_of: "from" is a component, member, subtype, or stage of "to". Every item in a list or framework is part_of the concept that names that list or framework.
+- instance_of: "from" is a specific case or example of the general concept "to".
+- precedes: "from" comes before "to" in a stated sequence or process.
+- contrasts_with: the text sets "from" against "to" as opposites or alternatives (for example in a side-by-side comparison).
+- prerequisite: a reader must understand "from" before "to".
+- causes: the text says one idea or event produces or leads to the other. Do not use for a person or organization performing an action.
+- enables: "from" is a method, condition, or tool that makes "to" possible.
+- addresses: "from" is an action, intervention, or policy aimed at the problem "to".
+- related_to: use only when the text states a connection that none of the labels above fits.
+
+Rules:
+- Extract a relationship only if the text states it, or the layout implies it (a list under a heading, or items in the same table row).
+- "from" and "to" must both be names from your concepts list.
+- Each pair of concepts gets one relationship, using the most specific label. Do not repeat the same pair in reverse.
+- Do not link concepts only because they appear near each other.
+- Do not invent any other label.
+- summary: one sentence.
+
+Respond with ONLY this structure. Replace each <...> placeholder with real content:
+{{"graph_name": "<short title>", "concepts": [{{"name": "<concept>", "description": "<description>"}}], "relationships": [{{"from": "<concept name>", "to": "<concept name>", "relation": "<one label above>", "chunk_id": "<CHUNK_ID from the input>", "summary": "<one sentence>"}}]}}"""
 
         user_text = "\n\n---\n\n".join(
             f"CHUNK_ID: {chunk['chunk_id']}\nTEXT:\n{chunk['text']}" for chunk in chunks
@@ -279,7 +333,6 @@ Respond with ONLY this exact JSON structure:
                 logger.warning("chunk_extraction_empty_response")
                 return {"concepts": [], "relationships": []}
 
-            # Strip markdown fences if the model wraps output anyway
             content = content.strip()
             if content.startswith("```"):
                 content = content.split("```")[1]
@@ -289,36 +342,37 @@ Respond with ONLY this exact JSON structure:
 
             raw_data = json.loads(content)
             validated = ExtractionResult(**raw_data)
+
+            # Drop only the relationships with unknown provenance, not the whole batch
             valid_chunk_ids = {chunk["chunk_id"] for chunk in chunks}
-            invalid_relationships = [
-                relationship
-                for relationship in validated.relationships
-                if relationship.chunk_id not in valid_chunk_ids
-            ]
-            if invalid_relationships:
-                raise ValueError(
-                    "LLM returned relationship provenance for an unknown chunk_id"
-                )
-            return {
-                "graph_name": validated.graph_name,
-                "concepts": [
-                    {
-                        "name": concept.name,
-                        "description": concept.description,
-                    }
-                    for concept in validated.concepts
-                ],
-                "relationships": [
+            relationships = []
+            for r in validated.relationships:
+                if r.chunk_id not in valid_chunk_ids:
+                    logger.warning(
+                        "dropped_relationship_unknown_chunk chunk_id=%s", r.chunk_id
+                    )
+                    continue
+                relationships.append(
                     {
                         "from": r.from_,
                         "to": r.to,
-                        "relation": r.relation,
+                        "relation": _clean_relation(r.relation),
                         "summary": getattr(r, "summary", "") or "",
                         "chunk_id": r.chunk_id,
                     }
-                    for r in validated.relationships
+                )
+
+            return {
+                "graph_name": validated.graph_name,
+                "concepts": [
+                    {"name": c.name, "description": c.description}
+                    for c in validated.concepts
                 ],
+                "relationships": relationships,
             }
+        except json.JSONDecodeError as e:
+            logger.warning("chunk_extraction_json_failed error=%s", e)
+            return {"concepts": [], "relationships": []}
         except ValueError as e:
             logger.warning(
                 "chunk_extraction_validation_failed error=%s raw_data_present=%s",
@@ -326,17 +380,12 @@ Respond with ONLY this exact JSON structure:
                 raw_data is not None,
             )
             return {"concepts": [], "relationships": []}
-        except json.JSONDecodeError as e:
-            logger.warning("chunk_extraction_json_failed error=%s", e)
-            return {"concepts": [], "relationships": []}
         except RATE_LIMIT_ERRORS as e:
             logger.warning("chunk_extraction_rate_limited error=%s", e)
             raise
         except API_STATUS_ERRORS:
-            # Do not turn invalid model IDs, credentials, or other API errors
-            # into a misleading empty-but-successful extraction.
             raise
-        except Exception as e:
+        except Exception:
             logger.exception(
                 "chunk_extraction_failed raw_data_present=%s", raw_data is not None
             )
@@ -347,8 +396,10 @@ Respond with ONLY this exact JSON structure:
         if self.graph_status == "active":
             self.graph_status = "needs_regeneration"
         if reason:
-            logger.info("graph_marked_dirty reason=%s graph_id=%s", reason, self.graph_id)
-        
+            logger.info(
+                "graph_marked_dirty reason=%s graph_id=%s", reason, self.graph_id
+            )
+
     def add_to_graph(
         self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None
     ):
@@ -626,7 +677,7 @@ Respond with ONLY this exact JSON structure:
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(
             self, self.client
         )
-        
+
         self.graph_status = "active"
 
         logger.info(
@@ -960,7 +1011,11 @@ Respond with ONLY this exact JSON structure:
     def mark_graph_for_regeneration(self, reason=None):
         self.graph_status = "needs_regeneration"
         if reason:
-            logger.info("graph_marked_for_regeneration reason=%s graph_id=%s", reason, self.graph_id)
+            logger.info(
+                "graph_marked_for_regeneration reason=%s graph_id=%s",
+                reason,
+                self.graph_id,
+            )
 
     def clear_graph_support(self):
         """Clear graph-derived state so the graph can be rebuilt from the remaining evidence."""
@@ -1098,9 +1153,9 @@ Respond with ONLY this exact JSON structure:
         retrieved = self.retrieve_chunks(query, top_k=5)
 
         working_edges = self.fused_edges if self.fused_edges else self.edges
-        
-        graph_section=""
-        concepts_mentioned=[]
+
+        graph_section = ""
+        concepts_mentioned = []
 
         if working_edges:
             multi_hop_result = self.multi_hop_search(query, depth=2)
@@ -1113,7 +1168,9 @@ Respond with ONLY this exact JSON structure:
             if subgraph.get("edges"):
                 graph_lines = ["Related concepts and connections:"]
                 for e in subgraph.get("edges", [])[:8]:
-                    graph_lines.append(f"  • {e['from']} --[{e['relation']}]--> {e['to']}")
+                    graph_lines.append(
+                        f"  • {e['from']} --[{e['relation']}]--> {e['to']}"
+                    )
                 graph_section = "\n".join(graph_lines)
             else:
                 graph_section = ""
@@ -1132,14 +1189,14 @@ Respond with ONLY this exact JSON structure:
             }
 
         context_blocks, all_cited_pages, sources = [], [], []
-        
+
         for i, r in enumerate(retrieved, start=1):
             citation = self.format_citation(r["pages"])
             header = f"[Chunk {i}: {citation}]" if citation else f"[Chunk {i}]"
             chunk_text = r["text"]
             context_blocks.append(f"{header}\n{chunk_text}")
             all_cited_pages.extend(r["pages"])
-            
+
             sources.append(
                 {
                     "fileName": r.get("source") or "document.pdf",
@@ -1152,35 +1209,34 @@ Respond with ONLY this exact JSON structure:
 
         context_text = "\n\n".join(context_blocks)
         unique_pages = sorted(set(all_cited_pages))
-        
-        use_graph_primarily=prioritize_graph(retrieved)
+
+        use_graph_primarily = prioritize_graph(retrieved)
 
         system_prompt = build_rag_system_prompt(prioritize_graph=use_graph_primarily)
 
         user_prompt = build_rag_user_prompt(context_text, query, graph_section)
 
         try:
-            res = call_rag_llm(
-                self.client,
-                self.rag_model, 
-                system_prompt,
-                user_prompt
+            res = call_rag_llm(self.client, self.rag_model, system_prompt, user_prompt)
+
+            answer = res["answer"]
+            used_sources = filter_sources_by_chunks_used(
+                sources, set(res["chunks_used"])
             )
-            
-            answer=res["answer"]
-            used_sources=filter_sources_by_chunks_used(sources, set(res["chunks_used"]))
             concepts_mentioned = res["concepts_mentioned"]
-            
+
         except (AttributeError, KeyError, ValueError) as e:
             logger.exception("rag_query_response_parse_failed error=%s", e)
-            answer = "Error: Could not parse response from language model. Please try again"
-            used_sources=[]
+            answer = (
+                "Error: Could not parse response from language model. Please try again"
+            )
+            used_sources = []
             concepts_mentioned = []
-            
+
         except Exception as e:
             logger.exception("rag_query_llm_failed error_type=%s", type(e).__name__)
-            answer =  f"Error querying language model: {type(e).__name__}"
-            used_sources=[]
+            answer = f"Error querying language model: {type(e).__name__}"
+            used_sources = []
             concepts_mentioned = []
 
         return {
@@ -1201,7 +1257,7 @@ Respond with ONLY this exact JSON structure:
             "subgraph": subgraph,
             "graph_search_depth": 2 if working_edges else 0,
             "fusion_status": "fused" if self.fused_edges else "raw",
-            "retrieval_method" : "text+graph" if graph_section else "text",
+            "retrieval_method": "text+graph" if graph_section else "text",
             "graph_used": bool(graph_section),
-            "concepts_mentioned": concepts_mentioned
+            "concepts_mentioned": concepts_mentioned,
         }

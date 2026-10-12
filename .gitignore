@@ -76,3 +76,7 @@ backend/eval/docs
 
 backend/eval/data
 backend/eval/reports
+backend/eval/concept/gold_labels
+
+backend/eval/concept/reports
+backend/eval/concept/source_docs
