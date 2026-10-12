@@ -26,17 +26,18 @@ _MODEL = EXTRACTION_MODEL
 logger = logging.getLogger(__name__)
 
 AUTO_MERGE_SIM = 0.95
-LLM_LOW_SIM = 0.55
+# Pairs below this are never asked; at 0.55 step 3 saw mostly distinct concepts.
+LLM_LOW_SIM = 0.70
 NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "mis")
 
-# Pairs per verdict call (steps 3, 3b and 5).
-_VERDICT_PAIR_BATCH = 6
+# Pairs per verdict call (steps 3 and 5), from FUSION_VERDICT_BATCH, clamped to 1-25.
+_VERDICT_PAIR_BATCH = min(25, max(1, int(os.getenv("FUSION_VERDICT_BATCH", "10"))))
 # Resends of the same request after malformed JSON. At temperature 0 a resend mostly repeats
 # itself, so one is enough; 429s count separately.
 _VERDICT_MAX_RETRIES = 1
-# Cap on pairs a failed batch may re-ask one at a time; each single costs a call. It matches the
-# batch, so a malformed batch re-asks every pair rather than leaving some as unrelated.
-_VERDICT_MAX_SINGLES = _VERDICT_PAIR_BATCH
+# Cap on pairs a failed batch may re-ask one at a time; each single costs a call. At the default
+# batch of 10 it matches the batch, so a malformed batch re-asks every pair.
+_VERDICT_MAX_SINGLES = min(_VERDICT_PAIR_BATCH, int(os.getenv("FUSION_VERDICT_MAX_SINGLES", "10")))
 _NEIGHBOURS_PER_NODE = 5
 _EVIDENCE_CHUNKS_PER_NODE = 1
 _EVIDENCE_SNIPPET_CHARS = 200
@@ -48,11 +49,14 @@ _SUMMARY_SENTENCE_CHARS = 200
 
 # Output cap per verdict call: a 4-pair batch measured 195-350 tokens, so 450 per 4 pairs.
 _VERDICT_MAX_TOKENS = -(-450 * _VERDICT_PAIR_BATCH // 4)
+# Step 3 answers only same/different (about 12-20 tokens a pair); step 5 keeps the cap above.
+_STEP3_MAX_TOKENS = 40 + 30 * _VERDICT_PAIR_BATCH
 # Characters of a response body logged when it parses but has the wrong shape.
 _RAW_LOG_CHARS = 500
 _CLUSTER_MAX_TOKENS_BASE = 150
 _CLUSTER_MAX_TOKENS_PER = 60
-_CLUSTER_BATCH = _VERDICT_PAIR_BATCH
+# Clusters per step 3b call; fixed, so tuning the verdict batch leaves step 3b alone.
+_CLUSTER_BATCH = 6
 # Retries after a 429, waiting what the server asks; fusion runs in the background, so waiting is
 # free.
 _RATE_LIMIT_RETRIES = 2
@@ -63,9 +67,8 @@ _FUSION_SLOT_SEMAPHORE = threading.BoundedSemaphore(_FUSION_GLOBAL_SLOTS)
 _CALL_INPUT_TOKENS = 275 * _VERDICT_PAIR_BATCH
 _CALL_SECONDS = 3.0
 
-# Bumped for temperature 0 and an output cap; older verdicts were sampled at the default
-# temperature.
-_STEP3_PROMPT_VERSION = "step3-evidence-v6"
+# Bumped when step 3 became merge-only; v6 verdicts carried relations and are not reused.
+_STEP3_PROMPT_VERSION = "step3-merge-v7"
 _STEP5_PROMPT_VERSION = "step5-evidence-v5"
 _CLUSTER_PROMPT_VERSION = "cluster-verify-v2"
 
@@ -560,6 +563,8 @@ _VERDICT_SYNONYMS = {
     "different but related": "related",
     "different-but-related": "related",
     "different, but related": "related",
+    # Step 3's merge-only answer for "not the same concept".
+    "different": "unrelated",
 }
 
 
@@ -630,6 +635,9 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
     rate_limit_count = 0
     started = time.perf_counter()
     limiter_wait = 0.0
+    # Summed over every attempt this call made; finish_reason is the last response's.
+    prompt_tokens = completion_tokens = reasoning_tokens = 0
+    finish_reason = None
     try:
         while True:
             reason = None
@@ -656,6 +664,12 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
                     # OpenAI reasoning models use max_completion_tokens.
                     **{COMPLETION_TOKEN_PARAMETER: max_tokens},
                 )
+                usage = getattr(completion, "usage", None)
+                prompt_tokens += getattr(usage, "prompt_tokens", None) or 0
+                completion_tokens += getattr(usage, "completion_tokens", None) or 0
+                details = getattr(usage, "completion_tokens_details", None)
+                reasoning_tokens += getattr(details, "reasoning_tokens", None) or 0
+                finish_reason = completion.choices[0].finish_reason
                 raw = completion.choices[0].message.content or ""
                 data = json.loads(raw)
                 results = _results_list(data)
@@ -709,9 +723,11 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
             failures["limiter_wait_seconds"] = failures.get("limiter_wait_seconds", 0.0) + limiter_wait
         logger.info(
             "fusion_verdict_call tag=%s pair_count=%d duration_ms=%.0f retries=%d "
-            "rate_limit_count=%d rate_limit_retries=%d",
+            "rate_limit_count=%d rate_limit_retries=%d limiter_wait_ms=%.0f "
+            "prompt_tokens=%d completion_tokens=%d reasoning_tokens=%d finish_reason=%s",
             tag, len(payload), (time.perf_counter() - started) * 1000,
-            attempt + rate_retries, rate_limit_count, rate_retries,
+            attempt + rate_retries, rate_limit_count, rate_retries, limiter_wait * 1000,
+            prompt_tokens, completion_tokens, reasoning_tokens, finish_reason,
         )
 
 
@@ -1013,8 +1029,10 @@ def _collect_nodes(engine):
 def merge_graph(engine, client, log=print):
     workers = fusion_workers()
     logger.info(
-        "fusion_concurrency workers=%d global_slots=%d input_tpm=%d output_tpm=%d",
-        workers, _FUSION_GLOBAL_SLOTS, graph_limiter.input_limit, graph_limiter.output_limit,
+        "fusion_concurrency workers=%d global_slots=%d verdict_batch=%d max_singles=%d "
+        "input_tpm=%d output_tpm=%d",
+        workers, _FUSION_GLOBAL_SLOTS, _VERDICT_PAIR_BATCH, _VERDICT_MAX_SINGLES,
+        graph_limiter.input_limit, graph_limiter.output_limit,
     )
     run = FusionLog(
         model=_MODEL,
@@ -1420,30 +1438,18 @@ def _neighbours(name, interim_cmap, adjacency, k):
     return out or ["(no neighbours)"]
 
 
+# Merge-only: step 3 decides whether two names are one concept and adds no edges.
 _STEP3_SYSTEM = (
-    "Resolve whether two concept names are SAME, DIFFERENT BUT RELATED, or UNRELATED. "
+    "Decide whether two concept names refer to the SAME concept. "
     "Judge PRIMARILY from the evidence sentences; use neighbourhood as secondary context. "
-    "Never judge from name similarity alone. Answer 'related' ONLY for meaningful academic relationships. "
-    "If an evidence sentence directly states how A and B relate to each other, the verdict is 'related', "
-    "not 'unrelated'. Two names merely appearing in the same sentence is not enough.\n"
+    "Never judge from name similarity alone. Related but distinct concepts are 'different'.\n"
     "SAME RULES:\n"
     "- NOT same if the evidence contrasts or distinguishes A and B with each other "
     "(e.g. 'A, unlike B', 'A whereas B', 'A while B' used as a contrast). A contrast of A or B "
     "with some third concept does not count, nor does 'while' meaning 'at the same time as'.\n"
     "- If modifier_variant is true, one name is the other plus extra words, which usually "
     "narrow it. Answer same only if the evidence uses the two names for one and the same thing.\n"
-    "RELATION LABEL RULES (when 'related'):\n"
-    "- 1-3 words, directed verb phrase in ACTIVE voice (e.g. 'is a type of', 'generalises'). "
-    "NOT passive voice.\n"
-    "- Must NOT contain either name, NOT a full sentence, NOT vague ('is related to', 'similar to').\n"
-    "- If HIERARCHICAL (is a/type of/generalises/includes/underlies), return 'broader': 'A'|'B' "
-    "naming the more general concept.\n"
-    "- 'sentence': one short sentence (max 12 words) stating the relation, subject first, "
-    "using both names exactly as given.\n"
-    'Return: {"id": int, "verdict": "same"|"related"|"unrelated", '
-    '"canonical": "A"|"B" (if same), "relation": phrase (if related), '
-    '"sentence": text (if related), '
-    '"direction": "A_to_B"|"B_to_A" (if related), "broader": "A"|"B" (if related + hierarchical)}. '
+    'Return: {"id": int, "verdict": "same"|"different", "canonical": "A"|"B" (if same)}. '
     'Only JSON: {"results": [...]}'
 )
 
@@ -1487,7 +1493,7 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
             if ev:
                 item["evidence"] = ev
             payload.append(item)
-        jobs.append((payload, _VERDICT_MAX_TOKENS))
+        jobs.append((payload, _STEP3_MAX_TOKENS))
     answers = _run_verdict_calls(client, _STEP3_SYSTEM, jobs, log, "Fusion step 3:",
                                  run.call_failures["step3"], run.settings.get("workers", 1))
 
@@ -1497,94 +1503,54 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
         for idx, (a, b, sim) in enumerate(sub):
             r = by_id.get(idx)
             if r is None:
-                resolved[(a, b)] = {"verdict": "unrelated"}
+                resolved[(a, b)] = {"verdict": "different"}
                 continue
-            rec = _to_cache_record(a, b, r)
+            # Only the merge fields are kept; canonical is stored in sorted-name order.
+            rec = {k: v for k, v in _to_cache_record(a, b, r).items() if k in ("verdict", "canonical")}
             resolved[(a, b)] = _from_cache_record(a, b, rec)
             # Only an answer we can read is kept: a missing or unknown verdict
-            # would otherwise stay "unrelated" for good. It is asked again next time.
+            # would otherwise stay "different" for good. It is asked again next time.
             if _normalise_verdict(r.get("verdict")) is not None:
                 cache[_pair_key(_STEP3_PROMPT_VERSION, a, b)] = rec
                 cache_dirty = True
     if cache_dirty:
         _save_verdict_cache(cache)
 
-    merges, new_edges, canonical_votes = [], [], {}
-    n_same = n_related = n_unrelated = n_not_named = n_rejected = n_rejected_kept = 0
+    merges, canonical_votes = [], {}
+    n_same = n_different = n_rejected = 0
     aliases = _source_aliases(_engine_texts(engine), sorted({n for (a, b, _s) in candidates for n in (a, b)}))
     for (a, b, sim) in candidates:
         r = resolved.get((a, b), {})
-        verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b)
         source = "cache" if (a, b) in from_cache else "call"
-        detail = ""
-        direction, from_sentence = _verdict_direction(a, b, r)
-        rejected = verdict == "same" and not _is_morphological_variant(a, b, aliases)
-        if verdict == "same":
-            detail = f"canonical {r.get('canonical') or '?'}"
-        if verdict == "related" or (rejected and r.get("relation")):
-            detail = (detail + "   " if detail else "") + (
-                f'"{_clean_relation(r.get("relation") or "")}" ({direction}, '
-                f'{"from sentence" if from_sentence else "direction field"})')
-            if r.get("sentence"):
-                detail += f'   "{r["sentence"]}"'
+        if _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b) != "same":
+            run.verdicts.append((source, a, b, sim, "different", ""))
+            n_different += 1
+            continue
+        detail = f"canonical {r.get('canonical') or '?'}"
         if _is_modifier_variant(a, b):
-            detail = (detail + "   [modifier variant]").strip()
-        # What a dropped relation is recorded as: a rejected merge keeps its own label.
-        dropped = "dropped"
-        if rejected:
-            # Not variants of one name, so not merged: both nodes stay. A relation the verdict
-            # carries goes through the same checks as a 'related' verdict.
+            detail += "   [modifier variant]"
+        if not _is_morphological_variant(a, b, aliases):
+            # Not variants of one name, so not merged: both nodes stay.
             run.verdicts.append((source, a, b, sim, "rejected merge",
-                                 (detail + "   [not a morphological variant: both nodes kept]").strip()))
+                                 detail + "   [not a morphological variant: both nodes kept]"))
             n_rejected += 1
-            if not str(r.get("relation") or "").strip():
-                continue
-            verdict, dropped = "related", "rejected merge"
-        else:
-            run.verdicts.append((source, a, b, sim, verdict, detail))
-        if verdict == "same":
-            merges.append((a, b))
-            canonical = str(r.get("canonical", "")).strip().upper()
-            if canonical in ("A", "B"):
-                chosen = a if canonical == "A" else b
-                canonical_votes[chosen] = canonical_votes.get(chosen, 0) + 1
-            n_same += 1
-        elif verdict == "related":
-            frm, to, relation, conflict = _orient(
-                a, b, r.get("relation") or "", direction, r.get("broader") or "")
-            if conflict and from_sentence:
-                # The model's broader field and its own sentence disagree on
-                # which way the edge runs; neither can be trusted over the other.
-                run.verdicts[-1] = (source, a, b, sim, dropped,
-                                    run.verdicts[-1][5] + "   [broader contradicts sentence]")
-                n_unrelated += 0 if rejected else 1
-                continue
-            if not _named_both(a, b, r.get("sentence") or "", aliases):
-                run.verdicts[-1] = (source, a, b, sim, dropped,
-                                    (run.verdicts[-1][5] + "   [sentence does not name both]").strip())
-                n_not_named += 0 if rejected else 1
-                continue
-            if (not relation or _is_vague_relation(relation)
-                    or _label_names_concept(relation, a) or _label_names_concept(relation, b)):
-                n_unrelated += 0 if rejected else 1
-                continue
-            new_edges.append({"from": frm, "to": to, "relation": relation,
-                              "summary": r.get("sentence") or "",
-                              "llm_sentence": from_sentence})
-            if rejected:
-                n_rejected_kept += 1
-            else:
-                n_related += 1
-        else:
-            n_unrelated += 1
+            continue
+        run.verdicts.append((source, a, b, sim, "same", detail))
+        merges.append((a, b))
+        canonical = str(r.get("canonical", "")).strip().upper()
+        if canonical in ("A", "B"):
+            chosen = a if canonical == "A" else b
+            canonical_votes[chosen] = canonical_votes.get(chosen, 0) + 1
+        n_same += 1
 
-    run.verdict_totals = {"same": n_same, "related": n_related, "unrelated": n_unrelated,
-                          "dropped (sentence does not name both)": n_not_named,
-                          "rejected merge": n_rejected,
-                          "rejected merge kept as relation": n_rejected_kept}
-    log(f"Fusion step 3: {len(candidates)} -> same {n_same} / related {n_related} / unrelated {n_unrelated}"
-        f" / not named {n_not_named} / rejected merge {n_rejected} ({n_rejected_kept} kept as relation)")
-    return merges, new_edges, canonical_votes
+    run.verdict_totals = {"same (merged)": n_same, "different": n_different,
+                          "same rejected (not a morphological variant)": n_rejected}
+    log(f"Fusion step 3: {len(candidates)} -> merged {n_same} / different {n_different}"
+        f" / same rejected as not a morphological variant {n_rejected}")
+    logger.info("fusion_step3_verdicts pairs=%d same_merged=%d same_rejected=%d different=%d",
+                len(candidates), n_same, n_rejected, n_different)
+    # Merge-only: step 3 adds no edges.
+    return merges, [], canonical_votes
 
 
 _STEP3B_SYSTEM = (
