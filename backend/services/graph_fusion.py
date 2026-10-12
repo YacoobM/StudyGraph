@@ -148,16 +148,58 @@ def _surface_key(name):
 
 
 def _is_morphological_variant(a, b, aliases=None):
-    """True when two names differ only in form (case, hyphen, spacing, punctuation, plural) or one
-    is an abbreviation the documents define for the other. Only these merge on SAME."""
+    """True when two names differ only in form (case, hyphen, spacing, punctuation, plural) or in
+    abbreviations: a document-defined one, a trailing (ACRONYM), or an initial like 'm.'. Only these
+    merge on SAME."""
     ka, kb = _surface_key(a), _surface_key(b)
     if not ka or not kb:
         return False
     if ka == kb:
         return True
     aliases = aliases or {}
-    return (kb in {_surface_key(x) for x in aliases.get(a, ())}
-            or ka in {_surface_key(x) for x in aliases.get(b, ())})
+    if (kb in {_surface_key(x) for x in aliases.get(a, ())}
+            or ka in {_surface_key(x) for x in aliases.get(b, ())}):
+        return True
+
+    def is_acronym(abbr, words):
+        # Right to left, letters in order: the last in the last word, the first in the first word.
+        letters = [c for c in abbr if c.isalnum()]
+        text = " ".join(words)
+        if not letters or len(letters) > 10 or len(words) < 2:
+            return False
+        pos = len(text)
+        for i, c in enumerate(reversed(letters)):
+            pos = text.rfind(c, 0, pos)
+            if pos < 0 or (i == 0 and pos < len(text) - len(words[-1])):
+                return False
+        return pos < len(words[0])
+
+    # Document-defined abbreviations as words inside names (tb -> tuberculosis); ambiguous ones skipped.
+    expand = {}
+    for full, abbrs in aliases.items():
+        for abbr in abbrs:
+            expand.setdefault(abbr, set()).add(normalize_concept(full))
+
+    def words(name):
+        text = normalize_concept(name)
+        # A trailing parenthetical acronym of the name itself: "latent tb infection (ltbi)".
+        m = re.match(r"^(.*\S)\s*\(([^()]{1,15})\)$", text)
+        if m and is_acronym(m.group(2), m.group(1).split()):
+            text = m.group(1)
+        return [w for t in text.split()
+                for w in (next(iter(expand[t])).split() if len(expand.get(t, ())) == 1 else [t])]
+
+    wa, wb = words(a), words(b)
+    if _surface_key(" ".join(wa)) == _surface_key(" ".join(wb)):
+        return True
+    # An initial with a period stands for one word ("m. tuberculosis"); a bare letter does not (b tree).
+    if len(wa) != len(wb):
+        return False
+    same = [_surface_key(x) == _surface_key(y) for x, y in zip(wa, wb)]
+    initial = [bool(re.fullmatch(r"[a-z]\.", x) and len(y) > 2 and y[0] == x[0]
+                    or re.fullmatch(r"[a-z]\.", y) and len(x) > 2 and x[0] == y[0])
+               for x, y in zip(wa, wb)]
+    return any(same) and any(initial) and all(s or i for s, i in zip(same, initial))
 
 
 _HYPHEN_VARIANTS = {"‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-"}
