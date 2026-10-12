@@ -27,7 +27,7 @@ from services import graph_fusion
 from services.llm_provider import API_STATUS_ERRORS, RATE_LIMIT_ERRORS
 from services.graph_runtime import call_llm
 
-ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
+ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(10)
 CROSS_WEEK_CONCEPT_COUNT = 10
 DEFAULT_CHUNK_SIZE = 1024
 DEFAULT_CHUNK_OVERLAP = 150
