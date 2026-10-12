@@ -1,4 +1,6 @@
 import logging
+import time
+from uuid import uuid4
 from fastapi import APIRouter, Depends
 from uuid import UUID
 
@@ -138,21 +140,36 @@ async def post_graph_version(
     body: GraphVersionCreateRequest,
     identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
+    request_id = uuid4().hex[:12]
+    started = time.perf_counter()
     logger.info(
-        "graph_generation_requested user_id=%s user_email=%s graph_id=%s document_count=%d",
+        "parallel_trace stage=request_start request_id=%s user_id=%s graph_id=%s document_count=%d",
+        request_id,
         identity.auth_user_id,
-        identity.email,
         graph_id,
         len(body.document_ids),
     )
-    return await create_graph_version_from_batch(
-        identity,
-        str(graph_id),
-        body.document_ids,
-        runtime_state.client,
-        max_nodes_per_document=body.max_nodes_per_document,
-        min_mentions=body.min_mentions,
-    )
+    try:
+        result = await create_graph_version_from_batch(
+            identity,
+            str(graph_id),
+            body.document_ids,
+            runtime_state.client,
+            max_nodes_per_document=body.max_nodes_per_document,
+            min_mentions=body.min_mentions,
+            trace_id=request_id,
+        )
+        logger.info(
+            "parallel_trace stage=request_end request_id=%s graph_id=%s elapsed_ms=%.0f",
+            request_id, graph_id, (time.perf_counter() - started) * 1000,
+        )
+        return result
+    except Exception:
+        logger.exception(
+            "parallel_trace stage=request_error request_id=%s graph_id=%s elapsed_ms=%.0f",
+            request_id, graph_id, (time.perf_counter() - started) * 1000,
+        )
+        raise
 
 
 def _trim_graph_edges(data, min_confidence=0.75):

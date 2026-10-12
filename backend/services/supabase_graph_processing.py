@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
 from collections import defaultdict
 from uuid import uuid4
 
@@ -543,7 +545,14 @@ async def create_graph_version_from_batch(
 	client,
 	max_nodes_per_document: int | None = None,
 	min_mentions: int = 1,
+	trace_id: str | None = None,
 ) -> dict:
+	trace_id = trace_id or uuid4().hex[:12]
+	started = time.perf_counter()
+	logger.info(
+		"parallel_trace stage=processing_start trace_id=%s graph_id=%s thread=%s",
+		trace_id, graph_id, threading.get_ident(),
+	)
 	graph_documents = list_graph_documents(identity, graph_id)
 	documents_by_id = {str(document["id"]): document for document in graph_documents}
 	selected_ids = list(dict.fromkeys(str(document_id) for document_id in document_ids))
@@ -569,6 +578,12 @@ async def create_graph_version_from_batch(
 		document_id: _read_document_chunks(identity, document_id)
 		for document_id in documents_by_id
 	}
+\tlogger.info(
+\t\t"parallel_trace stage=inputs_ready trace_id=%s graph_id=%s documents=%d chunks=%d elapsed_ms=%.0f",
+\t\ttrace_id, graph_id, len(selected_ids),
+\t\tsum(len(chunks) for chunks in chunks_by_document.values()),
+\t\t(time.perf_counter() - started) * 1000,
+\t)
 	engine = StudyGraphEngine(collections=None, client=client, graph_id=graph_id)
 	concept_support, relationship_support, previous_status = _restore_engine(
 		identity,
@@ -579,6 +594,11 @@ async def create_graph_version_from_batch(
 		latest_snapshot,
 	)
 	for document_id in selected_ids:
+\t\tdocument_started = time.perf_counter()
+\t\tlogger.info(
+\t\t\t"parallel_trace stage=document_start trace_id=%s graph_id=%s document_id=%s",
+\t\t\ttrace_id, graph_id, document_id,
+\t\t)
 		document = documents_by_id[document_id]
 		chunks = [
 			{
@@ -614,6 +634,11 @@ async def create_graph_version_from_batch(
 				total_batches=len(extraction_batches),
 			))
 		outcomes = await asyncio.gather(*batch_tasks, return_exceptions=True)
+\t\tlogger.info(
+\t\t\t"parallel_trace stage=llm_batches_done trace_id=%s graph_id=%s document_id=%s batches=%d elapsed_ms=%.0f",
+\t\t\ttrace_id, graph_id, document_id, len(batch_tasks),
+\t\t\t(time.perf_counter() - document_started) * 1000,
+\t\t)
 		failures = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
 		if failures:
 			set_graph_document_status(identity, document_id, "chunked", str(failures[0]))
@@ -661,9 +686,23 @@ async def create_graph_version_from_batch(
 				week_key,
 				min_mentions=min_mentions,
 			)
+\t\tlogger.info(
+\t\t\t"parallel_trace stage=document_end trace_id=%s graph_id=%s document_id=%s elapsed_ms=%.0f",
+\t\t\ttrace_id, graph_id, document_id,
+\t\t\t(time.perf_counter() - document_started) * 1000,
+\t\t)
 
+\tfusion_started = time.perf_counter()
+\tlogger.info(
+\t\t"parallel_trace stage=fusion_start trace_id=%s graph_id=%s thread=%s",
+\t\ttrace_id, graph_id, threading.get_ident(),
+\t)
 	await asyncio.to_thread(engine.deduplicate_extracted_edges)
 	await asyncio.to_thread(engine.fuse_graph)
+\tlogger.info(
+\t\t"parallel_trace stage=fusion_end trace_id=%s graph_id=%s elapsed_ms=%.0f",
+\t\ttrace_id, graph_id, (time.perf_counter() - fusion_started) * 1000,
+\t)
 	if engine.graph_status != "active":
 		raise HTTPException(status_code=500, detail="Graph fusion did not complete.")
 
