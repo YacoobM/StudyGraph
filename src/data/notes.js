@@ -1,6 +1,6 @@
 /**
- * Notes tab data: adapts /api/notes responses to the shapes NotesPane renders. Notes live in
- * the backend process; a section body is written on first open, which is the slow call.
+ * Notes tab data: adapts the notes API responses to the shapes NotesPane renders. Notes are
+ * stored in Supabase; a section body is written on first open, which is the slow call.
  */
 
 import {

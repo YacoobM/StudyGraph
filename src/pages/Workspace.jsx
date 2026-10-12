@@ -690,10 +690,19 @@ export default function Workspace() {
                     <GettingStarted hasSubjects={library.subjects.length > 0} />
                   ) : (
                     <>
-                      {docs.length ? (
+                      {docs.some((d) => ['working', 'queued'].includes(statusClass(d.status))) ? (
                         <>
                           <h3>Still reading your documents</h3>
                           <p>Concepts appear here as soon as each file has been read.</p>
+                        </>
+                      ) : docs.length ? (
+                        <>
+                          <h3>No concepts found yet</h3>
+                          <p>
+                            {docs.some((d) => statusClass(d.status) === 'failed')
+                              ? 'Some documents could not be read. The Documents tab shows which ones.'
+                              : 'StudyGraph read these documents but found no concepts. Scanned or image-only pages can come back empty. Try another file.'}
+                          </p>
                         </>
                       ) : (
                         <>

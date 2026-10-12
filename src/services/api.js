@@ -20,11 +20,6 @@ async function handleResponse(response) {
   return data;
 }
 
-async function safeFetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  return handleResponse(response);
-}
-
 export async function listLibrary() {
   return apiFetch(`${API_BASE_URL}/api/library`, {
     headers: await authHeaders(),
@@ -182,16 +177,6 @@ export async function askGraphQuestion(graphId, question) {
   );
 }
 
-export async function regenerateGraph() {
-  return safeFetchJson(`${API_BASE_URL}/api/graph/regenerate`, {
-    method: "POST",
-  });
-}
-
-export function getDocumentFileUrl(filename) {
-  return `${API_BASE_URL}/api/documents/file/${encodeURIComponent(filename)}`;
-}
-
 export async function refreshDegradedConcepts(graphId) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/concepts/refresh-degraded`,
@@ -206,99 +191,12 @@ export async function getGraphDocumentSignedUrl(graphId, documentId) {
   );
 }
 
-export async function regenerateConcept(conceptName) {
-  return safeFetchJson(
-    `${API_BASE_URL}/api/evolution/concept/${encodeURIComponent(conceptName)}/regenerate`,
-    {
-      method: "POST",
-    },
-  );
-}
-
-function buildGraphPayload(raw) {
-  if (!raw) return { nodes: [], relationships: [], stats: {} };
-
-  const nodes = Array.isArray(raw.nodes)
-    ? raw.nodes.map((node) => {
-        const {
-          id,
-          name,
-          description,
-          source,
-          is_canonical,
-          color,
-          appears_in_weeks,
-          ...rest
-        } = node;
-        return {
-          id,
-          label: name || "Concept",
-          // Use the color from the backend, with a fallback for older data structures.
-          color: color || (is_canonical ? "#4D7C0F" : "#6D28D9"),
-          properties: {
-            ...rest,
-            ...(name ? { name } : {}),
-            ...(description ? { description } : {}),
-            ...(source ? { source } : {}),
-            ...(appears_in_weeks !== undefined ? { appears_in_weeks } : {}),
-          },
-        };
-      })
-    : [];
-
-  const relationshipsSource = raw.edges || raw.relationships || [];
-  const relationships = Array.isArray(relationshipsSource)
-    ? relationshipsSource.map((rel) => {
-        const {
-          id,
-          source,
-          target,
-          relation,
-          label,
-          summary,
-          context,
-          ...rest
-        } = rel;
-        return {
-          id: id || `${source}_${target}`,
-          source,
-          target,
-          type: relation || label || "RELATED_TO",
-          properties: {
-            ...rest,
-            ...(summary ? { summary } : {}),
-            ...(context ? { context } : {}),
-          },
-        };
-      })
-    : [];
-
-  const stats = raw.stats || {
-    total_nodes: nodes.length,
-    total_relationships: relationships.length,
-  };
-
-  return {
-    nodes,
-    relationships,
-    stats,
-    is_fused: !!raw.is_fused,
-    status: raw.status || "active",
-  };
-}
-
 export async function fetchGraphConceptEvolution(graphId, conceptName) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/concepts/${encodeURIComponent(conceptName)}/evolution`,
     {
       headers: await authHeaders(),
     },
-  );
-}
-
-export async function fetchConceptSubgraph(conceptName) {
-  return safeFetchJson(
-    `${API_BASE_URL}/api/evolution/subgraph/${encodeURIComponent(conceptName)}`,
   );
 }
 
@@ -349,36 +247,6 @@ export async function regenerateGraphQuiz(graphId, { signal } = {}) {
       method: "POST",
       headers: await authHeaders(),
       signal,
-    },
-  );
-}
-
-// Compatibility endpoint for the older per-document quiz view. The current
-// Supabase graph flow uses fetchQuiz(graphId), which loads or creates the
-// persisted quiz for the latest graph version.
-export async function generateDocumentQuiz(_graphId, documentId) {
-  return apiFetch(
-    `${API_BASE_URL}/api/quiz/documents/${encodeURIComponent(documentId)}/generate`,
-    {
-      method: "POST",
-      headers: await authHeaders(),
-    },
-  );
-}
-
-export async function saveQuizResult(graphId, quizId, correct, total, points) {
-  return apiFetch(
-    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/results`,
-    {
-      method: "POST",
-      headers: await authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        quiz_id: quizId,
-        correct,
-        total,
-        points,
-        completed: true,
-      }),
     },
   );
 }
@@ -439,24 +307,6 @@ export async function saveNoteQuizProgress(
   );
 }
 
-/**
- * Every section quiz the user has been given, grouped by note title. Read
- * from the server's stored copy, so it is there after a restart even though
- * the notes themselves are not.
- */
-export async function fetchSectionQuizzes() {
-  return apiFetch(`${API_BASE_URL}/api/quiz/sections`, {
-    headers: await authHeaders(),
-  });
-}
-
-/** Every stored attempt, summarised per quiz id. */
-export async function fetchQuizResults() {
-  return apiFetch(`${API_BASE_URL}/api/quiz/results`, {
-    headers: await authHeaders(),
-  });
-}
-
 // ---------------------------------------------------------------------------
 // revision notes
 //
@@ -479,7 +329,7 @@ export async function planNote(graphId, documentIds, days = null) {
   );
 }
 
-/** Notes planned in this backend process, newest first. */
+/** Notes saved for this graph, newest first. */
 export async function fetchNotes(graphId) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes`,

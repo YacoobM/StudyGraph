@@ -139,6 +139,19 @@ export default function Inspector({
   const [detailsError, setDetailsError] = useState("");
   const toggle = (key) => setOpenSections((s) => ({ ...s, [key]: !s[key] }));
 
+  // Escape closes the panel, unless the key belongs to a field, the chat or a dialog.
+  useEffect(() => {
+    if (!node || !onClose) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target.closest?.("input, textarea, select")) return;
+      if (document.querySelector('[aria-modal="true"], .chat-backdrop')) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [node, onClose]);
+
   const info = useMemo(() => {
     if (!node) return null;
     const byId = new Map(nodes.map((n) => [n.id, n]));

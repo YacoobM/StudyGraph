@@ -144,20 +144,27 @@ would leave them pointing at questions that no longer exist.
 
 ## 6. Verifying
 
-With the backend running:
-
 ```bash
-node verify_workspace.mjs                  # 13 checks, the full workspace flow
-node verify_quiz.mjs                       # 14 checks, quiz generation
-npx vite build                             # production build
+npx vite build                                   # production build
+npm run test:ui                                  # UI smoke test, see below
+cd backend && python -m pytest tests             # backend unit tests
 ```
 
-`verify_workspace.mjs` covers the path that matters: sign up, confirm the graph
-starts empty, upload a document, watch progress callbacks fire, **confirm the
-graph is generated from that upload**, check every node maps with the fields the
-canvas needs, confirm the documents table and chat work, then delete.
+`npm run test:ui` builds the app, serves it and drives it in headless Chromium
+against a fake API (`tests/ui/mock-api.mjs`), so it needs no backend, Supabase
+or LLM key. It checks the graph and sidebar counts, the concept inspector
+(collapsing, connections, sources and the Open button), revision notes
+(day labels, plan days, saving completion) and quiz generation (progress,
+success and a server error). Run `npx playwright-core install chromium` once first,
+or set `CHROMIUM_PATH` to an installed Chrome.
 
-All three were run against this copy before it was packaged.
+The old `verify_*.mjs` scripts were removed. They imported `api.js` through a
+`data:` URL, which fails now that `api.js` imports the Supabase client, and
+they called functions (`register`, `uploadDocument`, `fetchGraph`) that no
+longer exist since the move to Supabase.
+
+To score concept extraction against a hand checked list, see
+`backend/eval/README.md`.
 
 ## 7. Real extraction
 

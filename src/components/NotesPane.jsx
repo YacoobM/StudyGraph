@@ -80,9 +80,11 @@ function ListView({ notes, loading, error, planning, canCreate, onOpen, onCreate
             <h2 className="nt-title">Revision notes</h2>
             <p className="nt-intro">Written from the documents in this graph. Split them into days for a study plan.</p>
           </div>
-          <button className="nt-btn primary" onClick={onCreate}>
-            <Icon d={I.plus} /> New notes
-          </button>
+          {canCreate && (
+            <button className="nt-btn primary" onClick={onCreate}>
+              <Icon d={I.plus} /> New notes
+            </button>
+          )}
         </header>
 
         {error && <div className="notice-error" role="alert">{error}</div>}

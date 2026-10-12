@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 /**
  * Takes one quiz question by question, then shows the score. Only the first try at each

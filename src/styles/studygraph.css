@@ -7,305 +7,14 @@
   display: flex;
   height: 100vh;
 }
-.app-sidebar {
-  width: 260px;
-  flex-shrink: 0;
-  background: var(--cream);
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  padding: 16px 14px;
-  height: 100vh;
-}
-.sb-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 6px 16px;
-}
-.sb-logo {
-  background: none;
-  border: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14.5px;
-  color: var(--ink);
-  font-family: "Inter", sans-serif;
-}
-.sb-new {
-  width: 100%;
-  background: var(--ink);
-  color: var(--bg-1);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 13.5px;
-  font-weight: 500;
-  text-align: left;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.sb-search {
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 13px;
-  color: var(--ink-soft);
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.sb-search input {
-  border: none;
-  outline: none;
-  background: none;
-  font-size: 13px;
-  flex: 1;
-  color: var(--ink);
-  font-family: "Inter", sans-serif;
-}
-.sb-section-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
-  padding: 4px 8px;
-  margin-top: 4px;
-}
-.sb-list {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.sb-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 8px;
-  border-radius: 8px;
-  font-size: 13.5px;
-  color: var(--ink-soft);
-}
-.sb-item:hover {
-  background: var(--bg-3);
-}
-.sb-item.active {
-  background: var(--bg-1);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  font-weight: 600;
-}
-.sb-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.sb-item .name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sb-item .meta {
-  font-size: 10.5px;
-  color: var(--text-3);
-  font-family: "JetBrains Mono", monospace;
-}
-.sb-bottom {
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.sb-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--accent-tint);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--accent);
-}
-.sb-user {
-  font-size: 12.5px;
-}
-.sb-user .u-name {
-  font-weight: 600;
-  color: var(--ink);
-}
-.sb-user .u-plan {
-  color: var(--text-3);
-}
-.app-main {
-  flex: 1;
-  height: 100vh;
-  overflow-y: auto;
-  background: var(--paper);
-}
-.sb-toggle {
-  display: none;
-}
-@media (max-width: 900px) {
-  .app-sidebar {
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: 60;
-    transform: translateX(-100%);
-    transition: transform 0.22s ease;
-  }
-  .app-sidebar.open {
-    transform: translateX(0);
-    box-shadow: 20px 0 60px rgba(0, 0, 0, 0.18);
-  }
-  .sb-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: var(--bg-1);
-  }
-}
-
-/* Dashboard */
-.dash-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 26px 34px 10px;
-  gap: 14px;
-}
-.dash-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.dash-title h1 {
-  font-size: 22px;
-  font-weight: 600;
-}
-.dash-new-btn {
-  background: var(--ink);
-  color: var(--bg-1);
-  border: none;
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 13.5px;
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.dash-sub {
-  padding: 0 34px 24px;
-  color: var(--ink-soft);
-  font-size: 14px;
-}
-.dash-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 18px;
-  padding: 0 34px 60px;
-}
-.g-card {
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--bg-1);
-  transition:
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-}
-.g-card:hover {
-  box-shadow: 0 14px 32px rgba(20, 22, 26, 0.08);
-  transform: translateY(-2px);
-}
-.g-thumb {
-  height: 120px;
-  background: var(--night);
-  position: relative;
-}
-.g-thumb canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.g-body {
-  padding: 14px 16px 16px;
-}
-.g-name {
-  font-size: 14.5px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.g-stats {
-  display: flex;
-  gap: 12px;
-  font-size: 11.5px;
-  color: var(--text-3);
-  font-family: "JetBrains Mono", monospace;
-  margin-bottom: 10px;
-}
-.g-progress {
-  height: 4px;
-  border-radius: 4px;
-  background: var(--bg-3);
-  overflow: hidden;
-}
-.g-progress-fill {
-  height: 100%;
-  background: var(--action-primary);
-}
-.g-updated {
-  font-size: 11px;
-  color: var(--text-3);
-  margin-top: 8px;
-}
 
 /* Workspace */
-.ws-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--line);
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.ws-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
 .ws-title {
   font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.ws-updated {
-  font-size: 12px;
-  color: var(--text-3);
-  white-space: nowrap;
 }
 .ws-tabs {
   display: flex;
@@ -325,31 +34,11 @@
   color: var(--ink);
   border-bottom-color: var(--accent);
 }
-.ws-actions {
-  display: flex;
-  gap: 8px;
-}
-.icon-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg-1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--ink-soft);
-}
 .ws-body {
   display: none;
 }
 .ws-body.active {
   display: flex;
-}
-
-#ws-graph {
-  height: calc(100vh - 65px);
 }
 .graph-canvas-wrap {
   flex: 1;
@@ -365,13 +54,8 @@
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 20px 50px rgba(20, 22, 26, 0.14);
-}
-/* .ws-graph-legend was the graph's old stacked legend; the graph now uses the
-   compact .gx-legend further down. .swatch stays — NotesPane still uses it. */
-.swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  /* Lets the overlays respond to the card's width, which changes with the sidebar. */
+  container-type: inline-size;
 }
 .ws-timeline {
   position: absolute;
@@ -438,14 +122,6 @@
   outline: 2px solid rgba(243, 238, 221, 0.75);
   outline-offset: 4px;
 }
-.sp-deleted {
-  margin-left: 7px;
-  color: var(--danger, var(--danger));
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-  vertical-align: baseline;
-}
 .node-tip {
   position: absolute;
   z-index: 5;
@@ -465,13 +141,6 @@
   opacity: 1;
 }
 
-.chat-hint {
-  text-align: center;
-  font-size: 11.5px;
-  color: var(--text-3);
-  margin-top: 10px;
-}
-
 .study-wrap {
   flex: 1;
   overflow-y: auto;
@@ -482,14 +151,6 @@
   width: 100%;
   max-width: 720px;
   padding: 28px 24px 80px;
-}
-.study-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 22px;
-  flex-wrap: wrap;
 }
 .study-toolbar-left {
   display: flex;
@@ -538,84 +199,6 @@
 .btn-primary2:hover {
   background: var(--action-primary-hover);
 }
-.doc-header {
-  margin-bottom: 28px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--line);
-}
-.doc-eyebrow {
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-3);
-  margin-bottom: 8px;
-}
-.doc-title {
-  font-size: 26px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.doc-meta {
-  font-size: 12.5px;
-  color: var(--text-3);
-  font-family: "JetBrains Mono", monospace;
-}
-.doc-section {
-  margin-bottom: 30px;
-}
-.doc-section h3 {
-  font-size: 17px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-.doc-section ul {
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.doc-section li {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--ink-soft);
-}
-.doc-section li b {
-  color: var(--ink);
-  font-weight: 600;
-}
-.glossary-item {
-  display: flex;
-  gap: 8px;
-  font-size: 13.5px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-.glossary-item .term {
-  font-weight: 700;
-  width: 190px;
-  flex-shrink: 0;
-}
-.glossary-item .gdef {
-  color: var(--ink-soft);
-  line-height: 1.5;
-}
-.quiz-item {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 18px 18px 16px;
-  margin-bottom: 14px;
-}
-.quiz-item-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.quiz-num {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11.5px;
-  color: var(--text-3);
-}
 .diff-tag {
   font-size: 10.5px;
   font-weight: 700;
@@ -635,42 +218,6 @@
 .diff-tag.hard {
   background: var(--danger-soft);
   color: var(--danger);
-}
-.quiz-q {
-  font-size: 14.5px;
-  font-weight: 600;
-  margin-bottom: 12px;
-  line-height: 1.5;
-}
-.quiz-opt {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13.5px;
-  color: var(--ink-soft);
-  padding: 7px 0;
-}
-.quiz-opt .radio {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-strong);
-  flex-shrink: 0;
-}
-.quiz-answer {
-  display: none;
-  font-size: 13px;
-  background: var(--cream);
-  border-radius: 8px;
-  padding: 9px 12px;
-  margin-top: 10px;
-  color: var(--ink);
-}
-.quiz-answer b {
-  color: var(--accent);
-}
-.study-wrap.show-answers .quiz-answer {
-  display: block;
 }
 
 .btn-primary {
@@ -706,7 +253,6 @@
   display: flex;
 }
 .empty-state h3 {
-  font-size: 18px;
   font-weight: 600;
   font-family: var(--font-display); font-size: 22px;
 }
@@ -954,7 +500,7 @@
   }
 }
 
-/* Phones: the legend gives way and the warning moves down so controls do not overlap. */
+/* Phones: the legend gives way so the controls fit. */
 @media (max-width: 640px) {
   .gx-legend {
     display: none;
@@ -968,13 +514,6 @@
     right: auto;
     justify-content: flex-start;
     max-width: calc(100% - 150px);
-  }
-  .gx-degraded-banner {
-    top: auto;
-    bottom: 86px;
-    left: 12px;
-    right: 12px;
-    max-width: none;
   }
 }
 
@@ -1185,14 +724,6 @@
   color: var(--ink-soft);
   line-height: 1.5;
 }
-.qz-topic-meta {
-  text-align: right;
-  flex-shrink: 0;
-}
-.qz-topic-meta .of {
-  font-size: 11px;
-  color: var(--text-3);
-}
 .qz-bar {
   height: 4px;
   background: var(--bg-3);
@@ -1253,6 +784,11 @@
   cursor: pointer;
 }
 .gx-degraded-banner button:disabled { opacity: 0.65; cursor: wait; }
+/* On a narrow graph card the warning sits above the timeline so it does not
+   cover the controls. Kept after the base rule so it wins. */
+@container (max-width: 860px) {
+  .gx-degraded-banner { top: auto; bottom: 86px; left: 12px; right: 12px; max-width: none; }
+}
 
 .ws-toast {
   position: fixed;
@@ -1537,15 +1073,6 @@
 /* ===================== AUTH (one screen, two modes) ===================== */
 /* One undivided column. Sign in and create-account are the same form; the
    segmented control swaps which fields apply, so nothing typed is lost. */
-.auth-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 44px 24px;
-  position: relative;
-}
 .auth-card {
   width: 100%;
   max-width: 404px;
@@ -1688,12 +1215,6 @@
 }
 
 /* Fields that only apply to one mode */
-.auth-card.mode-signin .signup-only {
-  display: none;
-}
-.auth-card.mode-signup .signin-only {
-  display: none;
-}
 
 .auth-submit {
   width: 100%;
@@ -1734,177 +1255,8 @@
   text-align: center;
   line-height: 1.5;
 }
-.auth-switchslot {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-}
 
 /* ===================== DOCUMENTS TAB ===================== */
-.docs-wrap {
-  height: 100%;
-  overflow-y: auto;
-  padding: 26px 30px 40px;
-}
-.docs-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-  margin-bottom: 22px;
-}
-.docs-head h2 {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-.docs-head p {
-  font-size: 13.5px;
-  color: var(--ink-soft);
-  margin-top: 5px;
-}
-.docs-stats {
-  display: flex;
-  gap: 26px;
-}
-.docs-stat .n {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: "JetBrains Mono", monospace;
-}
-.docs-stat .l {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
-  margin-top: 3px;
-}
-
-.dropzone {
-  border: 1.5px dashed var(--line);
-  border-radius: 14px;
-  background: var(--bg-1);
-  padding: 34px 24px;
-  text-align: center;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-.dropzone.over {
-  border-color: var(--accent);
-  background: var(--accent-tint);
-}
-.dropzone h3 {
-  font-size: 15.5px;
-  font-weight: 700;
-}
-.dropzone p {
-  font-size: 13px;
-  color: var(--ink-soft);
-  margin: 7px 0 16px;
-}
-.dropzone input[type="file"] {
-  display: none;
-}
-
-.docs-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 22px;
-  font-size: 13.5px;
-}
-.docs-table th {
-  text-align: left;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
-  font-weight: 600;
-  padding: 0 12px 9px;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-.docs-table td {
-  padding: 13px 12px;
-  border-bottom: 1px solid var(--line);
-  vertical-align: middle;
-}
-.docs-table tr:hover td {
-  background: #fffdf8;
-}
-.docs-table .fname {
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.docs-table .fmeta {
-  font-size: 11.5px;
-  color: var(--text-3);
-  font-family: "JetBrains Mono", monospace;
-}
-.docs-table .num {
-  font-family: "JetBrains Mono", monospace;
-}
-.doc-ext {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  background: var(--cream);
-  color: var(--ink-soft);
-  font-size: 9px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.st {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 100px;
-  white-space: nowrap;
-}
-.st .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.st.ready {
-  background: rgba(34, 80, 60, 0.09);
-  color: var(--accent);
-}
-.st.ready .dot {
-  background: var(--accent);
-}
-.st.working {
-  background: rgba(193, 101, 47, 0.11);
-  color: #9c4e20;
-}
-.st.working .dot {
-  background: var(--copper);
-  animation: pulse 1.1s ease-in-out infinite;
-}
-.st.queued {
-  background: #efede6;
-  color: var(--ink-soft);
-}
-.st.queued .dot {
-  background: var(--text-3);
-}
-.st.failed {
-  background: var(--danger-tint);
-  color: var(--danger);
-}
-.st.failed .dot {
-  background: var(--danger);
-}
 @keyframes pulse {
   0%,
   100% {
@@ -1914,147 +1266,6 @@
     opacity: 0.35;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .st .dot {
-    animation: none !important;
-  }
-}
-
-.doc-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-}
-.doc-btn {
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 5px 10px;
-  font-size: 12px;
-  color: var(--ink-soft);
-  font-weight: 500;
-}
-.doc-btn:hover {
-  border-color: var(--ink);
-  color: var(--ink);
-}
-.doc-btn.danger:hover {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.docs-empty {
-  text-align: center;
-  padding: 26px 20px;
-  color: var(--ink-soft);
-  font-size: 13.5px;
-}
-.docs-err {
-  display: none;
-  margin-top: 16px;
-  background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  color: var(--danger);
-  font-size: 13px;
-  padding: 11px 14px;
-  border-radius: 9px;
-  line-height: 1.5;
-}
-.docs-err.show {
-  display: block;
-}
-.sb-user-signout {
-  background: none;
-  border: none;
-  font-size: 11px;
-  color: var(--text-3);
-  text-decoration: underline;
-  padding: 0;
-  margin-top: 2px;
-}
-
-/* ===================== WORKSPACE SCROLLING ===================== */
-/* .app-main is height:100vh with overflow-y:hidden (set inline), but it was
-   not a flex column, so .ws-body sized itself to its content rather than to
-   the viewport. .study-wrap's flex:1 + overflow-y:auto therefore had no
-   bounded height to scroll within, and Notes/Quiz content past the fold was
-   simply clipped. Making the column a flex chain with min-height:0 lets the
-   panel scroll instead of overflow. Scoped to the workspace so the dashboard
-   layout is untouched. */
-#screen-workspace .app-main {
-  display: flex;
-  flex-direction: column;
-}
-#screen-workspace .ws-topbar {
-  flex: 0 0 auto;
-}
-#screen-workspace .ws-body.active {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-#screen-workspace .study-wrap {
-  min-height: 0;
-  overflow-y: auto;
-}
-#screen-workspace .docs-wrap {
-  min-height: 0;
-}
-#screen-workspace .graph-canvas-wrap {
-  min-height: 0;
-}
-
-/* ======================================================================
-   NOTES TAB
-   Three views inside the Notes tab: list, create, detail.
-
-   Reuses what already exists rather than restating it — .qz-ring for the
-   progress rings, .qz-check for completion ticks, .pane/.pane-scroll for
-   the list and create containers, .inspector for the context panel,
-   .empty.tall for the empty list, .evo-log for the development timeline
-   and .insp-pill for concept and relation chips. Only what has no
-   equivalent is defined here.
-   ====================================================================== */
-
-/* ---------- ring: .qz-ring sized down, with the centred value it was
-     designed for (the quiz overview draws its own bare svg instead) ------ */
-
-/* ---------- list ---------- */
-
-/* ---------- create ---------- */
-
-/* ---------- detail: shell ---------- */
-
-/* ---------- detail: contents rail ---------- */
-/* min-width:0 lets a long title wrap instead of widening the 252px rail. */
-/* .qz-check is styled as a span in the quiz study plan; as a button it needs
-   the browser chrome cleared and its own done rule, since the quiz's is
-   scoped to .qz-day.done. */
-
-/* ---------- detail: body ---------- */
-
-/* ---------- detail: context panel ----------
-   .inspector already supplies the 320px width, the left border and the
-   white ground; padding moves onto a fixed-width inner so the panel can
-   animate to zero without the text reflowing on the way out. */
-
-/* ---------- notes: waiting on the backend ----------
-   Planning and writing are both real LLM calls, so both need to say they are
-   working rather than leaving a dead button. */
-@keyframes ntpulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.35;
-    transform: scale(0.8);
-  }
-}
-
-/* ---------- notes: paragraph headings ----------
-   Each body paragraph names what it covers, so a section can be scanned.
-   Sized between the section title and the prose: findable when skimming,
-   quiet when reading through. */
 
 /* ---------- font fallback for maths and Greek ---------- */
 .mono {
@@ -2062,10 +1273,9 @@
 }
 
 body{ font-family:var(--font-body); }
-.mono{ font-family:var(--font-mono-stack); }
 
 /* ---- quiz: two sources, review, section quiz in notes ---- */
-.qz-section-title{ font-size:19px; font-weight:700; color:var(--ink); margin:30px 0 12px; font-family:var(--font-display); font-weight:600; }
+.qz-section-title{ font-size:19px; color:var(--ink); margin:30px 0 12px; font-family:var(--font-display); font-weight:600; }
 .qz-section-title:first-child{ margin-top:0; }
 .qz-review-card{ margin-bottom:14px; }
 .qz-review-card .qz-choice{ cursor:default; }
@@ -2076,7 +1286,7 @@ body{ font-family:var(--font-body); }
 .qz-land{ display:flex; flex-direction:column; gap:14px; }
 .qz-land-banner{ display:flex; align-items:center; justify-content:space-between; gap:24px; background:var(--bg-1); border:1px solid var(--line); border-radius:18px; padding:32px 36px; margin-bottom:10px; }
 .qz-land-copy{ flex:1 1 240px; min-width:0; }
-.qz-land-heading{ font-size:28px; font-weight:700; letter-spacing:-0.02em; line-height:1.15; color:var(--ink); margin-bottom:10px; font-family:var(--font-display); font-weight:600; }
+.qz-land-heading{ font-size:28px; letter-spacing:-0.02em; line-height:1.15; color:var(--ink); margin-bottom:10px; font-family:var(--font-display); font-weight:600; }
 .qz-land-intro{ font-size:15px; line-height:1.55; color:var(--ink-soft); max-width:34ch; }
 .qz-land-art{ flex:0 1 320px; width:320px; max-width:48%; height:auto; display:block; }
 .qz-land-row{ display:flex; align-items:center; gap:20px; width:100%; text-align:left; font:inherit; color:var(--ink); background:var(--bg-1); border:1px solid var(--line); border-radius:16px; padding:22px 26px; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
@@ -2084,7 +1294,7 @@ body{ font-family:var(--font-body); }
 .qz-land-row:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
 .qz-land-icon{ flex:none; width:52px; height:52px; border-radius:13px; background:var(--accent-tint); color:var(--accent); display:flex; align-items:center; justify-content:center; }
 .qz-land-text{ flex:1; min-width:0; display:flex; flex-direction:column; gap:5px; }
-.qz-land-title{ font-size:19px; font-weight:700; letter-spacing:-0.01em; font-family:var(--font-display); font-weight:600; }
+.qz-land-title{ font-size:19px; letter-spacing:-0.01em; font-family:var(--font-display); font-weight:600; }
 .qz-land-desc{ font-size:14.5px; line-height:1.5; color:var(--ink-soft); }
 .qz-land-go{ flex:none; width:44px; height:44px; border-radius:50%; background:var(--cream); color:var(--ink); display:flex; align-items:center; justify-content:center; transition:background .15s, color .15s; }
 .qz-land-row:hover .qz-land-go{ background:var(--action-primary); color:var(--action-primary-text); }

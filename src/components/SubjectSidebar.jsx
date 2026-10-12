@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
  * Left panel: Subject → Topic → Graph, in the style of a chat app's history

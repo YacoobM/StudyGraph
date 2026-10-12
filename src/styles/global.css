@@ -105,27 +105,6 @@ input, textarea, select {
   cursor: not-allowed;
 }
 
-.btn-ghost {
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-0);
-}
-.btn-ghost:hover {
-  background: var(--bg-2);
-  border-color: var(--text-3);
-}
-
-.btn-danger {
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-1);
-}
-.btn-danger:hover {
-  background: var(--danger-soft);
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
 .input {
   width: 100%;
   background: var(--bg-1);
@@ -143,27 +122,6 @@ input, textarea, select {
 .input::placeholder { color: var(--text-3); }
 
 /* shared chips */
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 11px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--bg-3);
-  color: var(--text-0);
-}
-
-.label-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-0);
-}
 
 /* status dots */
 .dot {
@@ -172,7 +130,3 @@ input, textarea, select {
   border-radius: 50%;
   display: inline-block;
 }
-.dot-success { background: var(--success); }
-.dot-warn    { background: var(--warn); }
-.dot-danger  { background: var(--danger); }
-.dot-idle    { background: var(--text-3); }

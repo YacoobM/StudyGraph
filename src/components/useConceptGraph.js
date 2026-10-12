@@ -18,6 +18,7 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
   const frameRef = useRef(null)
   const runtimeRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
+  const [drawnCount, setDrawnCount] = useState(null)
 
   const updateTooltipPosition = useCallback((event) => {
     pointerRef.current = { x: event.clientX, y: event.clientY }
@@ -133,6 +134,12 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
       return incident ? null : "none"
     })
     runtime.visibleIds = visibleIds
+    // Tell the caption how many nodes are drawn, only when it changes.
+    const drawn = currentView.nodes.filter((node) => visibleIds.has(node.id)).length
+    if (drawn !== runtime.drawnCount) {
+      runtime.drawnCount = drawn
+      setDrawnCount(drawn)
+    }
   }, [])
 
   runtimeRef.current = {
@@ -318,6 +325,8 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
       svg.attr("viewBox", `0 0 ${width} ${height}`)
       simulation.force("x", d3.forceX(width / 2).strength(0.055))
       simulation.force("y", d3.forceY(height / 2).strength(0.055))
+      // Fit again once the layout settles, unless the user has moved the camera.
+      if (!runtimeRef.current.cameraInteracted) runtimeRef.current.initialFitDone = false
       if (simulation.nodes().length) simulation.alpha(Math.max(simulation.alpha(), 0.06)).restart()
     })
     resizeObserver.observe(wrapper)
@@ -666,5 +675,5 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
     setTooltip(null)
   }, [scheduleStyles])
 
-  return { svgRef, wrapRef, tooltipRef, tooltip, fit, zoomBy, relayout, locate, clearHover }
+  return { svgRef, wrapRef, tooltipRef, tooltip, drawnCount, fit, zoomBy, relayout, locate, clearHover }
 }

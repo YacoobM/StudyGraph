@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { supabase } from './services/supabase.js'
 

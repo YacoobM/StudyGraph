@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "document": "week3-normalisation.pdf",
+      "concepts": [
+        "normalisation",
+        "Functional Dependencies",
+        "1NF",
+        "Second Normal Form",
+        "Primary Keys",
+        "Database",
+        "Table"
+      ],
+      "relationships": [
+        {"from": "normalisation", "to": "1NF"},
+        {"from": "Primary Keys", "to": "Database"}
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
  * In-page upload: a drop zone that takes several files at once, the queue
