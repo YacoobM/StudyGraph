@@ -64,10 +64,16 @@ class SharedTokenLimiter:
 
     async def acquire(self, input_tokens: int, output_tokens: int) -> None:
         """Asynchronously acquire tokens. Awaits until the reservation fits, then records it."""
+        started = time.perf_counter()
         while True:
             with self._sync_lock:
                 wait_time = self._available_wait(input_tokens, output_tokens)
             if wait_time <= 0:
+                logger.info(
+                    "concurrency_trace stage=token_reserved workload=%s input_tokens=%d output_tokens=%d wait_ms=%.1f",
+                    self.workload, input_tokens, output_tokens,
+                    (time.perf_counter() - started) * 1000,
+                )
                 return
             logger.warning(
                 "workload=%s wait_seconds=%.1f input_tokens=%d output_tokens=%d",
