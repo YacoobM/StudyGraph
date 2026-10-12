@@ -61,8 +61,8 @@ _FUSION_SLOT_SEMAPHORE = threading.BoundedSemaphore(_FUSION_GLOBAL_SLOTS)
 _CALL_INPUT_TOKENS = 275 * _VERDICT_PAIR_BATCH
 _CALL_SECONDS = 3.0
 
-# Bumped when step 3 became merge-only; v6 verdicts carried relations and are not reused.
-_STEP3_PROMPT_VERSION = "step3-merge-v7"
+# v7: merge-only (v6 carried relations). v8: no canonical field; labels are chosen without the LLM.
+_STEP3_PROMPT_VERSION = "step3-merge-v8"
 _STEP5_PROMPT_VERSION = "step5-evidence-v5"
 
 VERDICT_CACHE_FILE = FUSION_DIR / "verdict_cache.json"
@@ -1166,7 +1166,7 @@ def merge_graph(engine, client, log=print):
                 len(llm_candidates), len(run.possible_synonyms), run.check_ms)
     mark("1-2")
 
-    interim_cmap = _build_canonical_map(dsu, nodes)
+    interim_cmap = _build_canonical_map(dsu, nodes, aliases)
 
     adjacency = {}
     for e in engine.edges:
@@ -1177,22 +1177,22 @@ def merge_graph(engine, client, log=print):
         adjacency.setdefault(f, []).append((t, e["relation"]))
         adjacency.setdefault(t, []).append((f, e["relation"]))
 
-    canonical_votes = {}
     step3_new_edges = []
     if llm_candidates:
         ask_names = sorted({n for (a, b, _s) in llm_candidates for n in (a, b)})
         name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, encode_texts(ask_names))}
-        
-        merges, step3_new_edges, canonical_votes = _llm_evaluate_pairs(
+
+        merges, step3_new_edges = _llm_evaluate_pairs(
             llm_candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log, run)
         for (a, b) in merges:
             dsu.union(a, b)
     mark("3")
 
-    split_out = _verify_clusters(dsu, nodes, log, run, canonical_votes, aliases)
+    split_out = _verify_clusters(dsu, nodes, log, run, aliases)
     mark("3b")
 
-    final_cmap = _build_canonical_map(dsu, nodes, canonical_votes, split_out)
+    # The label of each merged group is chosen by _canonical_rank, not by the LLM.
+    final_cmap = _build_canonical_map(dsu, nodes, aliases, split_out)
 
     final_nodes = {}
     for norm, rec in nodes.items():
@@ -1367,8 +1367,20 @@ def merge_graph(engine, client, log=print):
     return canonical_nodes, fused_edges
 
 
-def _build_canonical_map(dsu, nodes, llm_votes=None, split_out=None):
-    votes = llm_votes or {}
+def _canonical_rank(name, nodes, expand):
+    """Sort key for a merged group's label, best lowest: a full form (no period-initial, no
+    document-defined abbreviation word, no trailing acronym), then most mentions, longest,
+    alphabetical."""
+    text = normalize_concept(name)
+    words = text.split()
+    m = _TRAILING_PAREN.match(text)
+    abbreviated = (any(_INITIAL.fullmatch(w) or w in expand for w in words)
+                   or bool(m and _is_acronym(m.group(2), m.group(1).split())))
+    return (abbreviated, -nodes[name]["mentions"], -len(name), name)
+
+
+def _build_canonical_map(dsu, nodes, aliases=None, split_out=None):
+    expand = _alias_expansions(aliases or {})
     split = split_out or set()
     cmap = {}
     for members in dsu.groups().values():
@@ -1376,7 +1388,7 @@ def _build_canonical_map(dsu, nodes, llm_votes=None, split_out=None):
         kept = [m for m in members if m not in active_split]
         if not kept:
             active_split, kept = set(), members
-        best = max(kept, key=lambda m: (votes.get(m, 0), len(m), nodes[m]["mentions"], m))
+        best = min(kept, key=lambda m: _canonical_rank(m, nodes, expand))
         for m in members:
             cmap[m] = m if m in active_split else best
     return cmap
@@ -1514,7 +1526,7 @@ _STEP3_SYSTEM = (
     "with some third concept does not count, nor does 'while' meaning 'at the same time as'.\n"
     "- If modifier_variant is true, one name is the other plus extra words, which usually "
     "narrow it. Answer same only if the evidence uses the two names for one and the same thing.\n"
-    'Return: {"id": int, "verdict": "same"|"different", "canonical": "A"|"B" (if same)}. '
+    'Return: {"id": int, "verdict": "same"|"different"}. '
     'Only JSON: {"results": [...]}'
 )
 
@@ -1570,9 +1582,9 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
             if r is None:
                 resolved[(a, b)] = {"verdict": "different"}
                 continue
-            # Only the merge fields are kept; canonical is stored in sorted-name order.
-            rec = {k: v for k, v in _to_cache_record(a, b, r).items() if k in ("verdict", "canonical")}
-            resolved[(a, b)] = _from_cache_record(a, b, rec)
+            # Only the verdict is kept; the merged node's label is chosen without the LLM.
+            rec = {"verdict": _to_cache_record(a, b, r)["verdict"]}
+            resolved[(a, b)] = rec
             # Only an answer we can read is kept: a missing or unknown verdict
             # would otherwise stay "different" for good. It is asked again next time.
             if _normalise_verdict(r.get("verdict")) is not None:
@@ -1582,7 +1594,7 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
         _save_verdict_cache(cache)
 
     # Every candidate already passed the name check in step 2, so "same" is the only gate left.
-    merges, canonical_votes = [], {}
+    merges = []
     n_same = n_different = 0
     for (a, b, sim) in candidates:
         r = resolved.get((a, b), {})
@@ -1591,15 +1603,9 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
             run.verdicts.append((source, a, b, sim, "different", ""))
             n_different += 1
             continue
-        detail = f"canonical {r.get('canonical') or '?'}"
-        if _is_modifier_variant(a, b):
-            detail += "   [modifier variant]"
-        run.verdicts.append((source, a, b, sim, "same", detail))
+        run.verdicts.append((source, a, b, sim, "same",
+                             "[modifier variant]" if _is_modifier_variant(a, b) else ""))
         merges.append((a, b))
-        canonical = str(r.get("canonical", "")).strip().upper()
-        if canonical in ("A", "B"):
-            chosen = a if canonical == "A" else b
-            canonical_votes[chosen] = canonical_votes.get(chosen, 0) + 1
         n_same += 1
 
     run.verdict_totals = {"same (merged)": n_same, "different": n_different}
@@ -1607,14 +1613,14 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
     logger.info("fusion_step3_verdicts pairs=%d merges=%d different=%d",
                 len(candidates), n_same, n_different)
     # Merge-only: step 3 adds no edges.
-    return merges, [], canonical_votes
+    return merges, []
 
 
-def _verify_clusters(dsu, nodes, log, run, votes=None, aliases=None):
+def _verify_clusters(dsu, nodes, log, run, aliases=None):
     """Step 3b without the LLM: in each merged group of 3+ names, a name that is not a
     morphological variant of the group's canonical name is split back out. aliases are the
     document abbreviations step 2 found for every node name."""
-    votes = votes or {}
+    expand = _alias_expansions(aliases or {})
     clusters = [sorted(m) for m in dsu.groups().values() if len(m) >= 3]
     log(f"Fusion step 3b: {len(clusters)} cluster(s) to re-verify")
     if not clusters:
@@ -1625,7 +1631,7 @@ def _verify_clusters(dsu, nodes, log, run, votes=None, aliases=None):
         failed_pairs += sum(1 for a, b in combinations(members, 2)
                             if not _is_morphological_variant(a, b, aliases))
         # Canonical picked as _build_canonical_map picks it.
-        canon = max(members, key=lambda m: (votes.get(m, 0), len(m), nodes[m]["mentions"], m))
+        canon = min(members, key=lambda m: _canonical_rank(m, nodes, expand))
         so = [m for m in members if m != canon and not _is_morphological_variant(m, canon, aliases)]
         run.clusters.append((list(members), so, "check"))
         split_out.update(so)
