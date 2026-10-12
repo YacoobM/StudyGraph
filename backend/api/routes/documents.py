@@ -1,5 +1,8 @@
 from pathlib import Path
 import asyncio
+import logging
+import time
+from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from uuid import UUID
 from repositories.supabase_documents import (
@@ -38,7 +41,13 @@ async def post_graph_document(
     file: UploadFile = File(...),
     identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
+    trace_id = uuid4().hex[:12]
+    started = time.perf_counter()
     filename = Path(file.filename or "").name
+    logger.info(
+        "parallel_trace stage=upload_start trace_id=%s graph_id=%s filename=%s",
+        trace_id, graph_id, filename,
+    )
     if not filename:
         raise HTTPException(status_code=422, detail="Choose a file to upload.")
     if Path(filename).suffix.lower() not in ALLOWED_GRAPH_SUFFIXES:
@@ -66,6 +75,11 @@ async def post_graph_document(
         persist_document_chunks(identity, document["id"], chunks, embeddings)
         set_graph_document_status(identity, document["id"], "chunked")
         document["status"] = "chunked"
+        logger.info(
+            "parallel_trace stage=upload_end trace_id=%s graph_id=%s document_id=%s elapsed_ms=%.0f",
+            trace_id, graph_id, document["id"],
+            (time.perf_counter() - started) * 1000,
+        )
     except Exception as error:
         try:
             set_graph_document_status(identity, document["id"], "error", str(error))

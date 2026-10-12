@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
 from collections import defaultdict
 from uuid import uuid4
 
@@ -543,7 +545,19 @@ async def create_graph_version_from_batch(
 	client,
 	max_nodes_per_document: int | None = None,
 	min_mentions: int = 1,
+	trace_id: str | None = None,
 ) -> dict:
+	trace_id = trace_id or uuid4().hex[:12]
+	started = time.perf_counter()
+
+	def log_phase(name: str, phase_started: float) -> None:
+		logger.info("phase=%s elapsed_ms=%.0f", name, (time.perf_counter() - phase_started) * 1000)
+
+	logger.info(
+		"parallel_trace stage=processing_start trace_id=%s graph_id=%s thread=%s",
+		trace_id, graph_id, threading.get_ident(),
+	)
+	restore_started = time.perf_counter()
 	graph_documents = list_graph_documents(identity, graph_id)
 	documents_by_id = {str(document["id"]): document for document in graph_documents}
 	selected_ids = list(dict.fromkeys(str(document_id) for document_id in document_ids))
@@ -578,6 +592,8 @@ async def create_graph_version_from_batch(
 		chunks_by_document,
 		latest_snapshot,
 	)
+	log_phase("restore", restore_started)
+	extraction_started = time.perf_counter()
 	for document_id in selected_ids:
 		document = documents_by_id[document_id]
 		chunks = [
@@ -662,8 +678,13 @@ async def create_graph_version_from_batch(
 				min_mentions=min_mentions,
 			)
 
+	log_phase("extraction", extraction_started)
+	deduplicate_started = time.perf_counter()
 	await asyncio.to_thread(engine.deduplicate_extracted_edges)
+	log_phase("deduplicate_extracted_edges", deduplicate_started)
+	fusion_started = time.perf_counter()
 	await asyncio.to_thread(engine.fuse_graph)
+	log_phase("fuse_graph", fusion_started)
 	if engine.graph_status != "active":
 		raise HTTPException(status_code=500, detail="Graph fusion did not complete.")
 
@@ -687,6 +708,7 @@ async def create_graph_version_from_batch(
 	# Descriptions are extracted alongside concepts. Prefer the first grounded
 	# description for each canonical concept and only use the old generation
 	# path as a fallback for concepts with no extracted description.
+	description_started = time.perf_counter()
 	concept_descriptions = {}
 	for concept in engine.concepts:
 		name = _canonical_name(engine, concept["name"])
@@ -714,6 +736,8 @@ async def create_graph_version_from_batch(
 		name = graph_fusion.normalize_concept(previous.get("name", ""))
 		if name and previous.get("description") and name not in concept_descriptions:
 			concept_descriptions[name] = previous["description"]
+	log_phase("description_fallback", description_started)
+	persist_started = time.perf_counter()
 	new_version = _persist_version(
 		identity,
 		graph_id,
@@ -725,6 +749,7 @@ async def create_graph_version_from_batch(
 		documents_by_id,
 		concept_descriptions,
 	)
+	log_phase("_persist_version", persist_started)
 	for document_id in selected_ids:
 		set_graph_document_status(identity, document_id, "processed", None, week=week_key)
 	return {"version": new_version, "concepts": len(engine.concepts), "relationships": len(engine.fused_edges)}

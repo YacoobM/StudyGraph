@@ -11,6 +11,8 @@ from app.config import (
 )
 
 _client: OpenAI | None = None
+_embedding_cache: dict[str, list[float]] = {}
+_EMBEDDING_CACHE_MAX = 20000
 
 
 def get_embedding_client() -> OpenAI:
@@ -31,21 +33,37 @@ def encode_texts(texts: Sequence[str]) -> list[list[float]]:
     if any(not isinstance(text, str) for text in texts):
         raise TypeError("All embedding inputs must be strings.")
 
-    response = get_embedding_client().embeddings.create(
-        model=OPENAI_EMBEDDING_MODEL,
-        input=list(texts),
-        dimensions=OPENAI_EMBEDDING_DIMENSIONS,
-    )
+    requested = list(texts)
+    missing = []
+    missing_seen = set()
+    for text in requested:
+        if text not in _embedding_cache and text not in missing_seen:
+            missing.append(text)
+            missing_seen.add(text)
 
-    # The API normally returns items in input order, but sorting by index
-    # makes that  explicit.
-    data = sorted(response.data, key=lambda item: item.index)
-    encoded = [[float(value) for value in item.embedding] for item in data]
+    if missing:
+        response = get_embedding_client().embeddings.create(
+            model=OPENAI_EMBEDDING_MODEL,
+            input=missing,
+            dimensions=OPENAI_EMBEDDING_DIMENSIONS,
+        )
+
+        # The API normally returns items in input order, but sorting by index
+        # makes that explicit.
+        data = sorted(response.data, key=lambda item: item.index)
+        encoded_missing = [[float(value) for value in item.embedding] for item in data]
+        if len(encoded_missing) != len(missing):
+            raise ValueError("OpenAI returned an unexpected number of embeddings.")
+        for text, vector in zip(missing, encoded_missing):
+            _embedding_cache[text] = vector
+        if len(_embedding_cache) > _EMBEDDING_CACHE_MAX:
+            # Keep the cache bounded; correctness does not depend on cache hits.
+            for old_text in list(_embedding_cache)[:len(_embedding_cache) - _EMBEDDING_CACHE_MAX]:
+                del _embedding_cache[old_text]
+
+    encoded = [_embedding_cache[text] for text in requested]
 
 	# 384 dims is currently set, eventuall increase this
-    if len(encoded) != len(texts):
-        raise ValueError("OpenAI returned an unexpected number of embeddings.")
-
     if any(len(vector) != OPENAI_EMBEDDING_DIMENSIONS for vector in encoded):
         raise ValueError(
             f"Embedding model must return "

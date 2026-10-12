@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 import re
+import threading
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +23,7 @@ from services.llm_gateway import estimate_tokens, graph_limiter
 from services.llm_provider import BAD_REQUEST_ERRORS, RATE_LIMIT_ERRORS
 
 _MODEL = EXTRACTION_MODEL
+logger = logging.getLogger(__name__)
 
 AUTO_MERGE_SIM = 0.95
 LLM_LOW_SIM = 0.55
@@ -54,7 +57,9 @@ _CLUSTER_BATCH = _VERDICT_PAIR_BATCH
 # free.
 _RATE_LIMIT_RETRIES = 2
 # Concurrent verdict calls: a 4-pair call measured 850-1,050 input tokens and 1.4-2.7 s on OpenAI.
-_FUSION_MAX_WORKERS = 4
+_FUSION_MAX_WORKERS = int(os.getenv("FUSION_MAX_WORKERS", "8"))
+_FUSION_GLOBAL_SLOTS = max(1, int(os.getenv("FUSION_GLOBAL_SLOTS", "16")))
+_FUSION_SLOT_SEMAPHORE = threading.BoundedSemaphore(_FUSION_GLOBAL_SLOTS)
 _CALL_INPUT_TOKENS = 275 * _VERDICT_PAIR_BATCH
 _CALL_SECONDS = 3.0
 
@@ -622,87 +627,121 @@ def _results_list(data):
 def _verdict_attempt(client, system, payload, log, tag, failures=None, max_tokens=_VERDICT_MAX_TOKENS):
     user = "PAIRS:\n" + json.dumps(payload, ensure_ascii=False)
     attempt = rate_retries = 0
-    while True:
-        reason = None
-        try:
-            # Reserved from the budget extraction and evolution share, so
-            # fusion no longer races them into the provider's per-minute limits.
-            graph_limiter.acquire_sync(estimate_tokens(system) + estimate_tokens(user), max_tokens)
-        except ValueError as e:
-            log(f"{tag} larger than the per-minute token budget ({e}) — not sent")
-            return None, "over budget"
-        try:
-            completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                model=_MODEL,
-                reasoning_effort=NON_RAG_REASONING_EFFORT,
-                response_format={"type": "json_object"},
-                # Accepted by OpenAI only with reasoning_effort "none".
-                temperature=0,
-                # OpenAI reasoning models use max_completion_tokens.
-                **{COMPLETION_TOKEN_PARAMETER: max_tokens},
-            )
-            raw = completion.choices[0].message.content or ""
-            data = json.loads(raw)
-            results = _results_list(data)
-            if results is None or (payload and not results):
-                # Valid JSON in the wrong shape: the body is the only record
-                # of what the model actually sent.
-                log(f"{tag} unexpected response shape: {_raw_excerpt(raw)}")
-                raise _MalformedVerdict("no 'results' list" if results is None
-                                        else "empty 'results' for non-empty batch")
-            if not isinstance(data.get("results"), list):
-                log(f"{tag} bare verdict object taken as a one-item result: {_raw_excerpt(raw)}")
-            return results, None
-        except RATE_LIMIT_ERRORS as e:
-            if is_request_too_large(e):
-                log(f"{tag} request too large for the per-minute limit — not retried")
-                return None, "request too large"
-            if rate_retries >= _RATE_LIMIT_RETRIES:
-                log(f"{tag} still rate limited after {rate_retries} retries")
-                return None, "rate limited"
-            rate_retries += 1
-            asked = retry_after_seconds(e)
-            delay = asked if asked is not None else min(60, 5 * (3 ** (rate_retries - 1)))
-            log(f"{tag} rate limited (retry {rate_retries}/{_RATE_LIMIT_RETRIES}) — waiting {delay:.1f}s")
-            time.sleep(delay)
-            continue
-        except (_MalformedVerdict, json.JSONDecodeError) as e:
-            reason = f"malformed ({type(e).__name__})"
-        except BAD_REQUEST_ERRORS as e:
-            if not _is_json_validate_failed(e):
-                log(f"{tag} rejected — defaults to unrelated")
-                return None, "rejected"
-            reason = "json_validate_failed"
-            if failures is not None:
-                failures["json_validate_failed"] = failures.get("json_validate_failed", 0) + 1
-        except Exception as e:
-            reason = f"{type(e).__name__}"
+    rate_limit_count = 0
+    started = time.perf_counter()
+    limiter_wait = 0.0
+    try:
+        while True:
+            reason = None
+            try:
+                # Reserved from the budget extraction and evolution share, so
+                # fusion no longer races them into the provider's per-minute limits.
+                wait_started = time.perf_counter()
+                graph_limiter.acquire_sync(estimate_tokens(system) + estimate_tokens(user), max_tokens)
+                limiter_wait += time.perf_counter() - wait_started
+            except ValueError as e:
+                log(f"{tag} larger than the per-minute token budget ({e}) — not sent")
+                return None, "over budget"
+            try:
+                completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    model=_MODEL,
+                    reasoning_effort=NON_RAG_REASONING_EFFORT,
+                    response_format={"type": "json_object"},
+                    # Accepted by OpenAI only with reasoning_effort "none".
+                    temperature=0,
+                    # OpenAI reasoning models use max_completion_tokens.
+                    **{COMPLETION_TOKEN_PARAMETER: max_tokens},
+                )
+                raw = completion.choices[0].message.content or ""
+                data = json.loads(raw)
+                results = _results_list(data)
+                if results is None or (payload and not results):
+                    # Valid JSON in the wrong shape: the body is the only record
+                    # of what the model actually sent.
+                    log(f"{tag} unexpected response shape: {_raw_excerpt(raw)}")
+                    raise _MalformedVerdict("no 'results' list" if results is None
+                                            else "empty 'results' for non-empty batch")
+                if not isinstance(data.get("results"), list):
+                    log(f"{tag} bare verdict object taken as a one-item result: {_raw_excerpt(raw)}")
+                return results, None
+            except RATE_LIMIT_ERRORS as e:
+                rate_limit_count += 1
+                if failures is not None:
+                    failures["rate_limited"] = failures.get("rate_limited", 0) + 1
+                if is_request_too_large(e):
+                    log(f"{tag} request too large for the per-minute limit — not retried")
+                    return None, "request too large"
+                if rate_retries >= _RATE_LIMIT_RETRIES:
+                    log(f"{tag} still rate limited after {rate_retries} retries")
+                    return None, "rate limited"
+                rate_retries += 1
+                asked = retry_after_seconds(e)
+                delay = asked if asked is not None else min(60, 5 * (3 ** (rate_retries - 1)))
+                log(f"{tag} rate limited (retry {rate_retries}/{_RATE_LIMIT_RETRIES}) — waiting {delay:.1f}s")
+                time.sleep(delay)
+                continue
+            except (_MalformedVerdict, json.JSONDecodeError) as e:
+                reason = f"malformed ({type(e).__name__})"
+            except BAD_REQUEST_ERRORS as e:
+                if not _is_json_validate_failed(e):
+                    log(f"{tag} rejected — defaults to unrelated")
+                    return None, "rejected"
+                reason = "json_validate_failed"
+                if failures is not None:
+                    failures["json_validate_failed"] = failures.get("json_validate_failed", 0) + 1
+            except Exception as e:
+                reason = f"{type(e).__name__}"
 
-        if attempt == _VERDICT_MAX_RETRIES:
-            log(f"{tag} failed after {_VERDICT_MAX_RETRIES} retries ({reason})")
-            return None, reason
-        delay = min(60, 5 * (3 ** attempt))
-        attempt += 1
-        log(f"{tag} {reason} (attempt {attempt}/{_VERDICT_MAX_RETRIES}) — waiting {delay:.1f}s")
-        time.sleep(delay)
+            if attempt == _VERDICT_MAX_RETRIES:
+                log(f"{tag} failed after {_VERDICT_MAX_RETRIES} retries ({reason})")
+                return None, reason
+            delay = min(60, 5 * (3 ** attempt))
+            attempt += 1
+            log(f"{tag} {reason} (attempt {attempt}/{_VERDICT_MAX_RETRIES}) — waiting {delay:.1f}s")
+            time.sleep(delay)
+    finally:
+        if failures is not None:
+            failures["retries"] = failures.get("retries", 0) + attempt + rate_retries
+            failures["limiter_wait_seconds"] = failures.get("limiter_wait_seconds", 0.0) + limiter_wait
+        logger.info(
+            "fusion_verdict_call tag=%s pair_count=%d duration_ms=%.0f retries=%d "
+            "rate_limit_count=%d rate_limit_retries=%d",
+            tag, len(payload), (time.perf_counter() - started) * 1000,
+            attempt + rate_retries, rate_limit_count, rate_retries,
+        )
 
 
 def _verdict_call(client, system, payload, log, tag, failures=None, max_tokens=_VERDICT_MAX_TOKENS):
     results, reason = _verdict_attempt(client, system, payload, log, tag, failures, max_tokens)
     if results is not None:
+        if payload and all("a" in item and "b" in item for item in payload):
+            expected = {item.get("id") for item in payload}
+            returned = {
+                result.get("id") for result in results
+                if isinstance(result, dict)
+                and "id" in result
+                and _normalise_verdict(result.get("verdict")) is not None
+            }
+            missing = len(expected - returned)
+            if failures is not None and missing:
+                failures["defaults_to_unrelated"] = failures.get("defaults_to_unrelated", 0) + missing
         return results
     if len(payload) <= 1:
         log(f"{tag} defaults to unrelated (not cached)")
+        if failures is not None:
+            failures["defaults_to_unrelated"] = failures.get("defaults_to_unrelated", 0) + len(payload)
         return []
 
     # Splitting isolates a malformed pair; it cannot help a rate limit, so only malformed output is
     # split, up to _VERDICT_MAX_SINGLES.
     if reason is None or not str(reason).startswith(("malformed", "json_validate_failed")):
         log(f"{tag} not splitting after {reason} — {len(payload)} pair(s) default to unrelated")
+        if failures is not None:
+            failures["defaults_to_unrelated"] = failures.get("defaults_to_unrelated", 0) + len(payload)
         return []
 
     head = payload[:_VERDICT_MAX_SINGLES]
@@ -717,16 +756,20 @@ def _verdict_call(client, system, payload, log, tag, failures=None, max_tokens=_
         if one:
             salvaged.extend(one)
     log(f"{tag} recovered {len(salvaged)}/{len(payload)} from singles")
+    if failures is not None:
+        expected = {item.get("id") for item in payload}
+        returned = {
+            result.get("id") for result in salvaged
+            if isinstance(result, dict)
+            and "id" in result
+            and _normalise_verdict(result.get("verdict")) is not None
+        }
+        failures["defaults_to_unrelated"] = failures.get("defaults_to_unrelated", 0) + len(expected - returned)
     return salvaged
 
 
 def fusion_workers(input_limit=None, output_limit=None):
-    """Verdict calls the graph_limiter budget keeps in flight at once: calls per minute times the call
-    time, from 1 to _FUSION_MAX_WORKERS."""
-    input_limit = graph_limiter.input_limit if input_limit is None else input_limit
-    output_limit = graph_limiter.output_limit if output_limit is None else output_limit
-    per_minute = min(input_limit // _CALL_INPUT_TOKENS, output_limit // _VERDICT_MAX_TOKENS)
-    return max(1, min(_FUSION_MAX_WORKERS, int(per_minute * _CALL_SECONDS / 60)))
+    return _FUSION_MAX_WORKERS
 
 
 def _run_verdict_calls(client, system, jobs, log, tag, failures, workers):
@@ -735,7 +778,8 @@ def _run_verdict_calls(client, system, jobs, log, tag, failures, workers):
     def one(job):
         payload, max_tokens = job
         lines, fails = [], {}
-        results = _verdict_call(client, system, payload, lines.append, tag, fails, max_tokens)
+        with _FUSION_SLOT_SEMAPHORE:
+            results = _verdict_call(client, system, payload, lines.append, tag, fails, max_tokens)
         return results, lines, fails
 
     def replay(out):
@@ -806,6 +850,65 @@ class _EvidencePool:
             for doc, chunks in by_doc.items()
         }
 
+    def _split(self, chunk):
+        sentences = []
+        for part in _SENTENCE_SPLIT.split(chunk["text"]):
+            part = _WS.sub(" ", part).strip()[:_EVIDENCE_SENTENCE_CHARS]
+            if len(part.split()) >= 3 and part not in sentences:
+                sentences.append(part)
+        return sentences
+
+    def _embed_sentences(self, chunks):
+        pending = []
+        seen = set()
+        for chunk in chunks:
+            if id(chunk) in self._sentence_cache:
+                continue
+            for sentence in self._split(chunk):
+                if sentence not in seen:
+                    pending.append(sentence)
+                    seen.add(sentence)
+        vectors_by_sentence = {}
+        api_batches = 0
+        if pending:
+            for start in range(0, len(pending), 2048):
+                batch = pending[start:start + 2048]
+                vectors_by_sentence.update(dict(zip(batch, encode_texts(batch))))
+                api_batches += 1
+            for chunk in chunks:
+                if id(chunk) in self._sentence_cache:
+                    continue
+                sentences = self._split(chunk)
+                if sentences and all(sentence in vectors_by_sentence for sentence in sentences):
+                    self._sentence_cache[id(chunk)] = (
+                        sentences,
+                        np.asarray([vectors_by_sentence[sentence] for sentence in sentences]),
+                    )
+        for chunk in chunks:
+            self._sentence_cache.setdefault(id(chunk), (self._split(chunk), None))
+        return len(pending), api_batches
+
+    def prefetch_sentences(self, pairs):
+        started = time.perf_counter()
+        chunks = []
+        seen = set()
+        for a_sources, b_sources, a, b in pairs:
+            a_vec, b_vec = self._name_vecs.get(a), self._name_vecs.get(b)
+            if a_vec is None or b_vec is None:
+                continue
+            pair_vec = (np.asarray(a_vec) + np.asarray(b_vec)) / 2
+            for sources in (a_sources, b_sources):
+                for chunk in self._nearest_chunks(sources, pair_vec, _EVIDENCE_CHUNKS_PER_SIDE):
+                    if id(chunk) not in seen:
+                        seen.add(id(chunk))
+                        chunks.append(chunk)
+        unique_sentences, api_batches = self._embed_sentences(chunks)
+        logger.info(
+            "fusion_sentence_prefetch chunks=%d unique_sentences=%d api_batches=%d elapsed_ms=%.0f",
+            len(chunks), unique_sentences, api_batches,
+            (time.perf_counter() - started) * 1000,
+        )
+
     def snippets(self, sources, query_name):
         query_vec = self._name_vecs.get(query_name)
         if query_vec is None:
@@ -842,18 +945,9 @@ class _EvidencePool:
         return [chunks[i] for i in order[:k]]
 
     def _sentences(self, chunk):
-        cached = self._sentence_cache.get(id(chunk))
-        if cached is None:
-            sentences = []
-            for part in _SENTENCE_SPLIT.split(chunk["text"]):
-                part = _WS.sub(" ", part).strip()[:_EVIDENCE_SENTENCE_CHARS]
-                if len(part.split()) >= 3 and part not in sentences:
-                    sentences.append(part)
-            vectors = (np.asarray(encode_texts(sentences))
-                       if sentences else None)
-            cached = (sentences, vectors)
-            self._sentence_cache[id(chunk)] = cached
-        return cached
+        if id(chunk) not in self._sentence_cache:
+            self._embed_sentences([chunk])
+        return self._sentence_cache[id(chunk)]
 
     def pair_sentences(self, a_sources, b_sources, a, b, k=_EVIDENCE_SENTENCES_PER_PAIR):
         """The k sentences closest to both names from the chunks nearest the pair; a sentence
@@ -917,13 +1011,18 @@ def _collect_nodes(engine):
 
 
 def merge_graph(engine, client, log=print):
+    workers = fusion_workers()
+    logger.info(
+        "fusion_concurrency workers=%d global_slots=%d input_tpm=%d output_tpm=%d",
+        workers, _FUSION_GLOBAL_SLOTS, graph_limiter.input_limit, graph_limiter.output_limit,
+    )
     run = FusionLog(
         model=_MODEL,
         prompt_versions={"step3": _STEP3_PROMPT_VERSION, "step5": _STEP5_PROMPT_VERSION,
                          "cluster": _CLUSTER_PROMPT_VERSION},
         settings={"auto_merge": AUTO_MERGE_SIM, "llm_low": LLM_LOW_SIM,
                   "batch": _VERDICT_PAIR_BATCH, "neighbours": _NEIGHBOURS_PER_NODE,
-                  "workers": fusion_workers()},
+                  "workers": workers, "global_slots": _FUSION_GLOBAL_SLOTS},
         documents=sorted(getattr(engine, "uploads_by_week", {}).items()),
     )
 
@@ -1127,6 +1226,20 @@ def merge_graph(engine, client, log=print):
         edge_groups[key] = rec
         edge_list.append(rec)
     mark("5")
+    logger.info("fusion_step_times %s", step_times)
+    failure_totals = {
+        key: sum(counts.get(key, 0) for counts in run.call_failures.values())
+        for key in ("defaults_to_unrelated", "json_validate_failed", "rate_limited")
+    }
+    limiter_wait_seconds = sum(
+        counts.get("limiter_wait_seconds", 0.0) for counts in run.call_failures.values()
+    )
+    logger.info(
+        "fusion_failures defaults_to_unrelated=%d json_validate_failed=%d "
+        "rate_limited=%d limiter_wait_seconds=%.3f",
+        failure_totals["defaults_to_unrelated"], failure_totals["json_validate_failed"],
+        failure_totals["rate_limited"], limiter_wait_seconds,
+    )
 
     canonical_nodes = {}
     for norm, rec in nodes.items():
@@ -1353,6 +1466,10 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
     # Built once: it stacks every document's chunk-embedding matrix, and that
     # does not change between batches.
     evidence = _EvidencePool(engine, log, name_vecs)
+    evidence.prefetch_sentences([
+        (nodes[a]["sources"], nodes[b]["sources"], a, b)
+        for a, b, _sim in to_ask
+    ])
 
     batches = [to_ask[i:i + _VERDICT_PAIR_BATCH] for i in range(0, len(to_ask), _VERDICT_PAIR_BATCH)]
     jobs = []
@@ -1622,6 +1739,10 @@ def _bridge_fusion(final_nodes, edge_list, engine, client, log, run):
     ask_names = sorted({n for (a, b, _c) in to_ask for n in (a, b)})
     name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, encode_texts(ask_names))} if ask_names else {}
     evidence = _EvidencePool(engine, log, name_vecs)
+    evidence.prefetch_sentences([
+        (final_nodes[a]["sources"], final_nodes[b]["sources"], a, b)
+        for a, b, _common in to_ask
+    ])
 
     batches = [to_ask[i:i + _VERDICT_PAIR_BATCH] for i in range(0, len(to_ask), _VERDICT_PAIR_BATCH)]
     jobs = []

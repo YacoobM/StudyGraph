@@ -1,6 +1,7 @@
 ﻿import asyncio
 import hashlib
 import json
+import time
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -27,7 +28,7 @@ from services import graph_fusion
 from services.llm_provider import API_STATUS_ERRORS, RATE_LIMIT_ERRORS
 from services.graph_runtime import call_llm
 
-ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(2)
+ENGINE_EXTRACTION_SEMAPHORE = asyncio.Semaphore(10)
 CROSS_WEEK_CONCEPT_COUNT = 10
 DEFAULT_CHUNK_SIZE = 1024
 DEFAULT_CHUNK_OVERLAP = 150
@@ -265,13 +266,26 @@ Respond with ONLY this exact JSON structure:
         )
 
         try:
+            semaphore_started = time.perf_counter()
+            logger.info(
+                "concurrency_trace stage=extraction_wait graph_id=%s chunks=%d semaphore_locked=%s limit=10",
+                self.graph_id, len(chunks), ENGINE_EXTRACTION_SEMAPHORE.locked(),
+            )
             async with ENGINE_EXTRACTION_SEMAPHORE:
+                logger.info(
+                    "concurrency_trace stage=extraction_acquired graph_id=%s wait_ms=%.1f",
+                    self.graph_id, (time.perf_counter() - semaphore_started) * 1000,
+                )
                 response = await call_llm(
                     self.client,
                     self.llm_model,
                     prompt,
                     user_text,
                     EXTRACTION_MAX_COMPLETION_TOKENS,
+                )
+                logger.info(
+                    "concurrency_trace stage=extraction_finished graph_id=%s held_ms=%.1f",
+                    self.graph_id, (time.perf_counter() - semaphore_started) * 1000,
                 )
             content = response.choices[0].message.content
 
