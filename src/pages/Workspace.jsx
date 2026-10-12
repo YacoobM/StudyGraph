@@ -64,45 +64,79 @@ function weekNumber(value) {
 /* ---------- persisted snapshot -> what ConceptGraph draws ---------- */
 
 /**
- * Turns a Supabase graph-version snapshot into nodes/edges.
- * Each node.sources entry is { name, week, weekLabel, documentId, chunkId?, deleted? }
- * so topic filtering can match on documentId rather than filename.
+ * Groups a concept's provenance rows into one source per document, keeping
+ * the pages and excerpts so the inspector can show real evidence.
  */
+function sourcesFor(rows, documentsById) {
+  const bySource = new Map()
+  rows.forEach((row) => {
+    const documentId = row.document_id ? String(row.document_id) : null
+    const document = documentId ? documentsById.get(documentId) : null
+    const name = (document?.filename || row.document_filename || '').trim()
+    const key = documentId || `name:${name || 'unknown'}`
+    const week = Number(row.source_week) || weekNumber(document?.week)
+    let source = bySource.get(key)
+    if (!source) {
+      source = {
+        key,
+        name: name || 'Unnamed document',
+        documentId,
+        week,
+        weekLabel: `Week ${week}`,
+        pages: new Set(),
+        excerpts: [],
+        // A row without a document id was never linked, which is not the same as deleted.
+        deleted: Boolean(documentId && !document),
+        unlinked: !documentId,
+      }
+      bySource.set(key, source)
+    }
+    source.week = Math.min(source.week, week)
+    source.weekLabel = `Week ${source.week}`
+    const start = Number(row.page_start)
+    const end = Number(row.page_end) || start
+    if (Number.isFinite(start) && start > 0) {
+      for (let page = start; page <= Math.min(end, start + 20); page += 1) source.pages.add(page)
+    }
+    const excerpt = String(row.source_excerpt || '').trim()
+    if (excerpt && !source.excerpts.includes(excerpt)) source.excerpts.push(excerpt)
+  })
+  return [...bySource.values()]
+    .map((source) => ({ ...source, pages: [...source.pages].sort((a, b) => a - b) }))
+    .sort((a, b) => a.week - b.week || a.name.localeCompare(b.name))
+}
+
+/** Turns a Supabase graph-version snapshot into the nodes and edges ConceptGraph draws. */
 function graphViewFromSnapshot(snapshot, activeSupport = null, documents = []) {
   const concepts = snapshot?.concepts || []
   const relationships = snapshot?.relationships || []
-  const conceptProvenance = snapshot?.concept_provenance || []
   const documentsById = new Map(documents.map((d) => [String(d.id), d]))
+  const rowsByConcept = new Map()
+  ;(snapshot?.concept_provenance || []).forEach((row) => {
+    const id = String(row.concept_id)
+    if (!rowsByConcept.has(id)) rowsByConcept.set(id, [])
+    rowsByConcept.get(id).push(row)
+  })
 
   const nodes = concepts.map((concept) => {
-    const provenanceSources = conceptProvenance
-      .filter((row) => String(row.concept_id) === String(concept.id))
-      .map((row) => {
-        const week =
-          Number(row.source_week) || weekNumber(documentsById.get(String(row.document_id))?.week)
-        return {
-          name: row.document_filename,
-          week,
-          weekLabel: `Week ${week}`,
-          documentId: row.document_id,
-          chunkId: row.chunk_id,
-          deleted: !documentsById.has(String(row.document_id)),
-        }
-      })
-    const fallbackSources = (activeSupport?.concepts?.[concept.normalized_name] || [])
-      .map((documentId) => documentsById.get(String(documentId)))
-      .filter(Boolean)
-      .map((document) => ({
-        name: document.filename,
-        week: weekNumber(document.week),
-        weekLabel: document.week || `Week ${weekNumber(document.week)}`,
-        documentId: document.id,
-      }))
-    const sources = [
-      ...new Map(
-        [...provenanceSources, ...fallbackSources].map((s) => [String(s.documentId), s]),
-      ).values(),
-    ]
+    let sources = sourcesFor(rowsByConcept.get(String(concept.id)) || [], documentsById)
+    if (!sources.length) {
+      // Older versions have no provenance rows; fall back to the documents that support the concept.
+      sources = (activeSupport?.concepts?.[concept.normalized_name] || [])
+        .map((documentId) => documentsById.get(String(documentId)))
+        .filter(Boolean)
+        .map((document) => ({
+          key: String(document.id),
+          name: document.filename,
+          documentId: String(document.id),
+          week: weekNumber(document.week),
+          weekLabel: `Week ${weekNumber(document.week)}`,
+          pages: [],
+          excerpts: [],
+          deleted: false,
+          unlinked: false,
+        }))
+    }
     const weeks = [...new Set(sources.map((s) => s.week))].sort((a, b) => a - b)
 
     return {
@@ -119,7 +153,7 @@ function graphViewFromSnapshot(snapshot, activeSupport = null, documents = []) {
   const edges = relationships.map((r) => ({
     source: String(r.source_concept_id),
     target: String(r.target_concept_id),
-    label: r.relationship_type || 'relates to',
+    label: String(r.relationship_type || 'relates to').replace(/_/g, ' '),
     strength: 'medium',
   }))
   return { nodes, edges }
@@ -182,7 +216,14 @@ export default function Workspace() {
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
   const [refreshingDegraded, setRefreshingDegraded] = useState(false)
-  const setBusyToast = (msg) => { setBusy(msg); setTimeout(() => setBusy(''), 1800) }
+  // One place for short confirmations; errors stay in the banner until dismissed.
+  const toastTimer = useRef(null)
+  const notify = useCallback((message, kind = 'success', ms = 3200) => {
+    window.clearTimeout(toastTimer.current)
+    setToast({ message, kind })
+    if (ms) toastTimer.current = window.setTimeout(() => setToast(null), ms)
+  }, [])
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
   // --- Supabase state (loaded on demand per graph) ---
   const [versions, setVersions] = useState([])
@@ -192,6 +233,9 @@ export default function Workspace() {
 
   const activeGraphRef = useRef('')
   const loadRequestRef = useRef(0)
+  // Keeps the sidebar's document counts in step with what the backend returned.
+  const syncDocsRef = useRef(null)
+  syncDocsRef.current = library.setGraphDocs
   const graphMetadataRef = useRef(new Map())
   const graphSnapshotsRef = useRef(new Map())
   useEffect(() => { activeGraphRef.current = library.activeGraphId }, [library.activeGraphId])
@@ -248,6 +292,7 @@ export default function Workspace() {
         ])
         metadata = { documents, versions: graphVersions }
         graphMetadataRef.current.set(supabaseGraphId, metadata)
+        syncDocsRef.current?.(supabaseGraphId, documents.map((d) => String(d.id)))
         graphSnapshotsRef.current.delete(`${supabaseGraphId}:${graphVersions[0]?.id}`)
         if (graphVersions[0]) graphSnapshotsRef.current.delete(`${supabaseGraphId}:${graphVersions[0].id}:support`)
         setDocs(documents.map(graphDocumentRow))
@@ -283,27 +328,32 @@ export default function Workspace() {
       setSelected(null)
     } catch (e) {
       setError(e.message)
+      throw e
     }
   }, [])
 
-  // When the library's active graph changes, load its Supabase data.
+  // Load the active graph. Depends on the backend id too: after a refresh the
+  // library can resolve the id after the selection is restored.
+  const activeSupabaseId = found?.graph?.supabaseId || null
+  const [graphStatus, setGraphStatus] = useState('idle')
   useEffect(() => {
-  const g = library.findGraph(library.activeGraphId)
-  const supabaseId = g?.graph?.supabaseId
-  // Do not leave the previous graph's documents visible while the new graph
-  // is loading. The request guard above also prevents late responses from
-  // putting the old graph's data back into this state.
-  loadRequestRef.current += 1
-  setDocs([])
-  setVersions([])
-  setGraph({ nodes: [], edges: [] })
-  setSelected(null)
-  if (supabaseId) {
-    setBusy('Loading graph…')
-    loadGraphWorkspace(supabaseId).catch(() => {}).finally(() => setBusy(''))
-  } else {
-  }
-}, [library.activeGraphId])
+    // Clear the previous graph first; the request guard drops late responses.
+    loadRequestRef.current += 1
+    setDocs([])
+    setVersions([])
+    setGraph({ nodes: [], edges: [] })
+    setSelected(null)
+    if (!activeSupabaseId) {
+      setGraphStatus('idle')
+      return
+    }
+    let live = true
+    setGraphStatus('loading')
+    loadGraphWorkspace(activeSupabaseId)
+      .then(() => live && setGraphStatus('ready'))
+      .catch(() => live && setGraphStatus('error'))
+    return () => { live = false }
+  }, [library.activeGraphId, activeSupabaseId, loadGraphWorkspace])
 
   async function selectVersion(versionId) {
     setSelectedVersionId(versionId)
@@ -329,21 +379,17 @@ export default function Workspace() {
       + 'Only affected definitions will be updated. The graph structure will not be rebuilt.',
     )) return
     setRefreshingDegraded(true)
-    setToast({ message: 'Refreshing affected concept definitions…', kind: 'info' })
+    notify('Refreshing affected concept definitions…', 'info', 0)
     try {
       const result = await refreshDegradedConcepts(supabaseId)
       await loadGraphWorkspace(supabaseId)
-      setToast({
-        message: result.updated
-          ? `Updated ${result.updated} concept definition${result.updated === 1 ? '' : 's'}.`
-          : 'No degraded definitions needed updating.',
-        kind: 'success',
-      })
+      notify(result.updated
+        ? `Updated ${result.updated} concept definition${result.updated === 1 ? '' : 's'}.`
+        : 'No degraded definitions needed updating.')
     } catch (e) {
-      setToast({ message: `Could not refresh definitions: ${e.message}`, kind: 'error' })
+      notify(`Could not refresh definitions: ${e.message}`, 'error', 6000)
     } finally {
       setRefreshingDegraded(false)
-      window.setTimeout(() => setToast(null), 4500)
     }
   }
 
@@ -417,17 +463,28 @@ export default function Workspace() {
     }
 
     const stamp = Date.now()
+    // Same name as a document already in the open graph: skip it rather than duplicate its concepts.
+    const existing = localGraphId === library.activeGraphId
+      ? new Set(docs.map((d) => String(d.name || d.filename).toLowerCase()))
+      : new Set()
     const items = files.map((file, i) => {
       const ext = extOf(file.name)
-      const ok = ALLOWED.includes(ext)
+      let message = ''
+      if (ext === 'json') {
+        message = 'JSON files are not learning material. Ground-truth concept files go to the evaluation tool in backend/eval.'
+      } else if (!ALLOWED.includes(ext)) {
+        message = `.${ext} files aren't supported. Use PDF, DOCX, PPTX, TXT or MD.`
+      } else if (existing.has(file.name.toLowerCase())) {
+        message = 'Already in this graph. Remove the old copy first to replace it.'
+      }
       return {
         key: `${stamp}-${i}-${file.name}`,
         file,
         name: file.name,
         localGraphId,
         topicId: library.findGraph(localGraphId)?.topic?.id || null,
-        status: ok ? 'queued' : 'failed',
-        message: ok ? '' : `.${ext} files aren't supported — use PDF, DOCX, PPTX, TXT or MD.`,
+        status: message ? 'failed' : 'queued',
+        message,
       }
     })
     setError('')
@@ -452,12 +509,14 @@ export default function Workspace() {
     const g = library.findGraph(library.activeGraphId)
     const supabaseId = g?.graph?.supabaseId
     if (!supabaseId || !viewingLatestVersion) return
+    const name = doc.name || doc.filename
+    if (!window.confirm(`Remove "${name}" from this graph?\n\nIts concepts leave the graph in a new version. Older versions keep them.`)) return
     try {
       await deleteGraphDocument(supabaseId, doc.id)
       library.assignDocs([doc.id], null)
       await loadGraphWorkspace(supabaseId)
     } catch (e) {
-      setError(`Could not remove ${doc.name || doc.filename}: ${e.message}`)
+      setError(`Could not remove ${name}: ${e.message}`)
     }
   }
 
@@ -473,13 +532,12 @@ export default function Workspace() {
 
   const fileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
   const canUpload = Boolean(library.activeGraphId) && viewingLatestVersion
-  const graphLoading = busy === 'Loading graph…'
+  const graphLoading = graphStatus === 'loading'
 
   return (
     <div className={`ws${sidebarCollapsed ? ' sidebar-collapsed' : ''}${sideOpen ? ' sidebar-drawer-open' : ''}`}>
       <SubjectSidebar
         library={library}
-        docs={docs}
         open={sideOpen}
         onClose={() => setSideOpen(false)}
         onHome={() => navigate('/')}
@@ -520,7 +578,12 @@ export default function Workspace() {
                 </div>
               )}
               <div className="ws-title" title={title}>{title}</div>
-              {library.activeGraphId && view.nodes.length ? (
+              {graphLoading ? (
+                <div className="ws-sub ws-sub-loading" role="status">
+                  <span className="ws-skel" aria-hidden="true" />
+                  Loading graph…
+                </div>
+              ) : library.activeGraphId && view.nodes.length ? (
                 <div className="ws-facts">
                   <span><b>{docs.length}</b> document{docs.length === 1 ? '' : 's'}</span>
                   <span><b>{view.nodes.length}</b> concepts</span>
@@ -557,6 +620,7 @@ export default function Workspace() {
               {TABS.map((x) => (
                 <button
                   key={x}
+                  aria-current={tab === x ? 'page' : undefined}
                   className={`ws-tab${tab === x ? ' on' : ''}`}
                   onClick={() => setTab(x)}
                   disabled={
@@ -570,6 +634,7 @@ export default function Workspace() {
               <button
                 type="button"
                 className={`ws-tab${chatOpen ? ' on' : ''}`}
+                aria-expanded={chatOpen}
                 disabled={!library.activeGraphId || !viewingLatestVersion}
                 onClick={() => setChatOpen((open) => !open)}
               >
@@ -583,8 +648,9 @@ export default function Workspace() {
           <div className="ws-banner">{busy}</div>
         )}
         {error && (
-          <div className="ws-banner err">
+          <div className="ws-banner err" role="alert">
             <span>{error}</span>
+            <button type="button" className="ws-banner-x" onClick={() => setError('')} aria-label="Dismiss">×</button>
           </div>
         )}
 
@@ -621,16 +687,22 @@ export default function Workspace() {
               ) : view.nodes.length === 0 ? (
                 <div className="empty-state">
                   {!library.activeGraphId ? (
-                    <>
-                      <h3>Choose a graph</h3>
-                      <p>Select or create a graph in the sidebar to view its documents and knowledge graph.</p>
-                    </>
+                    <GettingStarted hasSubjects={library.subjects.length > 0} />
                   ) : (
                     <>
-                      {docs.length ? (
+                      {docs.some((d) => ['working', 'queued'].includes(statusClass(d.status))) ? (
                         <>
                           <h3>Still reading your documents</h3>
                           <p>Concepts appear here as soon as each file has been read.</p>
+                        </>
+                      ) : docs.length ? (
+                        <>
+                          <h3>No concepts found yet</h3>
+                          <p>
+                            {docs.some((d) => statusClass(d.status) === 'failed')
+                              ? 'Some documents could not be read. The Documents tab shows which ones.'
+                              : 'StudyGraph read these documents but found no concepts. Scanned or image-only pages can come back empty. Try another file.'}
+                          </p>
                         </>
                       ) : (
                         <>
@@ -682,13 +754,14 @@ export default function Workspace() {
               edges={view.edges}
               maxWeek={evolutionMaxWeek}
               onClose={() => setSelected(null)}
+              onSelectConcept={(id) => setSelected(view.nodes.find((n) => n.id === id) || null)}
             />
           )}
 
           {tab === 'documents' && (
             <DocumentsTab
-              docs={docs} totals={t} topic={found?.topic || null}
-              library={library} queue={queue}
+              docs={docs} totals={t}
+              queue={queue}
               onFiles={(files) => enqueue(files, library.activeGraphId)}
               onRemove={remove}
               readOnly={!viewingLatestVersion}
@@ -696,7 +769,7 @@ export default function Workspace() {
           )}
 
           {tab === 'notes' && <NotesPane graphId={found?.graph?.supabaseId} readyDocs={readyDocs} />}
-          {tab === 'quiz' && <QuizPane graphId={found?.graph?.supabaseId} onToast={setBusyToast} />}
+          {tab === 'quiz' && <QuizPane graphId={found?.graph?.supabaseId} onToast={notify} />}
         </section>
       </main>
 
@@ -727,7 +800,7 @@ export default function Workspace() {
       )}
 
       {toast && (
-        <div className={`ws-toast ${toast.kind}`} role="status">
+        <div className={`ws-toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
           {toast.message}
         </div>
       )}
@@ -746,22 +819,61 @@ export default function Workspace() {
   )
 }
 
+/* ====================== first visit ====================== */
+
+const INTRO_KEY = 'studygraph.intro.dismissed'
+const readFlag = (key) => { try { return window.localStorage.getItem(key) === '1' } catch { return false } }
+
+/** A short, dismissible guide shown until the reader closes it. */
+function GettingStarted({ hasSubjects }) {
+  const [hidden, setHidden] = useState(() => readFlag(INTRO_KEY))
+  const dismiss = () => {
+    setHidden(true)
+    try { window.localStorage.setItem(INTRO_KEY, '1') } catch { /* private mode */ }
+  }
+  if (hidden) {
+    return (
+      <>
+        <h3>Choose a graph</h3>
+        <p>Select or create a graph in the sidebar to view its documents and knowledge graph.</p>
+      </>
+    )
+  }
+  const steps = [
+    ['Organise', hasSubjects ? 'Pick a graph in the sidebar, or add a new one under a topic.' : 'Create a subject, a topic and a graph in the sidebar.'],
+    ['Upload', 'Add lecture slides or notes: PDF, DOCX, PPTX, TXT or MD.'],
+    ['Explore', 'Click a concept to see its connections, sources and how it evolved.'],
+    ['Revise', 'Turn the graph into revision notes and quizzes from the tabs above.'],
+  ]
+  return (
+    <div className="intro" role="region" aria-label="Getting started">
+      <h3>Welcome to StudyGraph</h3>
+      <p>Four steps from your lecture material to a study plan.</p>
+      <ol className="intro-steps">
+        {steps.map(([title, text], i) => (
+          <li key={title}><span className="intro-n">{i + 1}</span><b>{title}</b><span>{text}</span></li>
+        ))}
+      </ol>
+      <button type="button" className="intro-dismiss" onClick={dismiss}>Got it</button>
+    </div>
+  )
+}
+
 /* ====================== documents ====================== */
 
-function DocumentsTab({ docs, totals, topic, library, queue, onFiles, onRemove, readOnly }) {
+function DocumentsTab({ docs, totals, queue, onFiles, onRemove, readOnly }) {
   return (
     <div className="pane pane-scroll">
       <div className="pane-head">
         <div>
-          <h2>{topic ? `Documents in ${topic.name}` : 'All documents'}</h2>
-          <p>{topic
-            ? 'The sources this topic’s graph is built from. Use the Topic column to move a document somewhere else.'
-            : 'Everything this graph was built from. Removing a source takes its concepts out of the graph.'}</p>
+          <h2>Documents</h2>
+          <p>The sources this graph is built from. Removing one takes its concepts out of the next graph version.</p>
         </div>
+        {/* Graph-wide totals: per-document counts overlap, so they are not summed. */}
         <div className="stat-row">
-          <div className="stat"><div className="n mono">{topic ? docs.length : totals.count}</div><div className="l">Documents</div></div>
-          <div className="stat"><div className="n mono">{topic ? docs.reduce((a, d) => a + (d.nodes ?? d.concepts ?? 0), 0) : totals.concepts}</div><div className="l">Concepts</div></div>
-          <div className="stat"><div className="n mono">{topic ? docs.reduce((a, d) => a + (d.relationships ?? 0), 0) : totals.relationships}</div><div className="l">Links</div></div>
+          <div className="stat"><div className="n mono">{totals.count}</div><div className="l">Documents</div></div>
+          <div className="stat"><div className="n mono">{totals.concepts}</div><div className="l">Concepts</div></div>
+          <div className="stat"><div className="n mono">{totals.relationships}</div><div className="l">Links</div></div>
         </div>
       </div>
 
@@ -769,7 +881,7 @@ function DocumentsTab({ docs, totals, topic, library, queue, onFiles, onRemove, 
         <div className="empty">You're viewing an older version of this graph. Switch to the latest version to add or remove documents.</div>
       ) : (
         <UploadDrop
-          title={topic ? `Add documents to ${topic.name}` : 'Add documents'}
+          title="Add documents to this graph"
           onFiles={onFiles}
         />
       )}

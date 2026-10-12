@@ -12,6 +12,7 @@ from services.notes_service import request_titles
 from services.notes_service import write_body
 from repositories.supabase_search import search_graph_chunks
 from services.supabase_note_quiz import latest_note_quiz_progress
+from services.note_days import assign_days, repair_note_days, split_sections_for_days
 
 logger = logging.getLogger(__name__)
 
@@ -23,37 +24,37 @@ def _fallback_section_title(filename: str) -> str:
     return " ".join(stem.replace("_", " ").replace("-", " ").split()) or "Mixed sources"
 
 
-async def _plan_supabase_sections(concepts: list[dict], edges: list[dict], cache_key: str) -> list[dict]:
-    """Build Supabase note sections from graph provenance.
+async def _plan_supabase_sections(concepts: list[dict], cache_key: str, days: int | None = None) -> list[dict]:
+    """Build note sections from graph provenance: one per source document, in page order.
 
-    The current notes service plans SQLite notes from document text internally;
-    it no longer exposes the old ``plan_sections`` graph-only helper. Supabase
-    already has the graph snapshot and provenance, so group concepts by their
-    source document here and reuse the current service's title call.
+    For a day plan, large sections are split so each requested day can get one.
     """
-    by_document: dict[str, list[str]] = {}
+    by_document: dict[str, list[dict]] = {}
     for concept in concepts:
-        filename = concept.get("source") or "Mixed sources"
-        by_document.setdefault(filename, []).append(concept["name"])
+        by_document.setdefault(concept.get("source") or "Mixed sources", []).append(concept)
 
-    sections = [
-        {
-            "title": "",
-            "concepts": sorted(set(names)),
-            "document": filename,
-            "range": (0, 1),
-        }
-        for filename, names in by_document.items()
-    ]
+    sections = []
+    for filename, rows in by_document.items():
+        # First page a concept appears on, then first mention, keeps reading order.
+        rows = sorted(enumerate(rows), key=lambda item: (item[1].get("page") or 10**6, item[0]))
+        names = list(dict.fromkeys(row["name"] for _, row in rows))
+        sections.append({"title": "", "concepts": names, "document": filename, "range": (0, 1)})
+    sections = split_sections_for_days(sections, days)
     if not sections:
         return []
 
     titles = await request_titles(sections, cache_key)
+    parts: dict[str, int] = {}
+    per_document = {s["document"]: sum(1 for x in sections if x["document"] == s["document"]) for s in sections}
     for index, section in enumerate(sections):
+        parts[section["document"]] = parts.get(section["document"], 0) + 1
+        fallback = _fallback_section_title(section["document"])
+        if per_document[section["document"]] > 1:
+            fallback = f"{fallback} (part {parts[section['document']]})"
         section["title"] = (
             titles[index].strip()
             if titles and index < len(titles) and titles[index].strip()
-            else _fallback_section_title(section["document"])
+            else fallback
         )
     return sections
 
@@ -73,6 +74,7 @@ def _with_sections(identity: SupabaseIdentity, rows: list[dict]) -> list[dict]:
         for section in row["sections"]:
             section["quiz_progress"] = latest_note_quiz_progress(identity, str(section["id"]))
         row["total"] = len(row["sections"])
+        repair_note_days(row)
     return rows
 
 
@@ -179,7 +181,12 @@ async def plan_graph_note(identity: SupabaseIdentity, graph_id: str, document_id
         key = (name, str(row.get("document_id")))
         if name and key not in seen:
             seen.add(key)
-            concepts.append({"name": name, "source": documents[str(row["document_id"])] ["filename"], "week": f"Week {row.get('source_week') or 1}"})
+            concepts.append({
+                "name": name,
+                "source": documents[str(row["document_id"])]["filename"],
+                "week": f"Week {row.get('source_week') or 1}",
+                "page": row.get("page_start"),
+            })
     names = {row["name"] for row in concepts}
     edges = []
     for edge in loaded["relationships"]:
@@ -189,15 +196,39 @@ async def plan_graph_note(identity: SupabaseIdentity, graph_id: str, document_id
             edges.append({"from": source, "to": target, "relation": edge.get("relationship_type", "related_to"), "summary": edge.get("summary", "")})
     if not concepts:
         raise ValueError("No extracted concepts found for those documents.")
+    days = int(days) if days else None
     sections = await _plan_supabase_sections(
         concepts,
-        edges,
-        f"supabase-notes:{version['id']}:{','.join(sorted(selected))}",
+        f"supabase-notes:{version['id']}:{','.join(sorted(selected))}:days={days or 0}",
+        days,
     )
     if not sections:
         raise ValueError("The AI Service returned an unusable plan.")
-    note_sections = [{"day": section.get("day"), "title": section["title"], "concepts": section.get("concepts", []), "relations": [edge for edge in edges if edge.get("from") in section.get("concepts", []) and edge.get("to") in section.get("concepts", [])], "sources": sorted({row["source"] for row in concepts if row["name"] in section.get("concepts", [])}), "must_cover": section.get("must_cover", []), "body": None, "done": False} for section in sections]
-    note = {"title": "Revision notes" if len(selected) > 1 else next(iter(documents.values()))["filename"], "kind": "plan" if days else "full", "days": days, "document_ids": sorted(selected), "documents": sorted(documents[value]["filename"] for value in selected)}
+    sections, used_days = assign_days(sections, days)
+    note_sections = [
+        {
+            "day": section["day"],
+            "title": section["title"],
+            "concepts": section.get("concepts", []),
+            "relations": [
+                edge for edge in edges
+                if edge.get("from") in section.get("concepts", []) and edge.get("to") in section.get("concepts", [])
+            ],
+            "sources": sorted({row["source"] for row in concepts if row["name"] in section.get("concepts", [])}),
+            "must_cover": section.get("must_cover", []),
+            "body": None,
+            "done": False,
+        }
+        for section in sections
+    ]
+    note = {
+        "title": "Revision notes" if len(selected) > 1 else documents[next(iter(selected))]["filename"],
+        # Fewer sections than days shortens the plan instead of leaving empty days.
+        "kind": "plan" if used_days else "full",
+        "days": used_days,
+        "document_ids": sorted(selected),
+        "documents": sorted(documents[value]["filename"] for value in selected),
+    }
     return replace_graph_note(identity, graph_id, str(version["id"]), note, note_sections)
 
 

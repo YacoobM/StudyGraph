@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchQuiz, fetchNotes, regenerateGraphQuiz, saveQuizProgress, saveNoteQuizProgress,
 } from "../services/api.js";
@@ -9,6 +9,23 @@ import landingArt from "../assets/quiz-landing.svg";
 
 // Pass marks come from the server (quiz_service.pass_mark), never computed here.
 const RING_RADIUS = 28;
+// The server gives no progress for generation, so the page only waits this long.
+const QUIZ_TIMEOUT_MS = 120000;
+// One generation per graph, shared across remounts so leaving the tab cannot start a second one.
+const pendingQuiz = new Map();
+
+function startQuizGeneration(graphId) {
+  if (pendingQuiz.has(graphId)) return pendingQuiz.get(graphId);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), QUIZ_TIMEOUT_MS);
+  const job = regenerateGraphQuiz(graphId, { signal: controller.signal })
+    .finally(() => {
+      clearTimeout(timer);
+      pendingQuiz.delete(graphId);
+    });
+  pendingQuiz.set(graphId, job);
+  return job;
+}
 const RING_VIEWBOX = 66;
 const DIFFICULTIES = ["all", "easy", "medium", "hard"];
 
@@ -96,6 +113,8 @@ export default function QuizPane({ onToast, graphId }) {
   const [run, setRun] = useState(null);
   const [review, setReview] = useState(null);
   const [drafts, setDrafts] = useState({});
+  // idle | generating | loading | error | timeout
+  const [generation, setGeneration] = useState({ phase: "idle" });
   const alive = useRef(true);
 
   const refreshDocs = useCallback(async () => {
@@ -219,7 +238,7 @@ export default function QuizPane({ onToast, graphId }) {
     } catch (e) {
       // Shown, not swallowed: a lost score is something the reader should know.
       if (alive.current) setError(`Your score was not saved: ${e.message}`);
-      onToast?.("Score not saved");
+      onToast?.("Your score was not saved", "error");
     }
   }
 
@@ -252,13 +271,44 @@ export default function QuizPane({ onToast, graphId }) {
     }
   }
 
-  async function regenerateGraph() {
+  const waitForQuiz = useCallback(async (job) => {
     setError("");
+    setGeneration({ phase: "generating" });
     try {
-      await regenerateGraphQuiz(graphId);
+      const result = await job;
+      if (!alive.current) return;
+      if (result && result.generated === false) {
+        setGeneration({ phase: "error", message: result.reason || "No quiz could be made from this graph yet." });
+        return;
+      }
+      setGeneration({ phase: "loading" });
       await refreshDocs();
+      if (alive.current) setGeneration({ phase: "idle", fresh: true });
     } catch (e) {
-      setError(e.message || "Could not regenerate this quiz.");
+      if (!alive.current) return;
+      setGeneration(e?.name === "AbortError"
+        ? { phase: "timeout" }
+        : { phase: "error", message: e?.message || "Could not generate this quiz." });
+    }
+  }, [refreshDocs]);
+
+  function regenerateGraph() {
+    if (pendingQuiz.has(graphId)) return;
+    waitForQuiz(startQuizGeneration(graphId));
+  }
+
+  // A generation started before the tab was left is still running: show it.
+  useEffect(() => {
+    if (pendingQuiz.has(graphId)) waitForQuiz(pendingQuiz.get(graphId));
+  }, [graphId, waitForQuiz]);
+
+  async function checkAgain() {
+    setGeneration({ phase: "loading" });
+    try {
+      await refreshDocs();
+      if (alive.current) setGeneration({ phase: "idle", fresh: true });
+    } catch (e) {
+      if (alive.current) setGeneration({ phase: "error", message: e.message });
     }
   }
 
@@ -319,8 +369,9 @@ export default function QuizPane({ onToast, graphId }) {
 
   if (loading) {
     return (
-      <div className="study-wrap"><div className="study-col">
-        <div className="qz-empty">Loading your quizzes…</div>
+      <div className="study-wrap"><div className="study-col" role="status" aria-label="Loading your quizzes">
+        <div className="skel-card"><span className="skel w40" /><span className="skel w70" /><span className="skel w55" /></div>
+        <div className="skel-card"><span className="skel w40" /><span className="skel w70" /></div>
       </div></div>
     );
   }
@@ -328,7 +379,7 @@ export default function QuizPane({ onToast, graphId }) {
   if (view === "home") {
     return (
       <div className="study-wrap"><div className="study-col">
-        {error && <div className="nt-error">{error}</div>}
+        {error && <div className="notice-error" role="alert">{error}</div>}
         <div className="qz-land">
           <div className="qz-land-banner">
             <div className="qz-land-copy">
@@ -361,7 +412,7 @@ export default function QuizPane({ onToast, graphId }) {
     return (
       <div className="study-wrap"><div className="study-col">
         {back}
-        {error && <div className="nt-error">{error}</div>}
+        {error && <div className="notice-error" role="alert">{error}</div>}
         <div className="qz-section-title">From notes</div>
         {noteQuizzes.length === 0 ? (
           <div className="qz-empty">
@@ -408,7 +459,7 @@ export default function QuizPane({ onToast, graphId }) {
   return (
     <div className="study-wrap"><div className="study-col">
       {back}
-      {error && <div className="nt-error">{error}</div>}
+      {error && <div className="notice-error" role="alert">{error}</div>}
       <div className="qz-section-title">By graph version</div>
 
       {topics.length > 0 && (
@@ -484,7 +535,9 @@ export default function QuizPane({ onToast, graphId }) {
           stats={topicStats(d.quiz_id)}
           questions={d.topic ? questionsFor(d.topic) : []}
           filter={filter}
+          generation={generation}
           onGenerate={regenerateGraph}
+          onCheckAgain={checkAgain}
           onStart={() => startTopic(topics.find((t) => t.id === d.quiz_id))}
         />
       ))}
@@ -492,18 +545,65 @@ export default function QuizPane({ onToast, graphId }) {
   );
 }
 
-function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
+function DocumentCard({ doc, stats, questions, filter, generation, onGenerate, onCheckAgain, onStart }) {
   const stale = doc.status === "stale" || doc.topic?.stale;
   const ready = (doc.status === "ready" || stale) && doc.topic;
   const failed = doc.status === "failed";
   const barPct = ready && stats.total ? Math.round((stats.correct / stats.total) * 100) : 0;
   const meta = [doc.week, doc.concepts ? `${doc.concepts} concepts` : null].filter(Boolean).join(" · ");
+  const busy = generation.phase === "generating" || generation.phase === "loading";
+
+  if (busy || generation.phase === "timeout" || generation.phase === "error") {
+    return (
+      <div className="qz-topic qz-card qz-gen" aria-live="polite">
+        <div className="qz-topic-name">{doc.title || displayName(doc.filename)}</div>
+        {meta && <div className="qz-topic-desc">{meta}</div>}
+        {busy ? (
+          <div className="qz-gen-body" role="status">
+            <span className="qz-spinner" aria-hidden="true" />
+            <div>
+              <div className="qz-gen-title">
+                {generation.phase === "generating" ? "Generating questions" : "Finalizing your quiz"}
+              </div>
+              <div className="qz-gen-sub">
+                {generation.phase === "generating"
+                  ? "Writing questions from this graph version. This usually takes under a minute, and you can keep using other tabs."
+                  : "The questions are ready. Loading them now."}
+              </div>
+              <div className="qz-gen-track" aria-hidden="true"><i /></div>
+            </div>
+          </div>
+        ) : generation.phase === "timeout" ? (
+          <div className="qz-gen-body warn">
+            <div>
+              <div className="qz-gen-title">This is taking longer than usual</div>
+              <div className="qz-gen-sub">
+                The server may still be writing the quiz. Check again in a moment before asking for a new one.
+              </div>
+              <div className="qz-gen-actions">
+                <button className="btn-primary2" onClick={onCheckAgain}>Check again</button>
+                <button className="btn-secondary" onClick={onGenerate}>Start over</button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="qz-gen-body error" role="alert">
+            <div>
+              <div className="qz-gen-title">The quiz could not be generated</div>
+              <div className="qz-gen-sub">{generation.message}</div>
+              <div className="qz-gen-actions">
+                <button className="btn-primary2" onClick={onGenerate}>Try again</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   let action;
   if (doc.status === "too_small") {
     action = <div className="sub">Too few concepts for a quiz</div>;
-  } else if (doc.status === "generating") {
-    action = <button className="btn-start" disabled>Generating…</button>;
   } else if (stale) {
     action = <button className="btn-primary2" onClick={onGenerate}>Regenerate quiz</button>;
   } else if (ready) {
@@ -527,13 +627,10 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
     line = `${questions.length} questions`;
     sub = stats.attempted
       ? `${stats.answered}/${stats.total} questions attempted · ${stats.line}`
-      : (filter === "all" ? "mixed difficulty" : filter);
+      : (filter === "all" ? "Mixed difficulty" : `${filter[0].toUpperCase()}${filter.slice(1)} questions`);
   } else if (failed) {
     line = "Couldn't create this quiz right now. Try again in a minute.";
     sub = null;
-  } else if (doc.status === "generating") {
-    line = "Writing questions";
-    sub = "This can take up to a minute.";
   } else {
     line = "Not generated yet";
     sub = "Generated only when you ask for it.";
@@ -549,7 +646,7 @@ function DocumentCard({ doc, stats, questions, filter, onGenerate, onStart }) {
       line={line}
       sub={sub}
       actions={action}
-      tone={failed ? "failed" : ""}
+      tone={[failed ? "failed" : "", generation.fresh && ready ? "qz-enter" : ""].filter(Boolean).join(" ")}
     />
   );
 }

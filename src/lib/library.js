@@ -314,6 +314,21 @@ export function useLibrary(userKey) {
     }))
   }, [])
 
+  /** Replaces a graph's document ids with the list the backend just returned. */
+  const setGraphDocs = useCallback((supabaseId, docIds) => {
+    setLib((l) => {
+      let changed = false
+      const next = mapGraphs((g) => {
+        if (g.supabaseId !== String(supabaseId)) return g
+        const same = g.docIds.length === docIds.length && g.docIds.every((id, i) => sameId(id, docIds[i]))
+        if (same) return g
+        changed = true
+        return { ...g, docIds: [...docIds] }
+      })(l)
+      return changed ? next : l
+    })
+  }, [])
+
   const topicOfDoc = useCallback((docId) => {
     for (const s of lib.subjects) {
       for (const t of s.topics) {
@@ -333,6 +348,6 @@ export function useLibrary(userKey) {
     addTopic, renameTopic, toggleTopic, deleteTopic,
     addGraph, renameGraph, deleteGraph,
     setActiveGraph, assignDocs, findGraph, findGraphBySupabaseId, graphOfDoc, topicOfDoc,
-    promoteGraphToSupabase,
+    promoteGraphToSupabase, setGraphDocs,
   }
 }

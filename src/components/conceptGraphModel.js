@@ -12,7 +12,11 @@ export const GRAPH_COLORS = {
 
 export const LABEL_ZOOM = { high: 0, mid: 0.85, low: 1.35 }
 
+// Graphs up to this size are always drawn in full. Larger ones reveal nodes as you zoom in.
+export const SMALL_GRAPH = 40
+
 export function progressiveNodeIds(nodes, scale) {
+  if (nodes.length <= SMALL_GRAPH) return new Set(nodes.map((node) => node.id))
   const visibleRatio =
     scale < 0.5 ? 0.12
       : scale < 0.8 ? 0.25

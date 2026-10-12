@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import useConceptGraph from "./useConceptGraph.js"
 import { buildGraphView, GRAPH_COLORS } from "./conceptGraphModel.js"
 
@@ -54,7 +54,7 @@ export default function ConceptGraph({
         <div className="gx-degraded-banner">
           <span>
             <strong>
-              {degradedCount} concept{degradedCount === 1 ? "" : "s"} need updated definitions
+              {degradedCount === 1 ? "1 concept needs an updated definition" : `${degradedCount} concepts need updated definitions`}
             </strong>
             <small>Some source material was removed from this graph.</small>
           </span>
@@ -168,12 +168,15 @@ export default function ConceptGraph({
         selectedVersionId={selectedVersionId}
         onVersionChange={onVersionChange}
         loading={loadingVersion}
+        inView={view.nodes.length}
+        drawn={graph.drawnCount ?? view.nodes.length}
+        total={allNodes.length}
       />
     </div>
   )
 }
 
-function GraphVersionTimeline({ versions, selectedVersionId, onVersionChange, loading }) {
+function GraphVersionTimeline({ versions, selectedVersionId, onVersionChange, loading, inView, drawn, total }) {
   const chronological = [...versions].sort(
     (a, b) => Number(a.version_number) - Number(b.version_number),
   )
@@ -191,7 +194,15 @@ function GraphVersionTimeline({ versions, selectedVersionId, onVersionChange, lo
           Version <span className="num">{selected.version_number}</span> of{" "}
           {chronological[chronological.length - 1].version_number}
         </span>
-        <span>{loading ? "Loading version…" : "Click a node to inspect"}</span>
+        <span>
+          {loading
+            ? "Loading version…"
+            : drawn < inView
+              ? `Showing ${drawn} of ${total} concepts · zoom in for more`
+              : inView < total
+                ? `Showing ${inView} of ${total} concepts`
+                : `${total} concepts · click one to inspect`}
+        </span>
       </div>
       <input
         type="range"
