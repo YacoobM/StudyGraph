@@ -248,6 +248,8 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
           .strength((edge) => (edge.strength === "high" ? 0.5 : 0.3)),
       )
       .force("charge", d3.forceManyBody().strength(-900).distanceMax(600))
+      // Keeps circles and the labels under them from piling on top of each other.
+      .force("collide", d3.forceCollide().radius((node) => node.r + 18).strength(0.7).iterations(2))
       .force("x", d3.forceX().strength(0.055))
       .force("y", d3.forceY().strength(0.055))
     simulationRef.current = simulation

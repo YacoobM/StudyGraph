@@ -7,10 +7,11 @@ import {
   planNote,
   fetchNotes,
   fetchNote,
+  updateNoteSection,
   writeSection,
 } from "../services/api.js";
 
-/** Completion held client-side, keyed on note id and section index so it survives a refetch. */
+/** Completion set in this session, shown straight away while the save is in flight. */
 const completion = new Map()
 
 const doneKey = (noteId, index) => `${noteId}:${index}`;
@@ -28,25 +29,41 @@ const WRITE_COOLDOWN_MS = 60000;
 
 /* ---------------------------------------------------------------- adapters */
 
-function createdLabel(seconds) {
-  if (!seconds) return "";
-  const mins = Math.round((Date.now() - seconds * 1000) / 60000);
+// Supabase sends ISO strings; older rows sent epoch seconds.
+function toMillis(value) {
+  if (typeof value === "number") return value * 1000;
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function createdLabel(value) {
+  const at = toMillis(value);
+  if (!at) return "";
+  const mins = Math.round((Date.now() - at) / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} min ago`;
   const hrs = Math.round(mins / 60);
   if (hrs < 24) return `${hrs} hr ago`;
   const days = Math.round(hrs / 24);
-  return days === 1 ? "yesterday" : days < 7 ? `${days} days ago` : "last week";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return new Date(at).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
+
+/** A usable day number, or null. Stored plans from before the fix can hold null. */
+export const validDay = (value) => (Number.isInteger(value) && value >= 1 ? value : null);
 
 /** A note as the list cards and the contents rail want it. */
 function toNote(raw) {
+  const sections = raw.sections || [];
+  // Only treat it as a day plan when every section has a real day.
+  const isPlan = raw.kind === "plan" && sections.length > 0 && sections.every((s) => validDay(s.day));
   return {
     id: raw.id,
     title: raw.title,
-    kind: raw.kind,
+    kind: isPlan ? "plan" : "full",
     status: raw.status || "current",
-    days: raw.days,
+    days: isPlan ? Math.max(...sections.map((s) => s.day)) : null,
     documentIds: raw.document_ids || [],
     docCount: (raw.documents || []).length,
     created: createdLabel(raw.created_at),
@@ -55,7 +72,7 @@ function toNote(raw) {
     sections: (raw.sections || []).map((s, i) => ({
       id: s.id,
       title: s.title,
-      day: s.day,
+      day: isPlan ? s.day : null,
       done: isDone(raw.id, i, s),
     })),
   };
@@ -96,8 +113,7 @@ function toSection(raw, noteId, index) {
   return {
     id: raw.id,
     title: raw.title,
-    day: raw.day,
-    week: null, // the backend does not carry weeks here
+    day: validDay(raw.day),
     done: isDone(noteId, index, raw),
     concepts: raw.concepts || [],
     sources: (raw.sources || []).map((file) => ({ file })),
@@ -124,16 +140,6 @@ function toSection(raw, noteId, index) {
     // Correct answers that complete the section, from quiz_service.pass_mark.
     passMark: body.quiz_pass_mark ?? null,
 
-    // Nothing produces these yet; the components already skip them when null.
-    evolution: null,
-    bridge: null,
-
-    // Carried through for inspection; label_violations lists relation labels used as words.
-    meta: {
-      chunksUsed: body.chunks_used ?? 0,
-      labelViolations: body.label_violations || [],
-      sources: body.sources || [],
-    },
   };
 }
 
@@ -192,13 +198,28 @@ export async function getSection(graphId, noteId, index, { signal } = {}) {
   return toSection(section, noteId, index);
 }
 
-/** Marks a section complete or not; held locally over server data and lost on reload. */
-export function setSectionDone(noteId, index, done) {
-  completion.set(doneKey(noteId, index), Boolean(done));
+/** Marks a section complete or not and saves it. Throws when the save fails. */
+export async function setSectionDone(graphId, noteId, index, done) {
+  const key = doneKey(noteId, index);
   const note = seen.get(noteId);
-  if (note?.sections[index]) {
-    note.sections[index].done = Boolean(done);
-    note.done = note.sections.filter((s) => s.done).length;
+  const stub = note?.sections[index];
+  const before = { cached: completion.get(key), stub: stub?.done };
+  const apply = (value) => {
+    if (stub) {
+      stub.done = Boolean(value);
+      note.done = note.sections.filter((s) => s.done).length;
+    }
+  };
+  completion.set(key, Boolean(done));
+  apply(done);
+  if (!stub) return;
+  try {
+    await updateNoteSection(graphId, noteId, stub.id, { done });
+  } catch (e) {
+    if (before.cached === undefined) completion.delete(key);
+    else completion.set(key, before.cached);
+    apply(before.stub);
+    throw e;
   }
 }
 

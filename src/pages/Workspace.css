@@ -17,7 +17,7 @@
 
 .side-brand { align-self: flex-start; margin: 0 0 18px 6px; padding: 0; border: none;
   background: none; font: inherit; font-size: 16px; font-weight: 800; letter-spacing: -0.01em;
-  color: var(--text-0); cursor: pointer; }
+  color: var(--text-0); cursor: pointer; font-family: var(--font-display); font-size: 18px; font-weight: 700; }
 .side-new { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%;
   padding: 10px; margin-bottom: 12px; border: none; border-radius: var(--radius-sm);
   background: var(--action-primary); color: var(--action-primary-text); font: inherit; font-size: 13.5px; font-weight: 600;
@@ -522,6 +522,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-display); font-size: 20px; font-weight: 600; letter-spacing: -0.015em;
 }
 .ws-sub {
   font-size: 12.5px;
@@ -567,6 +568,7 @@
   font-weight: 600;
   color: var(--text-2);
   cursor: pointer;
+  font-family: var(--font-display); font-size: 14px;
 }
 .ws-tab:hover {
   color: var(--text-0);
@@ -585,8 +587,27 @@
   border-bottom: 1px solid var(--border);
 }
 .ws-banner.err {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   background: var(--danger-soft);
   color: var(--danger);
+}
+.ws-banner-x {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  font-size: 17px;
+  line-height: 1;
+}
+.ws-banner-x:hover { background: var(--danger-tint); }
+
+.ws-sub-loading { display: flex; align-items: center; gap: 8px; }
+.ws-skel {
+  width: 120px; height: 9px; border-radius: 5px;
+  background: linear-gradient(90deg, var(--bg-3) 0%, var(--bg-2) 50%, var(--bg-3) 100%);
+  background-size: 200% 100%; animation: skel-shine 1.4s ease-in-out infinite;
 }
 
 .graph-loading {
@@ -822,6 +843,7 @@
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.01em;
+  font-family: var(--font-display); font-size: 24px; font-weight: 600;
 }
 .pane-head p {
   margin-top: 5px;
@@ -1866,3 +1888,26 @@
 .graph-canvas-wrap {
   position: relative;
 }
+
+/* first-visit guide, on the dark graph canvas */
+.intro { width: min(560px, 100%); text-align: left; color: var(--night-text); }
+.intro h3 { font-family: var(--font-display); font-size: 22px; font-weight: 600; color: var(--night-text); }
+.intro > p { margin: 4px 0 18px; color: var(--night-muted); }
+.intro-steps { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.intro-steps li {
+  display: flex; flex-direction: column; gap: 4px; padding: 14px 16px;
+  border: 1px solid var(--night-line); border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.03);
+  font-size: 13px; line-height: 1.5; color: var(--night-muted);
+}
+.intro-steps b { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--night-text); }
+.intro-n {
+  width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--night-copper); color: var(--night);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+}
+.intro-dismiss {
+  margin-top: 16px; padding: 8px 16px; border: 1px solid var(--night-line); border-radius: var(--radius-pill);
+  font-size: 13px; font-weight: 600; color: var(--night-text);
+}
+.intro-dismiss:hover { background: rgba(255, 255, 255, 0.06); }
+@media (max-width: 640px) { .intro-steps { grid-template-columns: 1fr; } }

@@ -75,7 +75,7 @@ function Actions({ items }) {
 }
 
 export default function SubjectSidebar({
-  library, docs, open, onClose, onHome, user, onSignOut,
+  library, open, onClose, onHome, user, onSignOut,
 }) {
   const {
     subjects, activeGraphId,
@@ -90,8 +90,11 @@ export default function SubjectSidebar({
   const stop = () => setEditing(null)
   const is = (kind, id) => editing?.kind === kind && (id === undefined || editing.id === id)
 
-  const liveIds = new Set(docs.map((d) => String(d.id)))
-  const countIn = (g) => g.docIds.filter((id) => liveIds.has(String(id))).length
+  // Counts come from the library, which the backend fills for every graph, so a
+  // graph keeps its count while another one is open.
+  const countIn = (g) => g.docIds.length
+  const allDocs = subjects.reduce((total, s) => total + s.topics.reduce(
+    (sum, t) => sum + t.graphs.reduce((n, g) => n + g.docIds.length, 0), 0), 0)
 
   const pick = (graphId) => { setActiveGraph(graphId); onClose?.() }
 
@@ -116,7 +119,7 @@ export default function SubjectSidebar({
                 onClick={() => pick(null)}>
           <Icon d={I.all} />
           <span className="st-name">All documents</span>
-          <span className="st-count">{docs.length}</span>
+          <span className="st-count">{allDocs}</span>
         </button>
 
         <div className="side-sec">Subjects</div>

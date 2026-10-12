@@ -342,12 +342,13 @@ export async function fetchQuiz(graphId) {
   );
 }
 
-export async function regenerateGraphQuiz(graphId) {
+export async function regenerateGraphQuiz(graphId, { signal } = {}) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/quiz/regenerate`,
     {
       method: "POST",
       headers: await authHeaders(),
+      signal,
     },
   );
 }
@@ -493,6 +494,18 @@ export async function fetchNote(graphId, noteId) {
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/${noteId}`,
     {
       headers: await authHeaders(),
+    },
+  );
+}
+
+/** Saves a section's completion. */
+export async function updateNoteSection(graphId, noteId, sectionId, { done }) {
+  return apiFetch(
+    `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/notes/${noteId}/sections/${sectionId}`,
+    {
+      method: "PATCH",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ done: Boolean(done) }),
     },
   );
 }
