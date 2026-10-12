@@ -17,7 +17,12 @@ import os
 from app import state as runtime_state
 from app.config import OPENAI_API_KEY
 from services.llm_provider import create_llm_client
-from app.logging_config import get_logger
+from app.logging_config import configure_logging, get_logger
+
+# Configure application loggers before importing route modules. Without this,
+# Python's default root level suppresses logger.info() messages while Uvicorn's
+# access logger continues to print its own INFO lines.
+configure_logging()
 
 # API routes registration
 from api.routes.graphs import router as graphs_router
