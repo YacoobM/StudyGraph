@@ -178,12 +178,14 @@ def _is_acronym(abbr, words):
 
 
 def _alias_expansions(aliases):
-    """{abbreviation: full name} for document-defined abbreviations; ambiguous ones are skipped."""
+    """{abbreviation: full name} for document-defined abbreviations. One with two different long
+    forms is skipped; forms that differ only in plural or punctuation count as one."""
     expand = {}
     for full, abbrs in aliases.items():
         for abbr in abbrs:
             expand.setdefault(abbr, set()).add(normalize_concept(full))
-    return {abbr: next(iter(fulls)) for abbr, fulls in expand.items() if len(fulls) == 1}
+    return {abbr: min(fulls, key=lambda f: (len(f), f)) for abbr, fulls in expand.items()
+            if len({_surface_key(f) for f in fulls}) == 1}
 
 
 def _name_words(name, expand):
@@ -192,7 +194,14 @@ def _name_words(name, expand):
     m = _TRAILING_PAREN.match(text)
     if m and _is_acronym(m.group(2), m.group(1).split()):
         text = m.group(1)
-    return [w for t in text.split() for w in expand.get(t, t).split()]
+    words = text.split()
+    # A long form can hold another abbreviation (ltbi -> latent tb infection); a few passes, bounded.
+    for _ in range(3):
+        expanded = [w for t in words for w in expand.get(t, t).split()]
+        if expanded == words:
+            break
+        words = expanded
+    return words
 
 
 def _initial_match(wa, wb):
@@ -548,6 +557,48 @@ def _source_aliases(texts, names):
                 if last is not None and last.end() == len(before) and _abbreviates(abbr, name):
                     out.setdefault(name, set()).add(abbr.lower())
     return out
+
+
+_LONG_FORM_STOPWORDS = {"of", "and", "the", "for", "in", "on", "to", "a", "an", "with", "by"}
+
+
+def _text_long_form(abbr, before):
+    """The long form written just before '(abbr)', or None. Schwartz and Hearst's letter test
+    (abbr's letters in order, its first letter starting a word), plus: the long form starts with
+    abbr's first letter and its word initials (small words aside) occur in abbr in order. The
+    longest such run within min(len + 5, 2 * len) words wins ('tuberculin skin test', not 'test')."""
+    letters = "".join(c for c in abbr if c.isalnum())
+    words = before.split()[-min(len(letters) + 5, len(letters) * 2):]
+    best = None
+    for start in range(len(words) - 1, -1, -1):
+        if not any(c.isalnum() for c in words[start]):
+            break                                   # punctuation ends the phrase
+        run = words[start:]
+        if run[0] in _LONG_FORM_STOPWORDS or run[0][0] != letters[0]:
+            continue
+        initials = iter(letters)
+        if (all(any(i == w[0] for i in initials) for w in run if w not in _LONG_FORM_STOPWORDS)
+                and _abbreviates(abbr, " ".join(run))):
+            best = " ".join(run)
+    return best if best != abbr else None
+
+
+def _document_aliases(texts, names):
+    """{long form: {abbreviation}}: the node-name definitions _source_aliases finds, plus every
+    '<long form> (ABBR)' the texts define, whether or not the long form is a node name."""
+    aliases = {name: set(abbrs) for name, abbrs in _source_aliases(texts, names).items()}
+    for text in texts:
+        text = re.sub("­\\s*", "", unicodedata.normalize("NFKC", text))
+        for m in _ABBREVIATION.finditer(text):
+            abbr = m.group(1).lower()
+            # An abbreviation is written with a capital somewhere: "(TB)", not "(right)".
+            if not any(c.isupper() for c in m.group(1)):
+                continue
+            before = normalize_concept(text[max(0, m.start() - _ABBREVIATION_WINDOW):m.start()])
+            long_form = _text_long_form(abbr, before)
+            if long_form:
+                aliases.setdefault(long_form, set()).add(abbr)
+    return aliases
 
 
 def _named_both(a, b, sentence, aliases=None):
@@ -1123,8 +1174,9 @@ def merge_graph(engine, client, log=print):
     dsu = _DSU(unique_names)
     llm_candidates = []
     auto_merged = blocked = 0
-    # Abbreviations the documents define for any node name; steps 2, 3b and the check share them.
-    aliases = _source_aliases(_engine_texts(engine), unique_names)
+    # Abbreviations the documents define (for node names or any other long form); steps 2, 3b and
+    # the check share them.
+    aliases = _document_aliases(_engine_texts(engine), unique_names)
     if len(unique_names) >= 2:
         name_embeddings = np.asarray(encode_texts(unique_names))
         sim_matrix = cosine_similarity(name_embeddings)

@@ -112,6 +112,9 @@ def _restore_engine(
 	concepts_by_id = {str(concept["id"]): concept for concept in latest_snapshot["concepts"]}
 	for concept in latest_snapshot["concepts"]:
 		previous_status[graph_fusion.normalize_concept(concept["name"])] = concept.get("status", "active")
+		# Names merged into this concept earlier keep pointing at it, even if not re-extracted.
+		for alias in concept.get("aliases") or []:
+			engine.canonical_nodes[alias] = graph_fusion.normalize_concept(concept["name"])
 
 	grouped_concepts = {}
 	for provenance in latest_snapshot["concept_provenance"]:
@@ -197,6 +200,12 @@ def _persist_version(
 		canonical_names.add(_canonical_name(engine, edge["from"]))
 		canonical_names.add(_canonical_name(engine, edge["to"]))
 	canonical_names.discard("")
+	# Names fusion merged into each node, for "also known as"; hyphen/case variants are left out.
+	aliases = {}
+	for variant in engine.canonical_nodes:
+		canonical = _canonical_name(engine, variant)
+		if graph_fusion.normalize_concept(variant) != canonical:
+			aliases.setdefault(canonical, set()).add(graph_fusion.normalize_concept(variant))
 
 	concepts = [
 		{
@@ -206,6 +215,7 @@ def _persist_version(
 			"status": previous_status.get(graph_fusion.normalize_concept(name), "active"),
 			**({"description": concept_descriptions[graph_fusion.normalize_concept(name)]}
 			   if concept_descriptions.get(graph_fusion.normalize_concept(name)) else {}),
+			"aliases": sorted(aliases.get(name, ())),
 		}
 		for name in sorted(canonical_names)
 	]

@@ -209,6 +209,9 @@ export default function Inspector({
       </div>
 
       <div className="insp-name">{node.name}</div>
+      {node.aliases?.length > 0 && (
+        <div className="insp-aliases">Also known as: {node.aliases.join(", ")}</div>
+      )}
 
       <div className="insp-meta">
         {node.status === "needs_regeneration" && (

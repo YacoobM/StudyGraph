@@ -109,6 +109,7 @@ function graphViewFromSnapshot(snapshot, activeSupport = null, documents = []) {
       id: String(concept.id),
       name: concept.name,
       description: concept.description || '',
+      aliases: concept.aliases || [],
       status: concept.status || 'active',
       week: weeks[0] || 1,
       weeks: weeks.length ? weeks : [1],
