@@ -23,9 +23,11 @@ def prioritize_graph(retrieved, sim_threshold=0.4):
     avg_similarity = sum(r["similarity"] for r in retrieved) / len(retrieved)
     return avg_similarity < sim_threshold
 
+
 def filter_sources_by_chunks_used(sources, used_chunk_numbers):
     """Return only sources that were actually cited by the LLM."""
-    return [sources[i-1] for i in used_chunk_numbers if 0 < i <= len(sources)]
+    return [sources[i - 1] for i in used_chunk_numbers if 0 < i <= len(sources)]
+
 
 def build_rag_system_prompt(prioritize_graph=False):
     """
@@ -37,23 +39,25 @@ def build_rag_system_prompt(prioritize_graph=False):
     Returns:
         str: System prompt text
     """
-    base = """You are a concise study assistant. Answer questions directly and briefly.
+    base = """You are a concise study assistant. Answer the specific question directly,
+    using only the supplied document text and relevant knowledge-graph context.
+
+    - Put the direct answer in the first sentence.
+    - Include only details that help answer the question.
+    - Do not add related topics, background, or speculation unless asked.
+    - If the evidence supports only part of the question, answer that part, then state
+    the limitation briefly.
+    - If the evidence does not answer the question, say so briefly.
 
     CITATION RULES:
-    - ALWAYS cite page numbers for facts from the text
-    - Format: [p. 5] for single page, [pp. 3-5] for ranges
-    - Put citations immediately after each claim
-    - Keep answers concise (2-3 sentences typical)
-    - Use the knowledge graph to understand concept relationships and structure
-    - When text is available, cite it; graph provides context and connections
-    - If the text chunks don't provide enough context to answer confidently, say so explicitly, and indicate if the graph provides
-    the necessary context
-    - Do not make up or infer facts beyond what's in the chunks
+    - Cite document facts with page numbers immediately after the claim.
+    - Format: [p. 5] for a single page and [pp. 3-5] for a range.
+    - Do not present unsupported claims as facts.
     """
-    
+
     if prioritize_graph:
-        base+="\n -For broad/vague/bigger picture questions or when text is limited, use the knowledge graph to identify key concepts and relationships"
-    
+        base += "\n -For broad/vague/bigger picture questions or when text is limited, use the knowledge graph to identify key concepts and relationships"
+
     return base
 
 
@@ -76,12 +80,16 @@ def build_rag_user_prompt(context_text, query, graph_section=""):
 
                 {graph_part}
 
-               QUESTION: {query}
+                              QUESTION: {query}
 
-    - Answer using text citations first. Use the graph for structure/connections. If chunks lack sufficient context, state that clearly.
+    Answer this exact question, not just its general topic.
+    Start with the direct answer and include only relevant supporting details.
+    Use graph context only when it directly helps answer the question; do not list
+    unrelated concepts or connections.
+    If only part of the question is supported, answer that part and state the
+    limitation in one brief sentence. Do not guess.
+    Cite document facts using the page numbers shown in the text chunks.
 
-    - Indicate the concepts mentioned from the graph clearly
-    
     Respond with ONLY a JSON object (no markdown, no explanation):
     {{
     "answer": "Your answer here",
@@ -102,21 +110,21 @@ def call_rag_llm(
         system_prompt: System prompt text
         user_prompt: user prompt text
         reasoning_effort: Reasoning effort level (ideally medium++)
-        
+
     Returns:
         dict: LLM resposne text and chunks used
-    
+
     Raises:
         AttributeError, KeyError, ValueError: Response parsing errors
         Exception: API or other errors
     """
     estimated_input = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
-    
+
     rag_limiter.acquire_sync(
         estimated_input,
         2000,
     )
-    
+
     response = client.chat.completions.create(
         messages=[
             {"role": "system", "content": system_prompt},
@@ -125,12 +133,12 @@ def call_rag_llm(
         model=model,
         reasoning_effort=reasoning_effort,
     )
-    
+
     response_text = response.choices[0].message.content
     response_json = json.loads(response_text)
-    
+
     return {
         "answer": response_json.get("answer", ""),
         "chunks_used": response_json.get("chunks_used", []),
-        "concepts_mentioned": response_json.get("concepts_mentioned", [])
+        "concepts_mentioned": response_json.get("concepts_mentioned", []),
     }
