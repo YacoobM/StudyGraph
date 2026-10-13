@@ -131,20 +131,25 @@ def _restore_engine(
 		if not concept_row:
 			continue
 		group_key = (raw_name, document_id, document.get("week") or "Week 1")
-		grouped_concepts.setdefault(group_key, set()).update(chunk.get("pages") or [])
+		# Keep the matched concept's definition with its grouped provenance.
+		group = grouped_concepts.setdefault(group_key, {
+			"pages": set(),
+			"description": concept_row.get("description") or "",
+		})
+		group["pages"].update(chunk.get("pages") or [])
 		concept_support.append({
 			"source_name": raw_name,
 			"document_id": document_id,
 			"chunk_id": chunk_id,
 			"source_week": int(str(document.get("week") or "Week 1").split()[-1]),
 		})
-	for (name, document_id, week), pages in grouped_concepts.items():
+	for (name, document_id, week), group in grouped_concepts.items():
 		engine.concepts.append({
 			"name": name,
 			"source": document_id,
 			"week": week,
-			"pages": sorted(pages),
-			"description": concept_row.get("description") or "",
+			"pages": sorted(group["pages"]),
+			"description": group["description"],
 		})
 		engine._doc_concept_names.setdefault(document_id, set()).add(name)
 		engine.known_concepts.add(name)
