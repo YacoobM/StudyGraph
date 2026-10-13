@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchQuiz, fetchNotes, regenerateGraphQuiz, saveQuizProgress, saveNoteQuizProgress,
-} from "../services/api.js";
+} from "../../services/api.js";
 import QuizRunner, { BackLink, QuizReview } from "./QuizRunner.jsx";
-import { displayName } from "../utils/documentTitle.js";
+import { displayName } from "../../lib/documentTitle.js";
 // Drawn for this project in the app's accent colour; see the SVG's header.
-import landingArt from "../assets/quiz-landing.svg";
+import landingArt from "../../assets/quiz-landing.svg";
+import "./QuizPane.css";
 
 // Pass marks come from the server (quiz_service.pass_mark), never computed here.
 const RING_RADIUS = 28;

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { listNotes, createNote, getSection, setSectionDone, validDay } from '../data/notes.js'
-import { saveNoteQuizProgress } from '../services/api.js'
-import QuizRunner from './QuizRunner.jsx'
+import { listNotes, createNote, getSection, setSectionDone, validDay } from '../../lib/notes.js'
+import { saveNoteQuizProgress } from '../../services/api.js'
+import QuizRunner from '../quiz/QuizRunner.jsx'
 import './NotesPane.css'
 
 /* --------------------------------------------------------------- helpers */

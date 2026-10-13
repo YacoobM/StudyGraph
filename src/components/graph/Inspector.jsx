@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchGraphConceptEvolution, getGraphDocumentSignedUrl } from "../services/api.js";
+import { fetchGraphConceptEvolution, getGraphDocumentSignedUrl } from "../../services/api.js";
 import "./Inspector.css";
 
 // Connections shown before "Show all".
@@ -213,7 +213,8 @@ export default function Inspector({
     setDetailsError("");
   }, [node?.id]);
 
-  const spansWeeks = Boolean(info && maxWeek > info.firstWeek && info.neighbours.length);
+  // The week slider only helps when the concept or its links change across weeks.
+  const spansWeeks = Boolean(info && info.timeline.length > 1);
 
   async function showDetails() {
     if (details) {

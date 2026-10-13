@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import { supabase } from './services/supabase.js'
+import { supabase } from '../services/supabase.js'
 
 const AuthCtx = createContext(null)
 

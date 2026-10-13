@@ -1,4 +1,5 @@
 import { useState } from "react";
+import "./QuizRunner.css";
 
 /**
  * Takes one quiz question by question, then shows the score. Only the first try at each

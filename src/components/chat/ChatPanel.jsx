@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { askGraphQuestion, getGraphDocumentSignedUrl } from "../services/api";
+import { askGraphQuestion, getGraphDocumentSignedUrl } from "../../services/api";
 import "./ChatPanel.css";
 import { ArrowUp } from "lucide-react";
 

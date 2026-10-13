@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../auth.jsx";
+import { useAuth } from "../../lib/auth.jsx";
 import "./Login.css";
 
 /**

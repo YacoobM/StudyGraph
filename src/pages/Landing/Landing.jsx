@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import LandingGraphDemo from '../components/LandingGraphDemo.jsx'
+import LandingGraphDemo from './LandingGraphDemo.jsx'
 import './Landing.css'
 
 /**

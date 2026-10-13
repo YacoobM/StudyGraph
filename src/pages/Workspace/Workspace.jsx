@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../auth.jsx'
-import ConceptGraph from '../components/ConceptGraph.jsx'
-import QuizPane from '../components/QuizPane.jsx'
-import Inspector from '../components/Inspector.jsx'
-import NotesPane from '../components/NotesPane.jsx'
-import ChatPanel from '../components/ChatPanel.jsx'
-import SubjectSidebar from '../components/SubjectSidebar.jsx'
-import UploadDialog, { UploadDrop, UploadQueue } from '../components/UploadPanel.jsx'
-import { useLibrary } from '../lib/library.js'
+import { useAuth } from '../../lib/auth.jsx'
+import ConceptGraph from '../../components/graph/ConceptGraph.jsx'
+import QuizPane from '../../components/quiz/QuizPane.jsx'
+import Inspector from '../../components/graph/Inspector.jsx'
+import NotesPane from '../../components/notes/NotesPane.jsx'
+import ChatPanel from '../../components/chat/ChatPanel.jsx'
+import SubjectSidebar from '../../components/library/SubjectSidebar.jsx'
+import UploadDialog, { UploadDrop, UploadQueue } from '../../components/library/UploadPanel.jsx'
+import { useLibrary } from '../../lib/library.js'
 
-import '../styles/studygraph.css'
 import './Workspace.css'
 
 import {
@@ -23,7 +22,7 @@ import {
   createGraphVersion,
   deleteGraphDocument,
   refreshDegradedConcepts,
-} from '../services/api.js'
+} from '../../services/api.js'
 
 const TABS = ['graph', 'documents', 'notes', 'quiz']
 const ALLOWED = ['pdf', 'docx', 'pptx', 'txt', 'md']

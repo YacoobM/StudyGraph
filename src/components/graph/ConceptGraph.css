@@ -1,0 +1,382 @@
+/* Concept graph: the dark canvas, its controls, legend and version timeline. */
+
+.graph-panel-inner {
+  flex: 1;
+  position: relative;
+  background: var(--night);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(20, 22, 26, 0.14);
+  /* Lets the overlays respond to the card's width, which changes with the sidebar. */
+  container-type: inline-size;
+}
+.ws-timeline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px 18px;
+  background: linear-gradient(
+    0deg,
+    rgba(21, 23, 26, 0.92),
+    rgba(21, 23, 26, 0)
+  );
+}
+.ws-timeline-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--night-text);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+  max-width: 520px;
+}
+.ws-timeline-head .num {
+  color: var(--night-text);
+  font-weight: 600;
+}
+/* The week scrubber sits on the dark graph card, so it cannot keep the
+   browser's default control colours. */
+.ws-timeline input[type="range"] {
+  max-width: 520px;
+  width: 100%;
+  /* 26px tall so it is actually tappable, while the visible track stays the
+     4px hairline the design calls for. */
+  height: 26px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(
+      rgba(255, 255, 255, 0.16),
+      rgba(255, 255, 255, 0.16)
+    )
+    center / 100% 4px no-repeat;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.ws-timeline input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--copper);
+  cursor: pointer;
+}
+.ws-timeline input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--copper);
+  cursor: pointer;
+}
+.ws-timeline input[type="range"]:focus-visible {
+  outline: 2px solid rgba(243, 238, 221, 0.75);
+  outline-offset: 4px;
+}
+.node-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  background: var(--night-2);
+  border: 1px solid var(--night-line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--night-text);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.node-tip.show {
+  opacity: 1;
+}
+
+/* ---------- graph panel controls ----------
+   Chrome that floats over the dark graph card: legend, search, toolbar and
+   hint. All of it is deliberately quiet — the graph is the subject. */
+
+.gx-legend {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 7px 11px;
+  background: rgba(23, 19, 9, 0.6);
+  border: 1px solid var(--night-line);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--night-slate);
+  pointer-events: none;
+}
+.gx-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gx-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ---------- search ---------- */
+
+.gx-search {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 10px;
+  height: 32px;
+  background: rgba(23, 19, 9, 0.72);
+  border: 1px solid var(--night-line);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+.gx-search > svg {
+  width: 13px;
+  height: 13px;
+  color: var(--night-slate);
+  flex-shrink: 0;
+}
+.gx-search input {
+  width: 168px;
+  border: none;
+  background: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--night-text);
+}
+.gx-search input::placeholder {
+  color: var(--night-slate);
+}
+.gx-search:focus-within {
+  border-color: rgba(243, 238, 221, 0.4);
+}
+/* The wrapper lights up, but the input carries its own ring so the indicator
+   is on the element that actually has focus. */
+.gx-search input:focus-visible {
+  outline: 2px solid rgba(243, 238, 221, 0.8);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.gx-search-clear {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--night-slate);
+}
+.gx-search-clear:hover {
+  color: var(--night-text);
+}
+
+/* ---------- toolbar ---------- */
+
+.gx-toolbar {
+  position: absolute;
+  top: 58px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: calc(100% - 36px);
+}
+.gx-group {
+  display: flex;
+  gap: 1px;
+  padding: 3px;
+  background: rgba(23, 19, 9, 0.72);
+  border: 1px solid var(--night-line);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+.gx-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--night-slate);
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+.gx-btn-wide {
+  padding: 0 10px;
+  font-size: 11.5px;
+}
+.gx-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--night-text);
+}
+.gx-btn.on {
+  background: var(--copper-strong);
+  color: #f0c6a5;
+}
+.gx-btn:focus-visible {
+  outline: 2px solid rgba(243, 238, 221, 0.75);
+  outline-offset: 1px;
+}
+
+/* ---------- canvas ---------- */
+
+.gx-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+.gx-svg:active {
+  cursor: grabbing;
+}
+.gx-node {
+  transition: opacity 180ms ease;
+}
+.gx-node circle {
+  transition:
+    r 160ms ease,
+    stroke-width 160ms ease;
+}
+.gx-node text {
+  pointer-events: none;
+  font-family: "Inter", sans-serif;
+}
+.gx-node:focus-visible {
+  outline: 2px solid var(--night-text);
+  outline-offset: 3px;
+  border-radius: 50%;
+}
+.gx-node:focus-visible circle {
+  stroke: var(--night-text);
+  stroke-width: 2.6;
+}
+.gx-edge {
+  transition: opacity 180ms ease;
+}
+.gx-edge-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8.5px;
+  fill: rgba(200, 190, 172, 0.9);
+  paint-order: stroke;
+  stroke: rgba(20, 17, 9, 0.85);
+  stroke-width: 3px;
+}
+.gx-hint {
+  position: absolute;
+  bottom: 72px;
+  right: 20px;
+  z-index: 4;
+  font-size: 10.5px;
+  color: var(--night-slate);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gx-node,
+  .gx-node circle,
+  .gx-edge {
+    transition: none;
+  }
+}
+
+/* Narrow viewports: the toolbar drops its labels to stay out of the way. */
+@media (max-width: 760px) {
+  .gx-search input {
+    width: 104px;
+  }
+  .gx-toolbar {
+    top: 54px;
+    right: 12px;
+    gap: 6px;
+  }
+  .gx-legend {
+    font-size: 10px;
+    gap: 4px 10px;
+    padding: 6px 9px;
+    max-width: calc(100% - 200px);
+  }
+  .gx-hint {
+    display: none;
+  }
+}
+
+/* Phones: the legend gives way so the controls fit. */
+@media (max-width: 640px) {
+  .gx-legend {
+    display: none;
+  }
+  .gx-search input {
+    width: 92px;
+  }
+  .gx-toolbar {
+    top: 14px;
+    left: 12px;
+    right: auto;
+    justify-content: flex-start;
+    max-width: calc(100% - 150px);
+  }
+}
+
+.gx-degraded-banner {
+  position: absolute;
+  top: 58px;
+  left: 18px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(470px, calc(100% - 36px));
+  padding: 8px 10px 8px 12px;
+  color: #f5d3c4;
+  background: rgba(92, 40, 27, 0.88);
+  border: 1px solid rgba(242, 179, 140, 0.58);
+  border-radius: 9px;
+  backdrop-filter: blur(5px);
+}
+.gx-degraded-banner span { display: grid; gap: 2px; font-size: 11px; }
+.gx-degraded-banner small { color: #e9bda8; font-size: 10px; }
+.gx-degraded-banner button {
+  flex-shrink: 0;
+  border: 1px solid #f2b38c;
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: #f2b38c;
+  color: #5c281b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.gx-degraded-banner button:disabled { opacity: 0.65; cursor: wait; }
+/* On a narrow graph card the warning sits above the timeline so it does not
+   cover the controls. Kept after the base rule so it wins. */
+@container (max-width: 860px) {
+  .gx-degraded-banner { top: auto; bottom: 86px; left: 12px; right: 12px; max-width: none; }
+}

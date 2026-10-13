@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import useConceptGraph from "./useConceptGraph.js"
 import { buildGraphView, GRAPH_COLORS } from "./conceptGraphModel.js"
+import "./ConceptGraph.css"
 
 export default function ConceptGraph({
   nodes: allNodes = [],

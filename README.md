@@ -34,6 +34,30 @@ Built by group MCS03 for FIT3162 at Monash University.
 | `backend/eval` | Tools that measure extraction and answer quality |
 | `tests/ui` | Browser test for the frontend |
 
+## Frontend layout
+
+Each component keeps its stylesheet in the same folder.
+
+```
+src/
+  main.jsx              routes
+  pages/
+    Landing/            landing page and the animated graph demo
+    Login/              sign in and sign up
+    Workspace/          the main app: header, tabs, documents tab
+    NotFound/
+  components/
+    graph/              concept graph, inspector panel
+    notes/              revision notes
+    quiz/               quiz tab and the question runner
+    chat/               Ask StudyGraph
+    library/            subject sidebar and uploads
+  lib/                  auth, library state, notes data, helpers
+  services/             API calls and the Supabase client
+  styles/               theme tokens, global and shared styles
+  assets/
+```
+
 ## Getting started
 
 See [SETUP.md](SETUP.md) for step by step instructions on Windows and macOS.

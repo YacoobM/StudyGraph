@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import './SubjectSidebar.css'
 
 /**
  * Left panel: Subject → Topic → Graph, in the style of a chat app's history

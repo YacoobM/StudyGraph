@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
+import "./LandingGraphDemo.css";
 
 /**
  * Landing-page demo of how a knowledge graph accumulates week to week.

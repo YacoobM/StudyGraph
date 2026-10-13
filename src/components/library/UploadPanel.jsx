@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import './UploadPanel.css'
 
 /**
  * In-page upload: a drop zone that takes several files at once, the queue
