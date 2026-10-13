@@ -196,7 +196,9 @@ def load_graph_version(
 		relationship_provenance = snapshot.get("relationship_provenance") or []
 	return {
 		"version": version,
-		"concepts": snapshot.get("concepts") or [],
+		# Versions saved before aliases were recorded get an empty list.
+		"concepts": [{**concept, "aliases": concept.get("aliases") or []}
+					 for concept in snapshot.get("concepts") or []],
 		"relationships": snapshot.get("relationships") or [],
 		"concept_provenance": concept_provenance,
 		"relationship_provenance": relationship_provenance,

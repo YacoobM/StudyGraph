@@ -591,6 +591,14 @@
   font-weight: 600;
   margin-bottom: 10px;
 }
+/* Names merged into this concept, in the eyebrow's small muted style. */
+.insp-aliases {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: -6px 0 10px;
+  /* Long lists and unbroken words wrap inside the panel. */
+  overflow-wrap: anywhere;
+}
 .insp-def {
   font-size: 13.5px;
   color: var(--ink-soft);
@@ -628,6 +636,12 @@
   font-size: 12.5px;
   font-weight: 600;
   margin-bottom: 2px;
+  /* Undo the global .st status pill (inline-flex, nowrap, padding) so long file names wrap. */
+  display: block;
+  white-space: normal;
+  padding: 0;
+  border-radius: 0;
+  overflow-wrap: anywhere;
 }
 .insp-source .sp {
   font-size: 11px;

@@ -26,20 +26,19 @@ _MODEL = EXTRACTION_MODEL
 logger = logging.getLogger(__name__)
 
 AUTO_MERGE_SIM = 0.95
-LLM_LOW_SIM = 0.55
+# Pairs at or above this that fail the name check are logged as possible synonyms, not merged.
+POSSIBLE_SYNONYM_SIM = 0.85
 NEGATION_PREFIXES = ("un", "non", "in", "im", "dis", "ir", "a", "anti", "de", "mis")
 
-# Pairs per verdict call (steps 3, 3b and 5).
-_VERDICT_PAIR_BATCH = 6
+# Pairs per verdict call (steps 3 and 5), from FUSION_VERDICT_BATCH, clamped to 1-25.
+_VERDICT_PAIR_BATCH = min(25, max(1, int(os.getenv("FUSION_VERDICT_BATCH", "10"))))
 # Resends of the same request after malformed JSON. At temperature 0 a resend mostly repeats
 # itself, so one is enough; 429s count separately.
 _VERDICT_MAX_RETRIES = 1
-# Cap on pairs a failed batch may re-ask one at a time; each single costs a call. It matches the
-# batch, so a malformed batch re-asks every pair rather than leaving some as unrelated.
-_VERDICT_MAX_SINGLES = _VERDICT_PAIR_BATCH
+# Cap on pairs a failed batch may re-ask one at a time; each single costs a call. At the default
+# batch of 10 it matches the batch, so a malformed batch re-asks every pair.
+_VERDICT_MAX_SINGLES = min(_VERDICT_PAIR_BATCH, int(os.getenv("FUSION_VERDICT_MAX_SINGLES", "10")))
 _NEIGHBOURS_PER_NODE = 5
-_EVIDENCE_CHUNKS_PER_NODE = 1
-_EVIDENCE_SNIPPET_CHARS = 200
 # Steps 3 and 5 send the few sentences nearest both names, not chunk openings.
 _EVIDENCE_CHUNKS_PER_SIDE = 2
 _EVIDENCE_SENTENCES_PER_PAIR = 3
@@ -48,11 +47,10 @@ _SUMMARY_SENTENCE_CHARS = 200
 
 # Output cap per verdict call: a 4-pair batch measured 195-350 tokens, so 450 per 4 pairs.
 _VERDICT_MAX_TOKENS = -(-450 * _VERDICT_PAIR_BATCH // 4)
+# Step 3 answers only same/different (about 12-20 tokens a pair); step 5 keeps the cap above.
+_STEP3_MAX_TOKENS = 40 + 30 * _VERDICT_PAIR_BATCH
 # Characters of a response body logged when it parses but has the wrong shape.
 _RAW_LOG_CHARS = 500
-_CLUSTER_MAX_TOKENS_BASE = 150
-_CLUSTER_MAX_TOKENS_PER = 60
-_CLUSTER_BATCH = _VERDICT_PAIR_BATCH
 # Retries after a 429, waiting what the server asks; fusion runs in the background, so waiting is
 # free.
 _RATE_LIMIT_RETRIES = 2
@@ -63,11 +61,9 @@ _FUSION_SLOT_SEMAPHORE = threading.BoundedSemaphore(_FUSION_GLOBAL_SLOTS)
 _CALL_INPUT_TOKENS = 275 * _VERDICT_PAIR_BATCH
 _CALL_SECONDS = 3.0
 
-# Bumped for temperature 0 and an output cap; older verdicts were sampled at the default
-# temperature.
-_STEP3_PROMPT_VERSION = "step3-evidence-v6"
+# v7: merge-only (v6 carried relations). v8: no canonical field; labels are chosen without the LLM.
+_STEP3_PROMPT_VERSION = "step3-merge-v8"
 _STEP5_PROMPT_VERSION = "step5-evidence-v5"
-_CLUSTER_PROMPT_VERSION = "cluster-verify-v2"
 
 VERDICT_CACHE_FILE = FUSION_DIR / "verdict_cache.json"
 FUSION_LOG_DIR = FUSION_DIR
@@ -145,16 +141,106 @@ def _surface_key(name):
 
 
 def _is_morphological_variant(a, b, aliases=None):
-    """True when two names differ only in form (case, hyphen, spacing, punctuation, plural) or one
-    is an abbreviation the documents define for the other. Only these merge on SAME."""
+    """True when two names differ only in form (case, hyphen, spacing, punctuation, plural) or in
+    abbreviations: a document-defined one, a trailing (ACRONYM), or an initial like 'm.'. Only these
+    merge on SAME."""
     ka, kb = _surface_key(a), _surface_key(b)
     if not ka or not kb:
         return False
     if ka == kb:
         return True
     aliases = aliases or {}
-    return (kb in {_surface_key(x) for x in aliases.get(a, ())}
-            or ka in {_surface_key(x) for x in aliases.get(b, ())})
+    if (kb in {_surface_key(x) for x in aliases.get(a, ())}
+            or ka in {_surface_key(x) for x in aliases.get(b, ())}):
+        return True
+    expand = _alias_expansions(aliases)
+    wa, wb = _name_words(a, expand), _name_words(b, expand)
+    return _surface_key(" ".join(wa)) == _surface_key(" ".join(wb)) or _initial_match(wa, wb)
+
+
+_TRAILING_PAREN = re.compile(r"^(.*\S)\s*\(([^()]{1,15})\)$")
+_INITIAL = re.compile(r"[a-z]\.")
+
+
+def _is_acronym(abbr, words):
+    """Right to left, abbr's letters occur in order in words: the last in the last word, the first
+    in the first word."""
+    letters = [c for c in abbr if c.isalnum()]
+    text = " ".join(words)
+    if not letters or len(letters) > 10 or len(words) < 2:
+        return False
+    pos = len(text)
+    for i, c in enumerate(reversed(letters)):
+        pos = text.rfind(c, 0, pos)
+        if pos < 0 or (i == 0 and pos < len(text) - len(words[-1])):
+            return False
+    return pos < len(words[0])
+
+
+def _alias_expansions(aliases):
+    """{abbreviation: full name} for document-defined abbreviations. One with two different long
+    forms is skipped; forms that differ only in plural or punctuation count as one."""
+    expand = {}
+    for full, abbrs in aliases.items():
+        for abbr in abbrs:
+            expand.setdefault(abbr, set()).add(normalize_concept(full))
+    return {abbr: min(fulls, key=lambda f: (len(f), f)) for abbr, fulls in expand.items()
+            if len({_surface_key(f) for f in fulls}) == 1}
+
+
+def _name_words(name, expand):
+    """A name's words with a trailing (ACRONYM) of itself removed and abbreviations expanded."""
+    text = normalize_concept(name)
+    m = _TRAILING_PAREN.match(text)
+    if m and _is_acronym(m.group(2), m.group(1).split()):
+        text = m.group(1)
+    words = text.split()
+    # A long form can hold another abbreviation (ltbi -> latent tb infection); a few passes, bounded.
+    for _ in range(3):
+        expanded = [w for t in words for w in expand.get(t, t).split()]
+        if expanded == words:
+            break
+        words = expanded
+    return words
+
+
+def _initial_match(wa, wb):
+    """An initial with a period stands for one word ("m. tuberculosis"); a bare letter does not
+    (b tree). Every other word must match, at least one exactly."""
+    if len(wa) != len(wb):
+        return False
+    same = [_surface_key(x) == _surface_key(y) for x, y in zip(wa, wb)]
+    initial = [bool(_INITIAL.fullmatch(x) and len(y) > 2 and y[0] == x[0]
+                    or _INITIAL.fullmatch(y) and len(x) > 2 and x[0] == y[0])
+               for x, y in zip(wa, wb)]
+    return any(same) and any(initial) and all(s or i for s, i in zip(same, initial))
+
+
+def _variant_pairs(names, aliases):
+    """Every (a, b) pair of names, a < b, that _is_morphological_variant accepts. Names are grouped
+    by normalised key instead of checking all n^2 pairs; initials get a pass of their own."""
+    expand = _alias_expansions(aliases)
+    words = {n: _name_words(n, expand) for n in names}
+    groups = {}
+    for n in names:
+        for key in {_surface_key(n), _surface_key(" ".join(words[n]))}:
+            if key:
+                groups.setdefault(key, set()).add(n)
+    # A name and its document-defined abbreviation used as a name of its own ("ltbi").
+    for full, abbrs in aliases.items():
+        for abbr in abbrs:
+            if full in words and _surface_key(abbr) in groups:
+                groups[_surface_key(abbr)].add(full)
+    found = {tuple(sorted(p)) for g in groups.values() for p in combinations(g, 2)}
+    by_length = {}
+    for n in names:
+        by_length.setdefault(len(words[n]), []).append(n)
+    for n in names:
+        if any(_INITIAL.fullmatch(w) for w in words[n]):
+            found |= {tuple(sorted((n, m))) for m in by_length[len(words[n])]
+                      if m != n and _initial_match(words[n], words[m])}
+    # Grouping over-collects slightly (two keys per name); the check itself decides.
+    return sorted(p for p in found if _is_morphological_variant(p[0], p[1], aliases))
 
 
 _HYPHEN_VARIANTS = {"‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-"}
@@ -473,6 +559,48 @@ def _source_aliases(texts, names):
     return out
 
 
+_LONG_FORM_STOPWORDS = {"of", "and", "the", "for", "in", "on", "to", "a", "an", "with", "by"}
+
+
+def _text_long_form(abbr, before):
+    """The long form written just before '(abbr)', or None. Schwartz and Hearst's letter test
+    (abbr's letters in order, its first letter starting a word), plus: the long form starts with
+    abbr's first letter and its word initials (small words aside) occur in abbr in order. The
+    longest such run within min(len + 5, 2 * len) words wins ('tuberculin skin test', not 'test')."""
+    letters = "".join(c for c in abbr if c.isalnum())
+    words = before.split()[-min(len(letters) + 5, len(letters) * 2):]
+    best = None
+    for start in range(len(words) - 1, -1, -1):
+        if not any(c.isalnum() for c in words[start]):
+            break                                   # punctuation ends the phrase
+        run = words[start:]
+        if run[0] in _LONG_FORM_STOPWORDS or run[0][0] != letters[0]:
+            continue
+        initials = iter(letters)
+        if (all(any(i == w[0] for i in initials) for w in run if w not in _LONG_FORM_STOPWORDS)
+                and _abbreviates(abbr, " ".join(run))):
+            best = " ".join(run)
+    return best if best != abbr else None
+
+
+def _document_aliases(texts, names):
+    """{long form: {abbreviation}}: the node-name definitions _source_aliases finds, plus every
+    '<long form> (ABBR)' the texts define, whether or not the long form is a node name."""
+    aliases = {name: set(abbrs) for name, abbrs in _source_aliases(texts, names).items()}
+    for text in texts:
+        text = re.sub("­\\s*", "", unicodedata.normalize("NFKC", text))
+        for m in _ABBREVIATION.finditer(text):
+            abbr = m.group(1).lower()
+            # An abbreviation is written with a capital somewhere: "(TB)", not "(right)".
+            if not any(c.isupper() for c in m.group(1)):
+                continue
+            before = normalize_concept(text[max(0, m.start() - _ABBREVIATION_WINDOW):m.start()])
+            long_form = _text_long_form(abbr, before)
+            if long_form:
+                aliases.setdefault(long_form, set()).add(abbr)
+    return aliases
+
+
 def _named_both(a, b, sentence, aliases=None):
     """Whether a sentence names both concepts, by name or defined abbreviation, at places that do
     not overlap ('binary search' inside 'binary search tree' does not count)."""
@@ -560,6 +688,8 @@ _VERDICT_SYNONYMS = {
     "different but related": "related",
     "different-but-related": "related",
     "different, but related": "related",
+    # Step 3's merge-only answer for "not the same concept".
+    "different": "unrelated",
 }
 
 
@@ -630,6 +760,9 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
     rate_limit_count = 0
     started = time.perf_counter()
     limiter_wait = 0.0
+    # Summed over every attempt this call made; finish_reason is the last response's.
+    prompt_tokens = completion_tokens = reasoning_tokens = 0
+    finish_reason = None
     try:
         while True:
             reason = None
@@ -656,6 +789,12 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
                     # OpenAI reasoning models use max_completion_tokens.
                     **{COMPLETION_TOKEN_PARAMETER: max_tokens},
                 )
+                usage = getattr(completion, "usage", None)
+                prompt_tokens += getattr(usage, "prompt_tokens", None) or 0
+                completion_tokens += getattr(usage, "completion_tokens", None) or 0
+                details = getattr(usage, "completion_tokens_details", None)
+                reasoning_tokens += getattr(details, "reasoning_tokens", None) or 0
+                finish_reason = completion.choices[0].finish_reason
                 raw = completion.choices[0].message.content or ""
                 data = json.loads(raw)
                 results = _results_list(data)
@@ -709,9 +848,11 @@ def _verdict_attempt(client, system, payload, log, tag, failures=None, max_token
             failures["limiter_wait_seconds"] = failures.get("limiter_wait_seconds", 0.0) + limiter_wait
         logger.info(
             "fusion_verdict_call tag=%s pair_count=%d duration_ms=%.0f retries=%d "
-            "rate_limit_count=%d rate_limit_retries=%d",
+            "rate_limit_count=%d rate_limit_retries=%d limiter_wait_ms=%.0f "
+            "prompt_tokens=%d completion_tokens=%d reasoning_tokens=%d finish_reason=%s",
             tag, len(payload), (time.perf_counter() - started) * 1000,
-            attempt + rate_retries, rate_limit_count, rate_retries,
+            attempt + rate_retries, rate_limit_count, rate_retries, limiter_wait * 1000,
+            prompt_tokens, completion_tokens, reasoning_tokens, finish_reason,
         )
 
 
@@ -909,28 +1050,6 @@ class _EvidencePool:
             (time.perf_counter() - started) * 1000,
         )
 
-    def snippets(self, sources, query_name):
-        query_vec = self._name_vecs.get(query_name)
-        if query_vec is None:
-            return []
-        chunks, vectors = [], []
-        for doc in sorted(sources):
-            entry = self._by_doc.get(doc)
-            if entry is None:
-                continue
-            chunks.extend(entry[0])
-            vectors.append(entry[1])
-        if not chunks:
-            self.missing += 1
-            if not self._missing_logged:
-                self._missing_logged = True
-                self._log("[fusion] no embedded chunks for node sources")
-            return []
-        sims = cosine_similarity(query_vec.reshape(1, -1), np.vstack(vectors))[0]
-        order = sorted(range(len(chunks)), key=lambda i: (-sims[i], i))
-        return [chunks[i]["text"][:_EVIDENCE_SNIPPET_CHARS]
-                for i in order[:_EVIDENCE_CHUNKS_PER_NODE]]
-
     def _nearest_chunks(self, sources, query_vec, k):
         chunks, vectors = [], []
         for doc in sorted(sources):
@@ -1013,14 +1132,15 @@ def _collect_nodes(engine):
 def merge_graph(engine, client, log=print):
     workers = fusion_workers()
     logger.info(
-        "fusion_concurrency workers=%d global_slots=%d input_tpm=%d output_tpm=%d",
-        workers, _FUSION_GLOBAL_SLOTS, graph_limiter.input_limit, graph_limiter.output_limit,
+        "fusion_concurrency workers=%d global_slots=%d verdict_batch=%d max_singles=%d "
+        "input_tpm=%d output_tpm=%d",
+        workers, _FUSION_GLOBAL_SLOTS, _VERDICT_PAIR_BATCH, _VERDICT_MAX_SINGLES,
+        graph_limiter.input_limit, graph_limiter.output_limit,
     )
     run = FusionLog(
         model=_MODEL,
-        prompt_versions={"step3": _STEP3_PROMPT_VERSION, "step5": _STEP5_PROMPT_VERSION,
-                         "cluster": _CLUSTER_PROMPT_VERSION},
-        settings={"auto_merge": AUTO_MERGE_SIM, "llm_low": LLM_LOW_SIM,
+        prompt_versions={"step3": _STEP3_PROMPT_VERSION, "step5": _STEP5_PROMPT_VERSION},
+        settings={"auto_merge": AUTO_MERGE_SIM, "possible_synonym": POSSIBLE_SYNONYM_SIM,
                   "batch": _VERDICT_PAIR_BATCH, "neighbours": _NEIGHBOURS_PER_NODE,
                   "workers": workers, "global_slots": _FUSION_GLOBAL_SLOTS},
         documents=sorted(getattr(engine, "uploads_by_week", {}).items()),
@@ -1054,36 +1174,51 @@ def merge_graph(engine, client, log=print):
     dsu = _DSU(unique_names)
     llm_candidates = []
     auto_merged = blocked = 0
+    # Abbreviations the documents define (for node names or any other long form); steps 2, 3b and
+    # the check share them.
+    aliases = _document_aliases(_engine_texts(engine), unique_names)
     if len(unique_names) >= 2:
         name_embeddings = np.asarray(encode_texts(unique_names))
         sim_matrix = cosine_similarity(name_embeddings)
-        for i in range(len(unique_names)):
-            for j in range(i + 1, len(unique_names)):
-                sim = float(sim_matrix[i, j])
-                if sim < LLM_LOW_SIM:
-                    continue
-                a, b = unique_names[i], unique_names[j]
-                if _is_negation_variant(a, b):
-                    blocked += 1
-                    run.blocked.append((a, b, sim))
-                    continue
-                if sim >= AUTO_MERGE_SIM and _is_modifier_variant(a, b):
+        index = {n: i for i, n in enumerate(unique_names)}
+        # No similarity floor: only pairs that pass the name check can merge, at any similarity.
+        check_started = time.perf_counter()
+        passed = _variant_pairs(unique_names, aliases)
+        run.check_ms = (time.perf_counter() - check_started) * 1000
+        run.pairs_checked = len(unique_names) * (len(unique_names) - 1) // 2
+        run.pairs_passed = len(passed)
+        for a, b in passed:
+            sim = float(sim_matrix[index[a], index[b]])
+            if _is_negation_variant(a, b):
+                blocked += 1
+                run.blocked.append((a, b, sim))
+            elif sim >= AUTO_MERGE_SIM and not _is_modifier_variant(a, b):
+                dsu.union(a, b)
+                auto_merged += 1
+                run.auto_merged.append((a, b, sim))
+            else:
+                if sim >= AUTO_MERGE_SIM:
                     run.modifier_held.append((a, b, sim))
-                    llm_candidates.append((a, b, sim))
-                elif sim >= AUTO_MERGE_SIM:
-                    dsu.union(a, b)
-                    auto_merged += 1
-                    run.auto_merged.append((a, b, sim))
-                else:
-                    llm_candidates.append((a, b, sim))
+                llm_candidates.append((a, b, sim))
+        passed_set = set(passed)
+        for i, j in np.argwhere(np.triu(sim_matrix, 1) >= POSSIBLE_SYNONYM_SIM):
+            a, b = unique_names[i], unique_names[j]
+            if (a, b) not in passed_set and not _is_negation_variant(a, b):
+                run.possible_synonyms.append((a, b, float(sim_matrix[i, j])))
     kept = [(a, b, s) for (a, b, s) in llm_candidates if dsu.find(a) != dsu.find(b)]
     run.already_linked = [c for c in llm_candidates if c not in kept]
     llm_candidates = kept
     run.candidates = list(llm_candidates)
-    log(f"Fusion step 2: {auto_merged} auto-merged, {blocked} blocked, {len(llm_candidates)} for LLM")
+    log(f"Fusion step 2: {run.pairs_checked} pairs checked, {run.pairs_passed} passed, "
+        f"{auto_merged} auto-merged, {blocked} blocked, {len(llm_candidates)} for LLM, "
+        f"{len(run.possible_synonyms)} possible synonym(s), check {run.check_ms:.1f} ms")
+    logger.info("fusion_step2_check names=%d pairs_checked=%d pairs_passed=%d auto_merged=%d "
+                "sent=%d possible_synonyms=%d check_ms=%.1f",
+                len(unique_names), run.pairs_checked, run.pairs_passed, auto_merged,
+                len(llm_candidates), len(run.possible_synonyms), run.check_ms)
     mark("1-2")
 
-    interim_cmap = _build_canonical_map(dsu, nodes)
+    interim_cmap = _build_canonical_map(dsu, nodes, aliases)
 
     adjacency = {}
     for e in engine.edges:
@@ -1094,22 +1229,22 @@ def merge_graph(engine, client, log=print):
         adjacency.setdefault(f, []).append((t, e["relation"]))
         adjacency.setdefault(t, []).append((f, e["relation"]))
 
-    canonical_votes = {}
     step3_new_edges = []
     if llm_candidates:
         ask_names = sorted({n for (a, b, _s) in llm_candidates for n in (a, b)})
         name_vecs = {nm: np.asarray(vec) for nm, vec in zip(ask_names, encode_texts(ask_names))}
-        
-        merges, step3_new_edges, canonical_votes = _llm_evaluate_pairs(
+
+        merges, step3_new_edges = _llm_evaluate_pairs(
             llm_candidates, interim_cmap, adjacency, nodes, name_vecs, engine, client, log, run)
         for (a, b) in merges:
             dsu.union(a, b)
     mark("3")
 
-    split_out = _verify_clusters(dsu, nodes, engine, client, log, run)
+    split_out = _verify_clusters(dsu, nodes, log, run, aliases)
     mark("3b")
 
-    final_cmap = _build_canonical_map(dsu, nodes, canonical_votes, split_out)
+    # The label of each merged group is chosen by _canonical_rank, not by the LLM.
+    final_cmap = _build_canonical_map(dsu, nodes, aliases, split_out)
 
     final_nodes = {}
     for norm, rec in nodes.items():
@@ -1284,8 +1419,20 @@ def merge_graph(engine, client, log=print):
     return canonical_nodes, fused_edges
 
 
-def _build_canonical_map(dsu, nodes, llm_votes=None, split_out=None):
-    votes = llm_votes or {}
+def _canonical_rank(name, nodes, expand):
+    """Sort key for a merged group's label, best lowest: a full form (no period-initial, no
+    document-defined abbreviation word, no trailing acronym), then most mentions, longest,
+    alphabetical."""
+    text = normalize_concept(name)
+    words = text.split()
+    m = _TRAILING_PAREN.match(text)
+    abbreviated = (any(_INITIAL.fullmatch(w) or w in expand for w in words)
+                   or bool(m and _is_acronym(m.group(2), m.group(1).split())))
+    return (abbreviated, -nodes[name]["mentions"], -len(name), name)
+
+
+def _build_canonical_map(dsu, nodes, aliases=None, split_out=None):
+    expand = _alias_expansions(aliases or {})
     split = split_out or set()
     cmap = {}
     for members in dsu.groups().values():
@@ -1293,7 +1440,7 @@ def _build_canonical_map(dsu, nodes, llm_votes=None, split_out=None):
         kept = [m for m in members if m not in active_split]
         if not kept:
             active_split, kept = set(), members
-        best = max(kept, key=lambda m: (votes.get(m, 0), len(m), nodes[m]["mentions"], m))
+        best = min(kept, key=lambda m: _canonical_rank(m, nodes, expand))
         for m in members:
             cmap[m] = m if m in active_split else best
     return cmap
@@ -1420,30 +1567,18 @@ def _neighbours(name, interim_cmap, adjacency, k):
     return out or ["(no neighbours)"]
 
 
+# Merge-only: step 3 decides whether two names are one concept and adds no edges.
 _STEP3_SYSTEM = (
-    "Resolve whether two concept names are SAME, DIFFERENT BUT RELATED, or UNRELATED. "
+    "Decide whether two concept names refer to the SAME concept. "
     "Judge PRIMARILY from the evidence sentences; use neighbourhood as secondary context. "
-    "Never judge from name similarity alone. Answer 'related' ONLY for meaningful academic relationships. "
-    "If an evidence sentence directly states how A and B relate to each other, the verdict is 'related', "
-    "not 'unrelated'. Two names merely appearing in the same sentence is not enough.\n"
+    "Never judge from name similarity alone. Related but distinct concepts are 'different'.\n"
     "SAME RULES:\n"
     "- NOT same if the evidence contrasts or distinguishes A and B with each other "
     "(e.g. 'A, unlike B', 'A whereas B', 'A while B' used as a contrast). A contrast of A or B "
     "with some third concept does not count, nor does 'while' meaning 'at the same time as'.\n"
     "- If modifier_variant is true, one name is the other plus extra words, which usually "
     "narrow it. Answer same only if the evidence uses the two names for one and the same thing.\n"
-    "RELATION LABEL RULES (when 'related'):\n"
-    "- 1-3 words, directed verb phrase in ACTIVE voice (e.g. 'is a type of', 'generalises'). "
-    "NOT passive voice.\n"
-    "- Must NOT contain either name, NOT a full sentence, NOT vague ('is related to', 'similar to').\n"
-    "- If HIERARCHICAL (is a/type of/generalises/includes/underlies), return 'broader': 'A'|'B' "
-    "naming the more general concept.\n"
-    "- 'sentence': one short sentence (max 12 words) stating the relation, subject first, "
-    "using both names exactly as given.\n"
-    'Return: {"id": int, "verdict": "same"|"related"|"unrelated", '
-    '"canonical": "A"|"B" (if same), "relation": phrase (if related), '
-    '"sentence": text (if related), '
-    '"direction": "A_to_B"|"B_to_A" (if related), "broader": "A"|"B" (if related + hierarchical)}. '
+    'Return: {"id": int, "verdict": "same"|"different"}. '
     'Only JSON: {"results": [...]}'
 )
 
@@ -1487,7 +1622,7 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
             if ev:
                 item["evidence"] = ev
             payload.append(item)
-        jobs.append((payload, _VERDICT_MAX_TOKENS))
+        jobs.append((payload, _STEP3_MAX_TOKENS))
     answers = _run_verdict_calls(client, _STEP3_SYSTEM, jobs, log, "Fusion step 3:",
                                  run.call_failures["step3"], run.settings.get("workers", 1))
 
@@ -1497,172 +1632,65 @@ def _llm_evaluate_pairs(candidates, interim_cmap, adjacency, nodes, name_vecs, e
         for idx, (a, b, sim) in enumerate(sub):
             r = by_id.get(idx)
             if r is None:
-                resolved[(a, b)] = {"verdict": "unrelated"}
+                resolved[(a, b)] = {"verdict": "different"}
                 continue
-            rec = _to_cache_record(a, b, r)
-            resolved[(a, b)] = _from_cache_record(a, b, rec)
+            # Only the verdict is kept; the merged node's label is chosen without the LLM.
+            rec = {"verdict": _to_cache_record(a, b, r)["verdict"]}
+            resolved[(a, b)] = rec
             # Only an answer we can read is kept: a missing or unknown verdict
-            # would otherwise stay "unrelated" for good. It is asked again next time.
+            # would otherwise stay "different" for good. It is asked again next time.
             if _normalise_verdict(r.get("verdict")) is not None:
                 cache[_pair_key(_STEP3_PROMPT_VERSION, a, b)] = rec
                 cache_dirty = True
     if cache_dirty:
         _save_verdict_cache(cache)
 
-    merges, new_edges, canonical_votes = [], [], {}
-    n_same = n_related = n_unrelated = n_not_named = n_rejected = n_rejected_kept = 0
-    aliases = _source_aliases(_engine_texts(engine), sorted({n for (a, b, _s) in candidates for n in (a, b)}))
+    # Every candidate already passed the name check in step 2, so "same" is the only gate left.
+    merges = []
+    n_same = n_different = 0
     for (a, b, sim) in candidates:
         r = resolved.get((a, b), {})
-        verdict = _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b)
         source = "cache" if (a, b) in from_cache else "call"
-        detail = ""
-        direction, from_sentence = _verdict_direction(a, b, r)
-        rejected = verdict == "same" and not _is_morphological_variant(a, b, aliases)
-        if verdict == "same":
-            detail = f"canonical {r.get('canonical') or '?'}"
-        if verdict == "related" or (rejected and r.get("relation")):
-            detail = (detail + "   " if detail else "") + (
-                f'"{_clean_relation(r.get("relation") or "")}" ({direction}, '
-                f'{"from sentence" if from_sentence else "direction field"})')
-            if r.get("sentence"):
-                detail += f'   "{r["sentence"]}"'
-        if _is_modifier_variant(a, b):
-            detail = (detail + "   [modifier variant]").strip()
-        # What a dropped relation is recorded as: a rejected merge keeps its own label.
-        dropped = "dropped"
-        if rejected:
-            # Not variants of one name, so not merged: both nodes stay. A relation the verdict
-            # carries goes through the same checks as a 'related' verdict.
-            run.verdicts.append((source, a, b, sim, "rejected merge",
-                                 (detail + "   [not a morphological variant: both nodes kept]").strip()))
-            n_rejected += 1
-            if not str(r.get("relation") or "").strip():
-                continue
-            verdict, dropped = "related", "rejected merge"
-        else:
-            run.verdicts.append((source, a, b, sim, verdict, detail))
-        if verdict == "same":
-            merges.append((a, b))
-            canonical = str(r.get("canonical", "")).strip().upper()
-            if canonical in ("A", "B"):
-                chosen = a if canonical == "A" else b
-                canonical_votes[chosen] = canonical_votes.get(chosen, 0) + 1
-            n_same += 1
-        elif verdict == "related":
-            frm, to, relation, conflict = _orient(
-                a, b, r.get("relation") or "", direction, r.get("broader") or "")
-            if conflict and from_sentence:
-                # The model's broader field and its own sentence disagree on
-                # which way the edge runs; neither can be trusted over the other.
-                run.verdicts[-1] = (source, a, b, sim, dropped,
-                                    run.verdicts[-1][5] + "   [broader contradicts sentence]")
-                n_unrelated += 0 if rejected else 1
-                continue
-            if not _named_both(a, b, r.get("sentence") or "", aliases):
-                run.verdicts[-1] = (source, a, b, sim, dropped,
-                                    (run.verdicts[-1][5] + "   [sentence does not name both]").strip())
-                n_not_named += 0 if rejected else 1
-                continue
-            if (not relation or _is_vague_relation(relation)
-                    or _label_names_concept(relation, a) or _label_names_concept(relation, b)):
-                n_unrelated += 0 if rejected else 1
-                continue
-            new_edges.append({"from": frm, "to": to, "relation": relation,
-                              "summary": r.get("sentence") or "",
-                              "llm_sentence": from_sentence})
-            if rejected:
-                n_rejected_kept += 1
-            else:
-                n_related += 1
-        else:
-            n_unrelated += 1
+        if _verdict_or_unrelated(r.get("verdict"), log, "Fusion step 3:", a, b) != "same":
+            run.verdicts.append((source, a, b, sim, "different", ""))
+            n_different += 1
+            continue
+        run.verdicts.append((source, a, b, sim, "same",
+                             "[modifier variant]" if _is_modifier_variant(a, b) else ""))
+        merges.append((a, b))
+        n_same += 1
 
-    run.verdict_totals = {"same": n_same, "related": n_related, "unrelated": n_unrelated,
-                          "dropped (sentence does not name both)": n_not_named,
-                          "rejected merge": n_rejected,
-                          "rejected merge kept as relation": n_rejected_kept}
-    log(f"Fusion step 3: {len(candidates)} -> same {n_same} / related {n_related} / unrelated {n_unrelated}"
-        f" / not named {n_not_named} / rejected merge {n_rejected} ({n_rejected_kept} kept as relation)")
-    return merges, new_edges, canonical_votes
+    run.verdict_totals = {"same (merged)": n_same, "different": n_different}
+    log(f"Fusion step 3: {len(candidates)} -> merged {n_same} / different {n_different}")
+    logger.info("fusion_step3_verdicts pairs=%d merges=%d different=%d",
+                len(candidates), n_same, n_different)
+    # Merge-only: step 3 adds no edges.
+    return merges, []
 
 
-_STEP3B_SYSTEM = (
-    "Several concept NAMES merged into ONE node. Using source text, decide which "
-    "names truly refer to the SAME concept and which are DIFFERENT (pulled in by mistake). "
-    "Return names that do NOT belong in 'split_out'; if all are the same, return [].\n"
-    'Return: {"id": int, "split_out": [name, ...]}. '
-    'Only JSON: {"results": [...]}'
-)
-
-
-def _verify_clusters(dsu, nodes, engine, client, log, run):
+def _verify_clusters(dsu, nodes, log, run, aliases=None):
+    """Step 3b without the LLM: in each merged group of 3+ names, a name that is not a
+    morphological variant of the group's canonical name is split back out. aliases are the
+    document abbreviations step 2 found for every node name."""
+    expand = _alias_expansions(aliases or {})
     clusters = [sorted(m) for m in dsu.groups().values() if len(m) >= 3]
     log(f"Fusion step 3b: {len(clusters)} cluster(s) to re-verify")
     if not clusters:
         return set()
 
-    def _ckey(members):
-        return _pair_key(_CLUSTER_PROMPT_VERSION, "||".join(members), "")
-
-    cache = _load_verdict_cache()
-    resolved, to_ask = {}, []
-    for ci, members in enumerate(clusters):
-        rec = cache.get(_ckey(members))
-        if isinstance(rec, dict):
-            resolved[ci] = rec
-        else:
-            to_ask.append((ci, members))
-
-    if to_ask:
-        cluster_names = sorted({m for (_ci, members) in to_ask for m in members})
-        name_vecs = {nm: np.asarray(vec) for nm, vec in zip(cluster_names, encode_texts(cluster_names))}
-        evidence = _EvidencePool(engine, log, name_vecs)
-
-        batches = [to_ask[i:i + _CLUSTER_BATCH] for i in range(0, len(to_ask), _CLUSTER_BATCH)]
-        jobs = []
-        for batch in batches:
-            payload = []
-            for (ci, members) in batch:
-                entry = {"id": ci, "names": []}
-                for m in members:
-                    name_item = {"name": m}
-                    snippets = evidence.snippets(nodes[m]["sources"], m)
-                    if snippets:
-                        name_item["evidence"] = snippets
-                    entry["names"].append(name_item)
-                payload.append(entry)
-            jobs.append((payload, _CLUSTER_MAX_TOKENS_BASE + _CLUSTER_MAX_TOKENS_PER * len(batch)))
-        run.cluster_calls += len(jobs)
-        answers = _run_verdict_calls(client, _STEP3B_SYSTEM, jobs, log, "Fusion step 3b:",
-                                     run.call_failures["step3b"], run.settings.get("workers", 1))
-
-        cache_dirty = False
-        for batch, results in zip(batches, answers):
-            by_id = _results_by_id(results)
-            for (ci, members) in batch:
-                r = by_id.get(ci)
-                if r is None or not isinstance(r.get("split_out"), list):
-                    # No answer for this cluster: kept together this run, but
-                    # not cached, so a failed call is not remembered as "same".
-                    resolved[ci] = {"split_out": []}
-                    continue
-                rec = {"split_out": [m for m in r["split_out"] if m in members]}
-                cache[_ckey(members)] = rec
-                cache_dirty = True
-                resolved[ci] = rec
-        if cache_dirty:
-            _save_verdict_cache(cache)
-
-    asked = {ci for (ci, _m) in to_ask}
-    split_out = set()
-    for ci, members in enumerate(clusters):
-        so = [m for m in ((resolved.get(ci) or {}).get("split_out") or []) if m in members]
-        run.clusters.append((list(members), list(so), "call" if ci in asked else "cache"))
-        if len(so) >= len(members):
-            so = so[:len(members) - 1]
+    split_out, failed_pairs = set(), 0
+    for members in clusters:
+        failed_pairs += sum(1 for a, b in combinations(members, 2)
+                            if not _is_morphological_variant(a, b, aliases))
+        # Canonical picked as _build_canonical_map picks it.
+        canon = min(members, key=lambda m: _canonical_rank(m, nodes, expand))
+        so = [m for m in members if m != canon and not _is_morphological_variant(m, canon, aliases)]
+        run.clusters.append((list(members), so, "check"))
         split_out.update(so)
-    log(f"Fusion step 3b: split out {len(split_out)} name(s)")
+    log(f"Fusion step 3b: checked {len(clusters)} group(s), {failed_pairs} pair(s) failed, "
+        f"split out {len(split_out)} name(s)")
+    logger.info("fusion_step3b_check groups=%d failed_pairs=%d names_split=%d",
+                len(clusters), failed_pairs, len(split_out))
     return split_out
 
 

@@ -19,8 +19,8 @@ class FusionLog:
     def __init__(self, model, prompt_versions, settings, documents):
         self.started = datetime.now()
         self.model = model
-        self.prompt_versions = prompt_versions   # {"step3": ..., "step5": ..., "cluster": ...}
-        self.settings = settings                 # {"auto_merge": ..., "llm_low": ..., ...}
+        self.prompt_versions = prompt_versions   # {"step3": ..., "step5": ...}
+        self.settings = settings                 # {"auto_merge": ..., "possible_synonym": ..., ...}
         self.documents = documents               # [(week, filename)]
 
         self.mentions = 0
@@ -31,11 +31,14 @@ class FusionLog:
         self.modifier_held = []      # (a, b, sim) above auto-merge, asked instead
         self.candidates = []         # (a, b, sim)
         self.already_linked = []     # (a, b, sim) dropped before asking
+        self.pairs_checked = 0       # name pairs covered by the step 2 name check
+        self.pairs_passed = 0
+        self.check_ms = 0.0
+        self.possible_synonyms = []  # (a, b, sim) similar but failing the name check, not merged
         self.verdicts = []           # (source, a, b, sim, verdict, detail)
         self.verdict_totals = {}
         self.step3_calls = 0
         self.clusters = []           # (members, split_out, source)
-        self.cluster_calls = 0
         self.edges_in = 0
         self.edges_in_detail = ""
         self.edges_out = 0
@@ -46,7 +49,7 @@ class FusionLog:
         self.bridge_verdicts = []    # (source, a, b, verdict, detail)
         self.bridge_edges = []       # (frm, to, relation)
         self.bridge_calls = 0
-        self.call_failures = {"step3": {}, "step3b": {}, "step5": {}}   # step -> {reason: count}
+        self.call_failures = {"step3": {}, "step5": {}}   # step -> {reason: count}
         self.result = {}
 
     # -- sections -----------------------------------------------------------
@@ -85,7 +88,9 @@ class FusionLog:
 
     def _step2(self, out):
         out += [
-            "step 2  similarity screen",
+            "step 2  name check",
+            f"  {self.pairs_checked} pair(s) checked, {self.pairs_passed} passed "
+            f"({self.check_ms:.1f} ms)",
             f"  auto-merged at or above {self.settings.get('auto_merge')}: {len(self.auto_merged)}",
         ]
         out += [f"    {_pair(a, b, s)}" for a, b, s in self.auto_merged]
@@ -99,6 +104,9 @@ class FusionLog:
             out += [f"    {_pair(a, b, s)}" for a, b, s in self.already_linked]
         out.append(f"  sent to the LLM: {len(self.candidates)}")
         out += [f"    {_pair(a, b, s)}" for a, b, s in self.candidates]
+        out.append(f"  possible synonyms (similar, failed the name check, not merged): "
+                   f"{len(self.possible_synonyms)}")
+        out += [f"    {_pair(a, b, s)}" for a, b, s in self.possible_synonyms]
         out.append("")
 
     def _step3(self, out):
@@ -123,7 +131,8 @@ class FusionLog:
         if not self.clusters:
             out += ["  no group reached 3 names, so nothing to re-verify", ""]
             return
-        out.append(f"  {len(self.clusters)} cluster(s), {self.cluster_calls} call(s)")
+        out.append(f"  {len(self.clusters)} cluster(s) checked without the LLM, "
+                   f"{sum(len(so) for _m, so, _s in self.clusters)} name(s) split out")
         for members, split_out, source in self.clusters:
             out.append(f"    {source:<6} {', '.join(members)}")
             out.append(
