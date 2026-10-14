@@ -79,16 +79,42 @@
   --n-university: #9d174d;
   --n-week: #4d7c0f;
 
+  --sage: #e7ece2;
+  --sage-ink: #3f5a45;
+  --beige: #f4eee2;
+
+  /* radii */
   --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --font-display: "Inter", system-ui, "Segoe UI", Roboto, "Helvetica Neue",
-    "Segoe UI Symbol", "DejaVu Sans", Arial, sans-serif;
-  --font-serif: "Newsreader", Georgia, serif;
-  --font-body: var(--font-display);
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* elevation */
+  --shadow-sm: 0 1px 2px rgba(42, 26, 16, 0.06);
+  --shadow-md: 0 6px 20px -8px rgba(42, 26, 16, 0.18), 0 1px 2px rgba(42, 26, 16, 0.05);
+  --shadow-lg: 0 18px 44px -16px rgba(42, 26, 16, 0.28);
+  --focus-ring: 0 0 0 3px rgba(34, 80, 60, 0.25);
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 150ms;
+  --dur: 220ms;
+
+  /* type: Space Grotesk for interface titles, Newsreader for reading titles,
+     Inter for body text and JetBrains Mono for numbers and metadata */
+  --font-display: "Space Grotesk", "Inter", system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-body: "Inter", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --font-mono-stack: "JetBrains Mono", ui-monospace, "Cascadia Mono",
     "DejaVu Sans Mono", Consolas, monospace;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 14px;
+  --fs-md: 15.5px;
+  --fs-lg: 18px;
+  --fs-xl: 23px;
+  --fs-2xl: 30px;
 
   /* Compatibility aliases for the existing workspace component styles. */
   --ink: var(--text-0);

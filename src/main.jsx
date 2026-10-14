@@ -1,11 +1,13 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Landing from './pages/Landing.jsx'
-import Login from './pages/Login.jsx'
-import NotFound from './pages/NotFound.jsx'
-import Workspace from './pages/Workspace.jsx'
-import { AuthProvider, RequireAuth } from './auth.jsx'
+// Shared styles load first so page and component styles can override them.
+import './styles/shared.css'
+import Landing from './pages/Landing/Landing.jsx'
+import Login from './pages/Login/Login.jsx'
+import NotFound from './pages/NotFound/NotFound.jsx'
+import Workspace from './pages/Workspace/Workspace.jsx'
+import { AuthProvider, RequireAuth } from './lib/auth.jsx'
 import './styles/global.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(

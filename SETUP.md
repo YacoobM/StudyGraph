@@ -1,188 +1,106 @@
-# StudyGraph — React app in the StudyGraph design
+# Setup
 
-## 1. What this project is
+You need two terminals: one for the backend and one for the frontend.
 
-**React 18 + Vite**, routed with `react-router-dom`, graphs drawn with `d3`.
-Entry point is `index.html` → `src/main.jsx`. There is no standalone HTML page
-any more — the design has been rebuilt as React components.
+## What to install first
 
-## 2. Run it
+1. **Node.js 20** or newer
+2. **Python 3.12** (newer versions break some packages)
+3. **Git**
+4. On macOS only, run `brew install libmagic`
 
-**Terminal 1 — backend**
+You also need the team's Supabase project URL and publishable key, and an OpenAI API key.
 
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install fastapi uvicorn python-multipart
-python dev_server.py
+## 1. Backend
+
+Open a terminal in the `backend` folder.
+
+**Windows (PowerShell)**
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-**Terminal 2 — frontend**
+If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once and try again.
+
+**macOS**
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Create a file called `.env` inside the `backend` folder:
+
+```
+OPENAI_API_KEY=your_openai_key
+SUPABASE_URL=https://yourproject.supabase.co
+SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+```
+
+`GEMINI_API_KEY` is optional. It is only used to read images and handwriting.
+See `backend/.env.example` for every setting.
+
+Start the server:
+
+```bash
+uvicorn app.main:app --port 8000 --reload
+```
+
+Open http://localhost:8000/docs to check it is running.
+
+## 2. Frontend
+
+Open a second terminal in the main `StudyGraph` folder (the one with `package.json`).
+
+Create a file called `.env` in that folder:
+
+```
+VITE_SUPABASE_URL=https://yourproject.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+VITE_API_URL=http://localhost:8000
+```
+
+Then run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open **http://localhost:3000/** and hard-refresh (Cmd+Shift+R).
+Open http://localhost:3000 and sign in.
 
-## 3. Using it
+## Common problems
 
-1. Sign in or create an account
-2. You land on `/workspace` — sidebar on the left, five tabs across the top
-3. **Documents** tab → drop in a PDF
-4. Watch it go Queued → Running → Ready with a concept count
-5. It switches to **Graph** automatically, drawn from what was extracted
-6. **Chat** answers from your sources; **Notes** are written from the concepts;
-   **Quiz** has practice questions
+| What you see | What to do |
+|---|---|
+| White screen | The frontend `.env` is missing or in the wrong folder. It must sit next to `package.json`. Stop `npm run dev` and start it again after any change. |
+| "Cannot reach the backend" | Start the backend and check it uses port 8000. |
+| "Supabase is not configured" | The backend `.env` is missing, or a value has a typo or an extra space. |
+| Error about libmagic on macOS | Run `brew install libmagic`, then reinstall the requirements. |
+| Package install fails | Check you are using Python 3.12 inside the `.venv`. |
 
-`+ New graph` opens the Documents tab. That is deliberate: a graph is whatever
-your documents produce, so there is nothing to create before adding a source.
+Never commit either `.env` file. Git already ignores them.
 
-## 4. What the screens arecd
+## Checking your changes
 
-| Route | Component | What it is |
+| Command | Where | What it checks |
 |---|---|---|
-| `/` | `pages/Landing.jsx` | marketing page |
-| `/login` | `pages/Login.jsx` | one screen, sign-in and sign-up |
-| `/workspace` | `pages/Workspace.jsx` | **the app** — sidebar, five tabs |
-| `/builder` | `pages/Builder.jsx` | your teammates' original page, untouched |
+| `npm run build` | main folder | The app builds for Vercel |
+| `npm run test:ui` | main folder | Opens the app in a hidden browser with fake data and clicks through the graph, notes and quiz |
+| `python -m pytest tests` | `backend` | Backend unit tests |
 
-`/builder` still works. Nothing of theirs was deleted.
+Before the first `npm run test:ui`, run `npx playwright-core install chromium` once.
+The `test_pruned_reactivation` tests need a real `OPENAI_API_KEY`.
 
-New files:
+## Deploying
 
-```
-src/pages/Workspace.jsx        the workspace: sidebar, tabs, all five panes
-src/pages/Workspace.css        its stylesheet
-src/components/ConceptGraph.jsx  d3 force graph with the week slider
-src/data/sampleData.js         quiz content carried over from the design
-```
+The frontend deploys to Vercel. Add the three `VITE_` settings above in the Vercel project, with `VITE_API_URL` pointing at the hosted backend.
+On the backend, set `FRONTEND_URL` to the Vercel address so the browser is allowed to call it.
 
-## 5. The design — ported, not approximated
+## New Supabase project
 
-`src/styles/studygraph.css` is the prototype's stylesheet, lifted verbatim
-(478 lines). `Landing.jsx` is the prototype's marketing markup converted to
-JSX — same elements, same class names — so it renders exactly as designed.
-Only the inline `onclick` strings became React handlers wired to the router.
-
-`ConceptGraph.jsx` is a direct port of the prototype's `gxBuild`, including
-the physics, which are load-bearing rather than decoration:
-
-- `velocityDecay(0.62)` — heavy friction, so nodes glide instead of jittering
-- `alphaDecay(0.05)` — the layout cools in about two seconds
-- `alphaMin(0.008)` — it stops early rather than drifting
-- `forceCollide(...).strength(1).iterations(2)` — firm separation, no vibrating overlap
-- `forceManyBody().strength(-520).distanceMax(420)` — distant nodes stop tugging
-
-When the simulation ends, every node is pinned, so the graph sits still.
-Dragging frees only the dragged node's direct neighbours, then re-pins
-everything where it landed. Arrow markers, edge labels, dashed weak links,
-search dimming, the zoom/re-layout toolbar and the week scrubber are all
-carried over.
-
-The graph draws on a **dark card inside the cream panel**, as the design does
-— that is why its strokes and labels are light while the rest of the app is
-paper.
-
-## 6. Palette
-
-`src/styles/global.css` holds the palette: warm off-white surfaces, ink text,
-forest-green accent, copper for in-progress states, Inter and JetBrains Mono.
-Every component reads those tokens, so changing one flows through the app.
-
-Converting from the old dark theme surfaced three light-on-light bugs that
-would have been invisible rather than merely wrong: graph labels were white
-text with a dark halo, the selection ring was white, and link marks were white
-at 50% opacity. All draw in ink now. Two tokens were darkened (`--text-3`,
-`--warn`) because they failed WCAG AA for small text on the lighter
-background; every text token now clears AA.
-
-## 5b. The quiz system — generated from your documents
-
-Ported from the prototype, not simplified. The model:
-
-- questions are grouped into **topics** the student picks; progress counts per
-  topic, not per quiz
-- points are easy 10 / medium 20 / hard 30
-- a quiz passes at **two thirds correct**, and a re-attempt keeps the better score
-- a topic is **mastered** once every quiz in it has been passed
-- the **study plan** gives each day one topic and a checkpoint quiz
-- a **difficulty filter** narrows the list to easy / medium / hard
-
-The runner shows one question at a time with a progress bar, a difficulty and
-points tag, per-answer right/wrong marking, and the explanation after checking.
-The result screen reports correct, points and topic progress, and offers the
-next quiz in the topic or another attempt.
-
-**The questions come from what you uploaded.** `GET /api/quiz`
-(`backend/quiz_service.py`) builds them from the concepts and relationships
-extracted out of your documents. Upload something new and the questions change
-with it. Before anything is processed the pane says so rather than showing
-samples.
-
-Two generation paths:
-
-- **With `OPENAI_API_KEY` set**, an LLM writes the questions from the extracted
-  concepts and relations. Better prose, better distractors.
-- **Without a key**, questions are built straight from the graph's relations by
-  template — "what does X *begins with*?" — with wrong options drawn from other
-  real concepts in the same document. Lower quality, but still genuinely from
-  your material, and it needs no key and costs nothing.
-
-Either way nothing is invented: every answer is a concept that appears in your
-graph, and a concept named in the question is never offered as a wrong option.
-
-Topics are the weeks your uploads were assigned to. A week with fewer than four
-concepts is skipped, because a fair four-option question needs at least that
-many.
-
-Attempts post to `/api/quiz/results`, which keeps the best score. They are held
-in memory: the generated quiz changes whenever you upload, so persisting scores
-would leave them pointing at questions that no longer exist.
-
-## 6. Verifying
-
-With the backend running:
-
-```bash
-node verify_workspace.mjs                  # 13 checks, the full workspace flow
-node verify_quiz.mjs                       # 14 checks, quiz generation
-npx vite build                             # production build
-```
-
-`verify_workspace.mjs` covers the path that matters: sign up, confirm the graph
-starts empty, upload a document, watch progress callbacks fire, **confirm the
-graph is generated from that upload**, check every node maps with the fields the
-canvas needs, confirm the documents table and chat work, then delete.
-
-All three were run against this copy before it was packaged.
-
-## 7. Real extraction
-
-`dev_server.py` fakes extraction — chat answers are tagged `[STUB ANSWER]` and
-the graph is a fixed sample, the same whatever you upload. For graphs built
-from your own PDFs:
-
-```bash
-cd backend && source .venv/bin/activate
-pip install -r requirements.txt     # spacy, chromadb, torch — several GB
-echo "OPENAI_API_KEY=your_openai_api_key" > .env
-uvicorn app.main:app --port 8000 --reload
-```
-
-`GEMINI_API_KEY` is optional and is needed only to read images and handwriting.
-
-## 8. Known limits
-
-- **Notes are generated from the graph**, not written prose — each core concept
-  with its relationships. The design prototype had hand-written sample notes;
-  those would have been fiction once real documents were loaded.
-- **Quiz difficulty is inferred from connectivity**, not from the material's
-  actual difficulty: a concept in many relationships is treated as easier to
-  recall than one mentioned once. It is a proxy, and a rough one.
-- **`Builder.jsx` and the graph components under `src/components/` are
-  untouched.** They are your teammates' work and still reachable at `/builder`.
-- **No React component tests.** The repo has no test setup for React; the API
-  layer and the backend are covered, the components are not.
+Only needed if you are not using the team's project. Run the files in `supabase/migrations` in number order in the Supabase SQL editor.

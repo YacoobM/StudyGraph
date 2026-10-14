@@ -12,6 +12,7 @@ from repositories.supabase_notes import (
     list_graph_notes,
     mark_graph_notes_stale,
     plan_graph_note,
+    update_note_section,
     write_graph_note_section,
 )
 from app.logging_config import get_logger
@@ -76,6 +77,25 @@ async def write_graph_note_section_route(
             status_code=404, detail="Note section not found or could not be written."
         )
     return result
+
+
+@router.patch("/api/graphs/{graph_id}/notes/{note_id}/sections/{section_id}")
+def update_graph_note_section_route(
+    graph_id: UUID,
+    note_id: UUID,
+    section_id: UUID,
+    body: dict,
+    identity: SupabaseIdentity = Depends(current_supabase_identity),
+):
+    # Only completion is editable here. Row level security limits this to the owner.
+    if not isinstance(body.get("done"), bool):
+        raise HTTPException(status_code=422, detail="Send done as true or false.")
+    if get_supabase_note(identity, str(graph_id), str(note_id)) is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    section = update_note_section(identity, str(note_id), str(section_id), {"done": body["done"]})
+    if section is None:
+        raise HTTPException(status_code=404, detail="Note section not found")
+    return {"section": section}
 
 
 @router.post("/api/graphs/{graph_id}/notes/sections/{section_id}/quiz-progress")

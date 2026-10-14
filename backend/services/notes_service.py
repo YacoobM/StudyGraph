@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.config import OUTPUT_DIR
 from services import evolution_data, key_sentences
+from services.note_days import split_across_days  # noqa: F401  (used by build_note)
 
 router = APIRouter(tags=["notes"])
 logger = logging.getLogger(__name__)
@@ -776,32 +777,6 @@ def name_sections(sections, titles: Optional[list[str]]) -> list[dict]:
         title = (titles[i] if titles and i < len(titles) else "").strip()
         out.append({**section, "title": title or fallback_title(section, seen[doc], per_doc[doc])})
         seen[doc] += 1
-    return out
-
-
-def split_across_days(sizes: list[int], days: Optional[int]) -> list[Optional[int]]:
-    """Day number per section (None each without a split), balanced on concept counts with
-    sections kept whole; every day gets at least one section."""
-    count = len(sizes)
-    if not days or count == 0:
-        return [None] * count
-
-    days = max(1, min(days, count))
-    target = sum(sizes) / days
-
-    out, day, acc = [], 1, 0
-    for i, size in enumerate(sizes):
-        if day < days:
-            # Staying would leave a later day with no section at all.
-            starves_a_later_day = (count - i - 1) < (days - day)
-            # Otherwise move on once this day has taken its share, counting a
-            # section as belonging to the day its bulk falls in.
-            day_is_full = acc and acc + size / 2 > target
-            if starves_a_later_day or day_is_full:
-                day += 1
-                acc = 0
-        out.append(day)
-        acc += size
     return out
 
 

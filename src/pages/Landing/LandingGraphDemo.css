@@ -1,0 +1,147 @@
+/* The animated graph demo on the landing page. */
+
+/* ---------------- graph demo card ---------------- */
+.lp-demo {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-elev);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(28, 26, 22, 0.14);
+}
+.lp-demo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--lp-line);
+  font-size: 12px;
+  color: var(--lp-muted);
+}
+.lp-demo-title {
+  font-weight: 500;
+  color: var(--lp-ink);
+}
+.lp-demo-stats {
+  display: flex;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.lp-demo-stats b {
+  color: var(--lp-ink);
+  font-weight: 600;
+}
+.lp-demo-new {
+  color: var(--warn);
+}
+.lp-demo-canvas {
+  position: relative;
+  height: clamp(360px, 42vw, 500px);
+}
+.lp-demo-canvas svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.lp-demo-timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 4px;
+}
+.lp-demo-track {
+  flex: 1;
+  height: 1px;
+  background: var(--lp-line);
+}
+.lp-demo-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lp-muted);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+.lp-demo-step:hover {
+  color: var(--lp-ink);
+}
+.lp-demo-step.on {
+  color: var(--lp-ink);
+  background: var(--accent-soft);
+}
+.lp-demo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+.lp-demo-step.on .lp-demo-dot {
+  background: var(--warn);
+  opacity: 1;
+}
+.lp-demo-replay {
+  margin-left: 4px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lp-ink);
+  cursor: pointer;
+}
+.lp-demo-replay:hover {
+  background: var(--accent-strong);
+}
+.lp-demo-caption {
+  margin: 0;
+  padding: 6px 20px 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--lp-muted);
+}
+
+/* readability inside the demo card */
+.lp-demo-bar,
+.lp-demo-caption,
+.lp-demo-step,
+.lp-demo-stats {
+  color: var(--text-2);
+}
+.lp-demo-title,
+.lp-demo-stats b,
+.lp-demo-step.on {
+  color: var(--text-0);
+}
+.lp-demo .lgd-link line {
+  stroke: var(--border-strong);
+}
+.lp-demo .lgd-label {
+  fill: var(--text-1);
+  font-weight: 600;
+}
+.lp-demo .lgd-node:has(circle[fill="#355b47"]) .lgd-label {
+  fill: var(--text-0);
+  font-weight: 700;
+}
+.lp-demo .lgd-node circle[fill="#b6a58f"] {
+  fill: #9d8a70;
+}
+@media (max-width: 560px) {
+  .lp-demo-canvas {
+    height: 280px;
+  }
+}

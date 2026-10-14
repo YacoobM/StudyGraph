@@ -1,0 +1,199 @@
+/* Upload dialog, drop zones and the upload queue. */
+.up-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 22px;
+  text-align: center;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.up-drop.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.up-drop h3 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.up-drop p {
+  margin: 0 0 8px;
+  max-width: 44ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.up-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+}
+.up-choose {
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--action-primary);
+  color: var(--action-primary-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.up-choose:hover {
+  background: var(--action-primary-hover);
+}
+
+/* the same drop zone inside the dark, empty graph canvas */
+.up-drop.up-dark { width: min(460px, 100%);
+  width: min(460px, 100%);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(243, 238, 221, 0.22);
+  color: var(--night-text);
+}
+.up-drop.up-dark.over {
+  border-color: var(--copper);
+  background: var(--copper-soft);
+}
+.up-drop.up-dark p {
+  color: var(--night-slate);
+}
+.up-drop.up-dark h3 {
+  font-family: var(--font-display);
+}
+.up-drop.up-dark .up-icon {
+  color: var(--copper);
+}
+.up-drop.up-dark .up-choose {
+  background: var(--action-primary);
+}
+.up-drop.up-dark .up-choose:hover {
+  background: var(--action-primary-hover);
+}
+
+.up-queue {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.up-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.up-item + .up-item {
+  border-top: 1px solid var(--border);
+}
+.up-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.up-item-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.up-item-msg {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.up-dest {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.up-dest select {
+  padding: 9px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-0);
+}
+.up-dest select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.up-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(23, 19, 9, 0.45);
+}
+.up-card { width: min(560px, 100%);
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 20px 22px 18px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(20, 16, 8, 0.28);
+}
+.up-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.up-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.up-close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.up-close:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.up-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+.up-note {
+  font-size: 12px;
+  color: var(--text-3);
+}
