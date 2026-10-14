@@ -90,6 +90,8 @@ def update_graph_note_section_route(
     # Only completion is editable here. Row level security limits this to the owner.
     if not isinstance(body.get("done"), bool):
         raise HTTPException(status_code=422, detail="Send done as true or false.")
+    if get_supabase_note(identity, str(graph_id), str(note_id)) is None:
+        raise HTTPException(status_code=404, detail="Note not found")
     section = update_note_section(identity, str(note_id), str(section_id), {"done": body["done"]})
     if section is None:
         raise HTTPException(status_code=404, detail="Note section not found")

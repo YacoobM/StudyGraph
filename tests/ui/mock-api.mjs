@@ -188,6 +188,8 @@ export async function mockRoutes(context, m) {
       return json({ section: { ...m.notes.flatMap((n) => n.sections).find((s) => s.id === mm[1]), body: BODY }, generated: true, retry_after: null })
     }
     if ((mm = p.match(/^\/api\/graphs\/\w+\/notes\/\w+\/sections\/(\w+)$/)) && method === 'PATCH') {
+      await wait(m.completionDelay ?? 0)
+      if (m.completionFail) return json({ detail: 'Progress save failed' }, 503)
       const body = JSON.parse(req.postData() || '{}')
       m.sectionDone[mm[1]] = !!body.done
       return json({ section: { id: mm[1], done: !!body.done } })

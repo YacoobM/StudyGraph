@@ -119,7 +119,7 @@ try {
     check('Check again does not start a second generation', regenerateCalls(mock) === 1, `${regenerateCalls(mock)} requests`)
   })
 
-  await group('Bug B: "DAY null OF 3" in revision notes', {}, async ({ page, mock }) => {
+  await group('Bug B: "DAY null OF 3" in revision notes', {}, async ({ page, mock, errors }) => {
     await tab(page, 'Notes')
     await page.click('.nt-card-open >> nth=0')
     await page.waitForSelector('.nt-eyebrow')
@@ -137,9 +137,22 @@ try {
     const days = await page.locator('.nt-group.day .nt-group-head').allInnerTexts()
     check('every one of the 3 days has sections', days.length === 3, days.join(' / '))
     await page.waitForSelector('.nt-done-btn:not([disabled])', { timeout: 10000 })
+    mock.completionDelay = 1000
     await page.click('.nt-done-btn')
-    await page.waitForTimeout(300)
+    check('completion button is disabled while saving', await page.locator('.nt-done-btn').isDisabled())
+    check('sidebar toggle is disabled for the same section', await page.locator('.nt-rail-item').first().locator('.nt-mark').isDisabled())
+    await page.locator('.nt-done-btn').evaluate((button) => button.click())
+    await page.waitForSelector('.nt-done-btn:not([disabled])')
     check('Mark complete is saved to the server', mock.calls.some((c) => /^PATCH .*\/sections\/ns0$/.test(c)))
+    check('repeated clicks send only one save', mock.calls.filter((c) => /^PATCH .*\/sections\/ns0$/.test(c)).length === 1)
+    mock.completionFail = true
+    await page.click('.nt-done-btn')
+    await page.waitForSelector('.nt-detail .notice-error')
+    check('failed save restores completed state', (await page.locator('.nt-done-btn').getAttribute('aria-pressed')) === 'true')
+    // This request intentionally returns 503; retain all unrelated console errors.
+    const expectedError = errors.findIndex((message) => message.includes('status of 503'))
+    if (expectedError !== -1) errors.splice(expectedError, 1)
+    mock.completionFail = false
 
     await page.click('.nt-back')
     check('the notes list shows "3-day plan"', /3-day plan/i.test(await page.locator('.nt-tag.plan').first().innerText()))

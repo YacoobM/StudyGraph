@@ -46,16 +46,27 @@ def split_sections_for_days(sections: list[dict], days: Optional[int]) -> list[d
     out = [dict(section) for section in sections]
     if not days:
         return out
-    while len(out) < days:
-        index = max(range(len(out)), key=lambda i: len(out[i]["concepts"]), default=None)
-        if index is None or len(out[index]["concepts"]) < 2 * MIN_CONCEPTS_PER_PART:
+    # Allocate parts before cutting, so an early halving cannot strand concepts
+    # in parts too small to split again (e.g. six concepts over three days).
+    sizes = [len(section["concepts"]) for section in out]
+    parts = [1] * len(out)
+    for _ in range(max(0, days - len(out))):
+        eligible = [i for i, size in enumerate(sizes)
+                    if size // MIN_CONCEPTS_PER_PART > parts[i]]
+        index = max(eligible, key=lambda i: sizes[i] / parts[i], default=None)
+        if index is None:
             break
-        concepts = out[index]["concepts"]
-        half = len(concepts) // 2
-        first = {**out[index], "concepts": concepts[:half]}
-        second = {**out[index], "concepts": concepts[half:]}
-        out[index:index + 1] = [first, second]
-    return out
+        parts[index] += 1
+    result = []
+    for section, count in zip(out, parts):
+        concepts = section["concepts"]
+        size, remainder = divmod(len(concepts), count)
+        start = 0
+        for part in range(count):
+            end = start + size + (part < remainder)
+            result.append({**section, "concepts": concepts[start:end]})
+            start = end
+    return result
 
 
 def assign_days(sections: list[dict], days: Optional[int]) -> tuple[list[dict], Optional[int]]:

@@ -54,6 +54,25 @@ def test_small_sections_are_not_split():
     assert used == 1
 
 
+def test_six_concepts_fill_three_days():
+    original = section(6)
+    parts = split_sections_for_days([original], 3)
+    assert [len(p["concepts"]) for p in parts] == [2, 2, 2]
+    assert [c for p in parts for c in p["concepts"]] == original["concepts"]
+    assigned, used = assign_days(parts, 3)
+    assert used == 3
+    assert [s["day"] for s in assigned] == [1, 2, 3]
+
+
+def test_multiple_documents_use_available_split_capacity():
+    originals = [section(6, "a.pdf"), section(4, "b.pdf")]
+    parts = split_sections_for_days(originals, 8)
+    assert [len(p["concepts"]) for p in parts] == [2] * 5
+    assert [p["document"] for p in parts] == ["a.pdf"] * 3 + ["b.pdf"] * 2
+    assert [c for p in parts for c in p["concepts"]] == [c for s in originals for c in s["concepts"]]
+    assert [len(s["concepts"]) for s in originals] == [6, 4]
+
+
 def test_repair_fills_null_days_on_stored_notes():
     note = {"kind": "plan", "days": 3, "sections": [
         {"day": None, "concepts": ["a", "b"]},

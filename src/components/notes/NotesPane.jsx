@@ -360,7 +360,7 @@ function ContextPanel({ section, open, onClose }) {
   )
 }
 
-function DetailView({ graphId, note, index, section, writing, writeError, coolLeft, planning, saveError,
+function DetailView({ graphId, note, index, section, writing, writeError, coolLeft, planning, saveError, savingSections,
                       onRetry, onBack, onOpenSection, onToggleDone, onRegenerate }) {
   const [railOn, setRailOn] = useState(wide)
   const [ctxOn, setCtxOn] = useState(wide)
@@ -444,6 +444,7 @@ function DetailView({ graphId, note, index, section, writing, writeError, coolLe
                     {g.items.map((s) => (
                       <li key={s.id} className={`nt-rail-item${s.index === index ? ' active' : ''}${s.done ? ' done' : ''}`}>
                         <button className="nt-mark" onClick={() => onToggleDone(s.index, !s.done)}
+                                disabled={savingSections.has(s.id)}
                                 aria-label={s.done ? `Mark ${s.title} not done` : `Mark ${s.title} done`} aria-pressed={s.done}>
                           <Icon d={I.check} size={12} />
                         </button>
@@ -490,7 +491,7 @@ function DetailView({ graphId, note, index, section, writing, writeError, coolLe
 
             <footer className="nt-foot">
               <button className={`nt-done-btn${done ? ' on' : ''}`} onClick={() => onToggleDone(index, !done)}
-                      disabled={!section} aria-pressed={done}>
+                      disabled={!section || savingSections.has(stub?.id)} aria-pressed={done}>
                 <span className="nt-done-check"><Icon d={I.check} size={14} /></span>
                 {done ? 'Completed' : 'Mark complete'}
               </button>
@@ -537,6 +538,8 @@ function DetailView({ graphId, note, index, section, writing, writeError, coolLe
 /* ================================================================= shell */
 
 export default function NotesPane({ readyDocs = [], graphId }) {
+  const pendingSaves = useRef(new Set())
+  const [savingSections, setSavingSections] = useState(new Set())
   const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -600,24 +603,33 @@ export default function NotesPane({ readyDocs = [], graphId }) {
     setView('detail')
   }
 
-  function applyDone(i, done) {
+  function applyDone(noteId, sectionId, done) {
     setNotes((rows) => rows.map((n) => {
-      if (n.id !== openId) return n
-      const sections = n.sections.map((s, k) => (k === i ? { ...s, done } : s))
+      if (n.id !== noteId) return n
+      const sections = n.sections.map((s) => (s.id === sectionId ? { ...s, done } : s))
       return { ...n, sections, done: sections.filter((s) => s.done).length }
     }))
-    if (i === index) setSection((s) => (s ? { ...s, done } : s))
+    setSection((s) => (s?.id === sectionId ? { ...s, done } : s))
   }
 
   // Shown straight away, saved in the background, put back if the save fails.
   async function toggleDone(i, done) {
+    const stub = note?.sections[i]
+    if (!stub || pendingSaves.current.has(stub.id)) return
+    const noteId = note.id
+    const before = stub.done
+    pendingSaves.current.add(stub.id)
+    setSavingSections(new Set(pendingSaves.current))
     setSaveError('')
-    applyDone(i, done)
+    applyDone(noteId, stub.id, done)
     try {
-      await setSectionDone(graphId, openId, i, done)
+      await setSectionDone(graphId, noteId, i, done)
     } catch (e) {
-      applyDone(i, !done)
+      applyDone(noteId, stub.id, before)
       setSaveError(`Could not save your progress: ${e.message}`)
+    } finally {
+      pendingSaves.current.delete(stub.id)
+      setSavingSections(new Set(pendingSaves.current))
     }
   }
 
@@ -672,6 +684,7 @@ export default function NotesPane({ readyDocs = [], graphId }) {
         coolLeft={coolLeft}
         planning={planning}
         saveError={saveError}
+        savingSections={savingSections}
         onRetry={() => setRetryTick((n) => n + 1)}
         onBack={() => setView('list')}
         onOpenSection={setIndex}
