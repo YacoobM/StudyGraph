@@ -471,7 +471,7 @@ export default function Workspace() {
       const ext = extOf(file.name)
       let message = ''
       if (ext === 'json') {
-        message = 'JSON files are not learning material. Ground-truth concept files go to the evaluation tool in backend/eval.'
+        message = 'JSON files are not learning material. Use PDF, DOCX, PPTX, TXT or MD.'
       } else if (!ALLOWED.includes(ext)) {
         message = `.${ext} files aren't supported. Use PDF, DOCX, PPTX, TXT or MD.`
       } else if (existing.has(file.name.toLowerCase())) {

@@ -96,11 +96,6 @@ Never commit either `.env` file. Git already ignores them.
 Before the first `npm run test:ui`, run `npx playwright-core install chromium` once.
 The `test_pruned_reactivation` tests need a real `OPENAI_API_KEY`.
 
-## Measuring concept extraction
-
-`backend/eval/concept_eval.py` compares the concepts StudyGraph found in a document with a list you checked by hand, and reports precision, recall and F1.
-The steps are in `backend/eval/README.md`.
-
 ## Deploying
 
 The frontend deploys to Vercel. Add the three `VITE_` settings above in the Vercel project, with `VITE_API_URL` pointing at the hosted backend.

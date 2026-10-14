@@ -31,7 +31,7 @@ Built by group MCS03 for FIT3162 at Monash University.
 | `src` | The React app |
 | `backend` | The FastAPI server |
 | `supabase/migrations` | Database tables, run in order on a new Supabase project |
-| `backend/eval` | Tools that measure extraction and answer quality |
+| `backend/eval` | RAGAS evaluation of answer quality |
 | `tests/ui` | Browser test for the frontend |
 
 ## Frontend layout
