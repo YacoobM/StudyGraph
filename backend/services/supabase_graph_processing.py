@@ -112,6 +112,9 @@ def _restore_engine(
 	concepts_by_id = {str(concept["id"]): concept for concept in latest_snapshot["concepts"]}
 	for concept in latest_snapshot["concepts"]:
 		previous_status[graph_fusion.normalize_concept(concept["name"])] = concept.get("status", "active")
+		# Names merged into this concept earlier keep pointing at it, even if not re-extracted.
+		for alias in concept.get("aliases") or []:
+			engine.canonical_nodes[alias] = graph_fusion.normalize_concept(concept["name"])
 
 	grouped_concepts = {}
 	for provenance in latest_snapshot["concept_provenance"]:
@@ -128,20 +131,25 @@ def _restore_engine(
 		if not concept_row:
 			continue
 		group_key = (raw_name, document_id, document.get("week") or "Week 1")
-		grouped_concepts.setdefault(group_key, set()).update(chunk.get("pages") or [])
+		# Keep the matched concept's definition with its grouped provenance.
+		group = grouped_concepts.setdefault(group_key, {
+			"pages": set(),
+			"description": concept_row.get("description") or "",
+		})
+		group["pages"].update(chunk.get("pages") or [])
 		concept_support.append({
 			"source_name": raw_name,
 			"document_id": document_id,
 			"chunk_id": chunk_id,
 			"source_week": int(str(document.get("week") or "Week 1").split()[-1]),
 		})
-	for (name, document_id, week), pages in grouped_concepts.items():
+	for (name, document_id, week), group in grouped_concepts.items():
 		engine.concepts.append({
 			"name": name,
 			"source": document_id,
 			"week": week,
-			"pages": sorted(pages),
-			"description": concept_row.get("description") or "",
+			"pages": sorted(group["pages"]),
+			"description": group["description"],
 		})
 		engine._doc_concept_names.setdefault(document_id, set()).add(name)
 		engine.known_concepts.add(name)
@@ -197,6 +205,12 @@ def _persist_version(
 		canonical_names.add(_canonical_name(engine, edge["from"]))
 		canonical_names.add(_canonical_name(engine, edge["to"]))
 	canonical_names.discard("")
+	# Names fusion merged into each node, for "also known as"; hyphen/case variants are left out.
+	aliases = {}
+	for variant in engine.canonical_nodes:
+		canonical = _canonical_name(engine, variant)
+		if graph_fusion.normalize_concept(variant) != canonical:
+			aliases.setdefault(canonical, set()).add(graph_fusion.normalize_concept(variant))
 
 	concepts = [
 		{
@@ -206,6 +220,7 @@ def _persist_version(
 			"status": previous_status.get(graph_fusion.normalize_concept(name), "active"),
 			**({"description": concept_descriptions[graph_fusion.normalize_concept(name)]}
 			   if concept_descriptions.get(graph_fusion.normalize_concept(name)) else {}),
+			"aliases": sorted(aliases.get(name, ())),
 		}
 		for name in sorted(canonical_names)
 	]

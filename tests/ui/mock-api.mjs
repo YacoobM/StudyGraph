@@ -36,6 +36,8 @@ const REL = [
   ['c1', 'c13', 'causes'], ['c1', 'c14', 'uses'], ['c1', 'c17', 'uses'], ['c15', 'c16', 'implemented_by'],
   ['c1', 'c15', 'contrasts_with'],
 ]
+// Names the backend merged into a concept.
+const ALIASES = { c2: ['Mutual exclusion lock'] }
 // [concept, document, page, week, excerpt]
 const PROV = [
   ['c1', 'd1', 2, 1, 'A thread is the smallest unit of execution scheduled by the operating system.'],
@@ -61,7 +63,7 @@ const DOCS = {
 function snapshot(versionNumber) {
   const keep = versionNumber === 1 ? new Set(PROV.filter((p) => p[3] === 1).map((p) => p[0])) : null
   const concepts = CONCEPTS.filter(([id]) => !keep || keep.has(id) || ['c10', 'c11', 'c12', 'c13', 'c14', 'c17'].includes(id))
-    .map(([id, name, description]) => ({ id, name, normalized_name: name.toLowerCase(), description, status: id === 'c13' ? 'needs_regeneration' : 'active' }))
+    .map(([id, name, description]) => ({ id, name, normalized_name: name.toLowerCase(), description, aliases: ALIASES[id] || [], status: id === 'c13' ? 'needs_regeneration' : 'active' }))
   const ids = new Set(concepts.map((c) => c.id))
   const relationships = REL.filter(([s, t]) => ids.has(s) && ids.has(t))
     .map(([s, t, r], i) => ({ id: `r${i}`, source_concept_id: s, target_concept_id: t, relationship_type: r }))

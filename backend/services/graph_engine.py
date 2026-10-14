@@ -621,7 +621,8 @@ Respond with ONLY this exact JSON structure:
         return {"matched": len(restored), "restored": restored}
 
     def fuse_graph(self):
-        """Fuse extracted concepts and edges; replaces canonical_nodes and fused_edges."""
+        """Fuse extracted concepts and edges; replaces canonical_nodes (keeping restored aliases)
+        and fused_edges."""
         logger.info(
             "graph_fusion_started concepts=%d edges=%d",
             len(self.concepts),
@@ -637,10 +638,18 @@ Respond with ONLY this exact JSON structure:
             len(self.concepts),
             len(self.edges),
         )
+        restored_aliases = dict(self.canonical_nodes)
         self.canonical_nodes, self.fused_edges = graph_fusion.merge_graph(
             self, self.client
         )
-        
+        # Aliases restored from the previous version that are not names in this run keep
+        # pointing at their concept, now under its current canonical name.
+        present = {graph_fusion.normalize_concept(n) for n in
+                   [c["name"] for c in self.concepts] + [e[k] for e in self.edges for k in ("from", "to")]}
+        for alias, canonical in restored_aliases.items():
+            if graph_fusion.normalize_concept(alias) not in present:
+                self.canonical_nodes.setdefault(alias, self.canonical_nodes.get(canonical, canonical))
+
         self.graph_status = "active"
 
         logger.info(

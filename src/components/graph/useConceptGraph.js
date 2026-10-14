@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import * as d3 from "d3"
-import { GRAPH_COLORS, LABEL_ZOOM, progressiveNodeIds } from "./conceptGraphModel.js"
+import { GRAPH_COLORS, LABEL_ZOOM, nodeMatches, progressiveNodeIds } from "./conceptGraphModel.js"
 
 const LINE_HEIGHT = 12
 
@@ -44,7 +44,7 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
     const focus = currentSelection ? String(currentSelection) : hoverNode
     const near = focus ? new Set(currentView.neighbours.get(focus) || []) : null
     if (near) near.add(focus)
-    const matches = (node) => Boolean(term) && node.name.toLowerCase().includes(term)
+    const matches = (node) => nodeMatches(node, term)
     const visibleIds = progressiveNodeIds(currentView.nodes, scale)
     near?.forEach((id) => visibleIds.add(id))
     currentView.nodes.forEach((node) => {
@@ -652,7 +652,7 @@ export default function useConceptGraph({ view, selectedId, onSelectNode, search
     const term = name.trim().toLowerCase()
     const node =
       simulation.nodes().find((item) => item.name.toLowerCase() === term) ||
-      simulation.nodes().find((item) => item.name.toLowerCase().includes(term))
+      simulation.nodes().find((item) => nodeMatches(item, term))
     if (!node) return
 
     runtimeRef.current.cameraInteracted = true

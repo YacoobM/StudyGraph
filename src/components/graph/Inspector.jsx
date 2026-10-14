@@ -302,6 +302,9 @@ export default function Inspector({
       </div>
 
       <h2 className="insp-name">{node.name}</h2>
+      {node.aliases?.length > 0 && (
+        <p className="insp-aliases">Also known as {node.aliases.join(", ")}</p>
+      )}
       <p className="insp-def">{info.definition}</p>
 
       <div className="insp-meta">

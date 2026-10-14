@@ -53,6 +53,12 @@ export function wrapLabel(value) {
     .map((line) => (line.length > 26 ? `${line.slice(0, 25)}…` : line))
 }
 
+// Search matches a concept's name or any name merged into it (its aliases). term is lower case.
+export function nodeMatches(node, term) {
+  return Boolean(term) && [node.name, ...(node.aliases || [])]
+    .some((name) => String(name || "").toLowerCase().includes(term))
+}
+
 export function buildGraphView(allNodes, allEdges, week, hideIsolated) {
   const inWeek = allNodes.filter((node) => (node.week || 1) <= week)
   const ids = new Set(inWeek.map((node) => String(node.id)))

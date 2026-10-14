@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import useConceptGraph from "./useConceptGraph.js"
-import { buildGraphView, GRAPH_COLORS } from "./conceptGraphModel.js"
+import { buildGraphView, GRAPH_COLORS, nodeMatches } from "./conceptGraphModel.js"
 import "./ConceptGraph.css"
 
 export default function ConceptGraph({
@@ -28,7 +28,7 @@ export default function ConceptGraph({
   const suggestions = useMemo(() => {
     const term = search.trim().toLowerCase()
     return term
-      ? view.nodes.filter((node) => node.name.toLowerCase().includes(term)).slice(0, 8)
+      ? view.nodes.filter((node) => nodeMatches(node, term)).slice(0, 8)
       : []
   }, [search, view.nodes])
   const graph = useConceptGraph({
@@ -92,6 +92,11 @@ export default function ConceptGraph({
         />
         <datalist id="gx-concepts">
           {suggestions.map((node) => <option key={node.id} value={node.name} />)}
+          {/* One option per alias, so the browser's datalist filter shows a suggestion when an
+              alias is typed; Enter then finds the node through nodeMatches. */}
+          {suggestions.flatMap((node) => (node.aliases || []).map((alias) => (
+            <option key={`${node.id}:${alias}`} value={alias} label={`also known as ${node.name}`} />
+          )))}
         </datalist>
         {search && (
           <button

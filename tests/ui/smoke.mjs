@@ -210,6 +210,16 @@ try {
     check('"All documents" counts every graph (3)', all.trim() === '3', all)
   })
 
+  await group('Concept aliases (from main)', {}, async ({ page }) => {
+    await openConcept(page, 'Mutex')
+    check('the inspector lists names merged into the concept', /Also known as Mutual exclusion lock/.test(await page.locator('.insp-aliases').innerText()))
+    await page.keyboard.press('Escape')
+    await page.fill('.gx-search input', 'exclusion lock')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(600)
+    check('searching an alias finds the concept', await page.locator('.insp-name:has-text("Mutex")').isVisible())
+  })
+
   await group('Graph and keyboard', {}, async ({ page }) => {
     await page.waitForTimeout(1500)
     const drawn = await page.$$eval('.gx-node', (nodes) => nodes.filter((n) => getComputedStyle(n).display !== 'none').length)
