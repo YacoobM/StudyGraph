@@ -36,15 +36,16 @@ Synthetic mode generates 10 questions per document set by default if the count i
 
 For each set, the evaluator extracts text, indexes chunks with the app's OpenAI embedding configuration, extracts concepts and relationships with the app's graph-extraction model, and fuses the graph before running queries through `StudyGraphEngine.rag_query()`. This includes graph extraction API calls in addition to answer generation and Ragas scoring.
 
-Each set writes two JSON files under `eval/reports/`:
+Each invocation creates one `eval/reports/run_<timestamp>/` folder. For each
+document set it writes:
 
-- `ragas_results_<directory>_<timestamp>.json` contains the per-question RAGAS scores and evaluation metadata. It is saved immediately after RAGAS finishes.
-- `ragas_aggregate_<directory>_<timestamp>.json` contains the average for each metric and `overall_score`, the mean of those metric averages.
+- `general/` contains the per-question results and, in synthetic mode, generated questions.
+- `aggregate/` contains the average for each metric and `overall_score`.
 
 If aggregation fails after the per-question report is saved, rerun only that step using its path:
 
 ```powershell
-python -m eval.ragas_evaluation --aggregate-report eval/reports/ragas_results_test1_20261013_080000.json
+python -m eval.ragas_evaluation --aggregate-report eval/reports/run_<timestamp>/general/ragas_results_test1_<timestamp>.json
 ```
 
 This aggregation-only command does not need an API key or rerun graph extraction, RAG queries, or RAGAS scoring.

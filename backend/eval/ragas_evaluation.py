@@ -118,6 +118,7 @@ def generate_questions(
     api_key: str,
     size: int,
     dataset_name: str,
+    output_dir: Path,
 ) -> list[dict]:
     """Generate a synthetic Ragas test set from the evaluation documents."""
     logger.info("Preparing document pages for synthetic question generation")
@@ -165,9 +166,8 @@ def generate_questions(
     logger.info("Synthetic question generation complete")
 
     generated = testset.to_pandas()
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     generated.to_json(
-        REPORTS_DIR / f"generated_testset_{dataset_name}.jsonl",
+        output_dir / f"generated_testset_{dataset_name}.jsonl",
         orient="records",
         lines=True,
     )
@@ -266,6 +266,9 @@ def evaluate_document_set(
     num_questions: int | None,
     api_key: str,
     llm_client,
+    general_dir: Path,
+    aggregate_dir: Path,
+    timestamp: str,
 ) -> Path:
     """Run indexing, RAG queries, and Ragas scoring for one document set."""
     logger.info("Starting document set '%s' (%d document(s))", dataset_name, len(documents))
@@ -288,6 +291,7 @@ def evaluate_document_set(
             api_key,
             num_questions or 10,
             dataset_name,
+            general_dir,
         )
     else:
         logger.info("[%s] Loading manual questions", dataset_name)
@@ -334,9 +338,7 @@ def evaluate_document_set(
     )
     logger.info("[%s] Ragas metric evaluation complete", dataset_name)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = REPORTS_DIR / f"ragas_results_{dataset_name}_{timestamp}.json"
+    report_path = general_dir / f"ragas_results_{dataset_name}_{timestamp}.json"
     results_frame = results.to_pandas()
     with report_path.open("w", encoding="utf-8") as f:
         json.dump(
@@ -349,10 +351,12 @@ def evaluate_document_set(
             f, indent=2, ensure_ascii=False, default=float,
         )
     logger.info("[%s] Per-question results saved to %s", dataset_name, report_path)
-    return aggregate_results_report(report_path)
+    return aggregate_results_report(report_path, aggregate_dir)
 
 
-def aggregate_results_report(results_path: Path) -> Path:
+def aggregate_results_report(
+    results_path: Path, aggregate_dir: Path | None = None
+) -> Path:
     """Create a separate aggregate report from a saved per-question report."""
     with results_path.open(encoding="utf-8") as f:
         report = json.load(f)
@@ -376,7 +380,13 @@ def aggregate_results_report(results_path: Path) -> Path:
 
     dataset_name = report.get("dataset", results_path.stem)
     evaluated_at = report.get("evaluated_at", datetime.now().strftime("%Y%m%d_%H%M%S"))
-    aggregate_path = results_path.with_name(
+    aggregate_dir = aggregate_dir or (
+        results_path.parent.parent / "aggregate"
+        if results_path.parent.name == "general"
+        else REPORTS_DIR / "aggregate"
+    )
+    aggregate_dir.mkdir(parents=True, exist_ok=True)
+    aggregate_path = aggregate_dir / (
         f"ragas_aggregate_{dataset_name}_{evaluated_at}.json"
     )
     with aggregate_path.open("w", encoding="utf-8") as f:
@@ -501,6 +511,11 @@ def main(argv: list[str] | None = None) -> None:
     configure_runtime(llm_client)
     logger.info("StudyGraph runtime ready")
 
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run_dir = REPORTS_DIR / f"run_{timestamp}"
+    general_dir, aggregate_dir = run_dir / "general", run_dir / "aggregate"
+    general_dir.mkdir(parents=True)
+    aggregate_dir.mkdir()
     for dataset_name, documents in document_sets:
         evaluate_document_set(
             dataset_name,
@@ -509,6 +524,9 @@ def main(argv: list[str] | None = None) -> None:
             args.num_questions,
             api_key,
             llm_client,
+            general_dir,
+            aggregate_dir,
+            timestamp,
         )
     logger.info("Ragas evaluation complete for %d document set(s)", len(document_sets))
 
