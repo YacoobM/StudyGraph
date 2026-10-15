@@ -290,6 +290,7 @@ export default function Workspace() {
           listGraphDocuments(supabaseGraphId),
           listGraphVersions(supabaseGraphId),
         ])
+        if (requestId !== loadRequestRef.current) return
         metadata = { documents, versions: graphVersions }
         graphMetadataRef.current.set(supabaseGraphId, metadata)
         syncDocsRef.current?.(supabaseGraphId, documents.map((d) => String(d.id)))
@@ -327,6 +328,7 @@ export default function Workspace() {
       setGraph(graphViewFromSnapshot(snapshot, activeSupport, documents))
       setSelected(null)
     } catch (e) {
+      if (requestId !== loadRequestRef.current) return
       setError(e.message)
       throw e
     }

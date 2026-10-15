@@ -102,8 +102,17 @@ export default function SubjectSidebar({
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
   const confirmDelete = (kind, name, detail) => window.confirm(
     `Delete the ${kind} "${name}"${detail ? ` and ${detail}` : ''}?\n\n`
-    + 'Your uploaded documents are kept — they still appear under All documents.',
+    + 'This permanently deletes this item and everything inside it, including documents, uploaded files, and graph history. This cannot be undone.',
   )
+
+  const removeHierarchyItem = async (kind, item, detail) => {
+    if (!confirmDelete(kind, item.name, detail)) return
+    try {
+      await ({ subject: deleteSubject, topic: deleteTopic, graph: deleteGraph }[kind])(item.id)
+    } catch (error) {
+      window.alert(`Could not delete ${kind} "${item.name}": ${error.message || 'Please try again.'}`)
+    }
+  }
 
   return (
     <>
@@ -159,7 +168,7 @@ export default function SubjectSidebar({
                       [`Add a topic to ${s.name}`, I.plus, () => { toggleSubject(s.id, true); setEditing({ kind: 'new-topic', id: s.id }) }],
                       [`Rename ${s.name}`, I.pencil, () => setEditing({ kind: 'rename-subject', id: s.id })],
                       [`Delete ${s.name}`, I.trash, () => {
-                        if (confirmDelete('subject', s.name, s.topics.length ? `its ${plural(s.topics.length, 'topic')}` : '')) deleteSubject(s.id)
+                        void removeHierarchyItem('subject', s, s.topics.length ? `its ${plural(s.topics.length, 'topic')}` : '')
                       }],
                     ]} />
                   </div>
@@ -187,7 +196,7 @@ export default function SubjectSidebar({
                               [`New graph in ${t.name}`, I.plus, () => { toggleTopic(t.id, true); setEditing({ kind: 'new-graph', id: t.id }) }],
                               [`Rename ${t.name}`, I.pencil, () => setEditing({ kind: 'rename-topic', id: t.id })],
                               [`Delete ${t.name}`, I.trash, () => {
-                                if (confirmDelete('topic', t.name, t.graphs.length ? `its ${plural(t.graphs.length, 'graph')}` : '')) deleteTopic(t.id)
+                                void removeHierarchyItem('topic', t, t.graphs.length ? `its ${plural(t.graphs.length, 'graph')}` : '')
                               }],
                             ]} />
                           </div>
@@ -213,7 +222,7 @@ export default function SubjectSidebar({
                                     </button>
                                     <Actions items={[
                                       [`Rename ${g.name}`, I.pencil, () => setEditing({ kind: 'rename-graph', id: g.id })],
-                                      [`Delete ${g.name}`, I.trash, () => { if (confirmDelete('graph', g.name)) deleteGraph(g.id) }],
+                                      [`Delete ${g.name}`, I.trash, () => { void removeHierarchyItem('graph', g) }],
                                     ]} />
                                   </div>
                                 )}

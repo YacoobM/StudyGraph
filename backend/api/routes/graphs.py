@@ -18,6 +18,7 @@ from repositories.supabase_library import (
     create_topic,
     delete_subject,
     delete_topic,
+    delete_graph,
     list_library,
     update_subject,
     update_topic,
@@ -124,6 +125,13 @@ def patch_graph(
     identity: SupabaseIdentity = Depends(current_supabase_identity),
 ):
     return {"graph": update_graph_name(identity, str(graph_id), body.name)}
+
+
+@router.delete("/api/graphs/{graph_id}", status_code=204)
+def remove_graph(
+    graph_id: UUID, identity: SupabaseIdentity = Depends(current_supabase_identity)
+):
+    delete_graph(identity, str(graph_id))
 
 
 @router.get("/api/graphs/{graph_id}/versions")
