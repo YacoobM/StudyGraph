@@ -14,6 +14,7 @@ from repositories.users import SupabaseIdentity
 
 logger = logging.getLogger(__name__)
 BUCKET = "studygraph-documents"
+STORAGE_DELETE_BATCH_SIZE = 1000
 
 
 def _storage_request(identity: SupabaseIdentity, path: str, method: str, data: bytes | None = None, mime: str | None = None) -> None:
@@ -35,7 +36,12 @@ def _storage_request(identity: SupabaseIdentity, path: str, method: str, data: b
 	try:
 		with urlopen(request, timeout=30) as response:
 			response.read()
-	except (HTTPError, URLError, TimeoutError) as error:
+	except HTTPError as error:
+		# A retry may encounter a file already removed by an earlier attempt.
+		if method == "DELETE" and error.code == 404:
+			return
+		raise HTTPException(status_code=502, detail="Unable to access document in Supabase Storage.") from error
+	except (URLError, TimeoutError) as error:
 		raise HTTPException(status_code=502, detail="Unable to store document in Supabase Storage.") from error
 
 
@@ -104,6 +110,40 @@ def set_graph_document_status(
 	)
 
 
+def delete_document_file(identity: SupabaseIdentity, document: dict) -> None:
+	if document.get("storage_path"):
+		_storage_request(identity, document["storage_path"], "DELETE")
+
+
+def delete_document_files(identity: SupabaseIdentity, documents: list[dict]) -> None:
+	"""Delete exact descendant paths in bounded Storage API requests."""
+	paths = list(dict.fromkeys(document["storage_path"] for document in documents
+		if document.get("storage_path")))
+	if not paths:
+		return
+	if not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY:
+		raise HTTPException(status_code=503, detail="Supabase is not configured.")
+	for offset in range(0, len(paths), STORAGE_DELETE_BATCH_SIZE):
+		request = Request(
+			f"{SUPABASE_URL}/storage/v1/object/{BUCKET}",
+			data=json.dumps({"prefixes": paths[offset:offset + STORAGE_DELETE_BATCH_SIZE]}).encode(),
+			headers={
+				"Authorization": f"Bearer {identity.access_token}",
+				"apikey": SUPABASE_PUBLISHABLE_KEY,
+				"Content-Type": "application/json",
+			},
+			method="DELETE",
+		)
+		try:
+			with urlopen(request, timeout=30) as response:
+				response.read()
+		except (HTTPError, URLError, TimeoutError) as error:
+			# Stop before deleting database rows; their paths allow retrying.
+			# Bulk removal already tolerates absent objects. An HTTP 404 here
+			# can indicate a missing bucket/endpoint and must not be ignored.
+			raise HTTPException(status_code=502, detail="Unable to delete document files from Supabase Storage.") from error
+
+
 def delete_graph_document_data(identity: SupabaseIdentity, document: dict) -> None:
 	request_table(
 		identity,
@@ -113,8 +153,7 @@ def delete_graph_document_data(identity: SupabaseIdentity, document: dict) -> No
 	)
 
 
-	if document.get("storage_path"):
-		_storage_request(identity, document["storage_path"], "DELETE")
+	delete_document_file(identity, document)
 	request_table(
 		identity,
 		"documents",

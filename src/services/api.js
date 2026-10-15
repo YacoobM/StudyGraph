@@ -94,6 +94,13 @@ export async function updateGraph(graphId, name) {
   });
 }
 
+export async function deleteGraph(graphId) {
+  return apiFetch(`${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
 export async function listGraphVersions(graphId) {
   return apiFetch(
     `${API_BASE_URL}/api/graphs/${encodeURIComponent(graphId)}/versions`,

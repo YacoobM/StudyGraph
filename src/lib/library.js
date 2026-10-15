@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createSubject as createRemoteSubject,
   createTopic as createRemoteTopic,
+  deleteSubject as deleteRemoteSubject,
+  deleteTopic as deleteRemoteTopic,
+  deleteGraph as deleteRemoteGraph,
   listLibrary,
   updateSubject as updateRemoteSubject,
   updateTopic as updateRemoteTopic,
@@ -19,9 +22,8 @@ import {
  * until the first document is uploaded, at which point a Supabase graph is
  * created and the local id is replaced with the backend uuid.
  *
- * This grouping lives in the browser and only stores backend document ids and
- * graph uuids. Deleting a subject, topic or graph never deletes documents or
- * backend graphs — those are orphaned but still there.
+ * Supabase owns the hierarchy; the browser caches its UI state. Pending
+ * deletions are hidden immediately, with cached rows retained until success.
  *
  * Shape:
  *   { subjects: [{ id, name, open,
@@ -79,20 +81,41 @@ function write(key, value) {
 
 export function useLibrary(userKey) {
   const storageKey = keyFor(userKey)
-  const [lib, setLib] = useState(() => read(storageKey))
+  const [storedLib, setLib] = useState(() => read(storageKey))
+  const [pendingDeletes, setPendingDeletes] = useState([])
+  const [reloadVersion, setReloadVersion] = useState(0)
   const loadedFor = useRef(storageKey)
   const skipWriteFor = useRef(null)
+  const deletionScope = useRef({ storageKey, pending: new Set(), revision: 0 })
+  if (deletionScope.current.storageKey !== storageKey) {
+    deletionScope.current = { storageKey, pending: new Set(), revision: 0 }
+  }
+  const hidden = (kind, id) => pendingDeletes.some((entry) =>
+    entry.scope === deletionScope.current && entry.kind === kind && entry.id === id)
+  const visibleSubjects = storedLib.subjects.filter((s) => !hidden('subject', s.id)).map((s) => ({
+    ...s,
+    topics: s.topics.filter((t) => !hidden('topic', t.id)).map((t) => ({
+      ...t, graphs: t.graphs.filter((g) => !hidden('graph', g.id)),
+    })),
+  }))
+  const lib = {
+    subjects: visibleSubjects,
+    activeGraphId: visibleSubjects.some((s) => s.topics.some((t) =>
+      t.graphs.some((g) => g.id === storedLib.activeGraphId))) ? storedLib.activeGraphId : null,
+  }
 
   // Supabase is the source of truth for the hierarchy. localStorage remains
   // only a cache for UI state such as expanded/collapsed rows.
   useEffect(() => {
     let cancelled = false
+    const scope = deletionScope.current
+    const revision = scope.revision
     if (!userKey) {
       setLib(EMPTY)
       return () => { cancelled = true }
     }
     listLibrary().then(({ subjects = [] }) => {
-      if (cancelled) return
+      if (cancelled || scope !== deletionScope.current || revision !== scope.revision) return
       const previous = read(storageKey)
       const previousSubjects = new Map(previous.subjects.map((s) => [String(s.id), s]))
       const nextSubjects = subjects.map((s) => {
@@ -126,7 +149,7 @@ export function useLibrary(userKey) {
       // Keep the cached hierarchy visible if the backend is temporarily down.
     })
     return () => { cancelled = true }
-  }, [storageKey, userKey])
+  }, [storageKey, userKey, reloadVersion])
 
   // The signed-in user can arrive after first render; reload for the new key.
   useEffect(() => {
@@ -145,8 +168,8 @@ export function useLibrary(userKey) {
       skipWriteFor.current = null
       return
     }
-    write(storageKey, lib)
-  }, [lib, storageKey])
+    write(storageKey, storedLib)
+  }, [storedLib, storageKey])
 
   // --- small immutable-update helpers ---
   const mapSubjects = (fn) => (l) => ({ ...l, subjects: l.subjects.map(fn) })
@@ -154,6 +177,32 @@ export function useLibrary(userKey) {
   const mapGraphs = (fn) => mapTopics((t) => ({ ...t, graphs: t.graphs.map(fn) }))
   const graphIdsOf = (subjects, pred) => subjects.flatMap((s) =>
     s.topics.flatMap((t) => (pred(s, t) ? t.graphs.map((g) => g.id) : [])))
+
+  // Hide pending rows without discarding them. Failure simply reveals the
+  // current cached subtree, preserving edits and navigation elsewhere.
+  const deleteOptimistically = useCallback(async (kind, id, remove, commit) => {
+    const scope = deletionScope.current
+    const key = `${kind}:${id}`
+    if (scope.pending.has(key)) return
+    scope.pending.add(key)
+    scope.revision += 1
+    const entry = { scope, kind, id }
+    setPendingDeletes((entries) => [...entries, entry])
+    try {
+      if (remove) await remove()
+      if (scope === deletionScope.current) {
+        scope.revision += 1
+        setLib(commit)
+      }
+    } catch (error) {
+      if (scope !== deletionScope.current) return
+      if (error.response?.status === 404) setReloadVersion((value) => value + 1)
+      throw error
+    } finally {
+      scope.pending.delete(key)
+      setPendingDeletes((entries) => entries.filter((item) => item !== entry))
+    }
+  }, [])
 
   // --- subjects ---
   const addSubject = useCallback(async (name) => {
@@ -179,15 +228,16 @@ export function useLibrary(userKey) {
   const toggleSubject = useCallback((id, open) =>
     setLib(mapSubjects((s) => (s.id === id ? { ...s, open: open ?? !s.open } : s))), [])
 
-  const deleteSubject = useCallback((id) => {
-    setLib((l) => {
+  const deleteSubject = useCallback(async (id) => {
+    return deleteOptimistically('subject', id,
+      String(id).startsWith('sub_') ? null : () => deleteRemoteSubject(id), (l) => {
     const gone = graphIdsOf(l.subjects, (s) => s.id === id)
     return {
       subjects: l.subjects.filter((s) => s.id !== id),
       activeGraphId: gone.includes(l.activeGraphId) ? null : l.activeGraphId,
     }
     })
-  }, [])
+  }, [deleteOptimistically])
 
   // --- topics ---
   const addTopic = useCallback(async (subjectId, name) => {
@@ -218,15 +268,16 @@ export function useLibrary(userKey) {
   const toggleTopic = useCallback((id, open) =>
     setLib(mapTopics((t) => (t.id === id ? { ...t, open: open ?? !t.open } : t))), [])
 
-  const deleteTopic = useCallback((id) => {
-    setLib((l) => {
+  const deleteTopic = useCallback(async (id) => {
+    return deleteOptimistically('topic', id,
+      String(id).startsWith('top_') ? null : () => deleteRemoteTopic(id), (l) => {
     const gone = graphIdsOf(l.subjects, (_s, t) => t.id === id)
     return {
       subjects: l.subjects.map((s) => ({ ...s, topics: s.topics.filter((t) => t.id !== id) })),
       activeGraphId: gone.includes(l.activeGraphId) ? null : l.activeGraphId,
     }
     })
-  }, [])
+  }, [deleteOptimistically])
 
   // --- graphs ---
   /**
@@ -252,12 +303,18 @@ export function useLibrary(userKey) {
     if (supabaseId) updateRemoteGraph(supabaseId, name).catch(() => {})
   }, [lib])
 
-  const deleteGraph = useCallback((id) => setLib((l) => ({
+  const deleteGraph = useCallback(async (id) => {
+    const graph = lib.subjects.flatMap((s) => s.topics.flatMap((t) => t.graphs))
+      .find((g) => g.id === id)
+    if (!graph) return
+    return deleteOptimistically('graph', id,
+      graph.supabaseId ? () => deleteRemoteGraph(graph.supabaseId) : null, (l) => ({
     subjects: l.subjects.map((s) => ({
       ...s, topics: s.topics.map((t) => ({ ...t, graphs: t.graphs.filter((g) => g.id !== id) })),
     })),
     activeGraphId: l.activeGraphId === id ? null : l.activeGraphId,
-  })), [])
+    }))
+  }, [lib, deleteOptimistically])
 
   const setActiveGraph = useCallback((id) => setLib((l) => ({ ...l, activeGraphId: id || null })), [])
 
