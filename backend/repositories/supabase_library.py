@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 
 from repositories.supabase_graphs import request_table
+from repositories.supabase_documents import delete_document_files, list_graph_documents
 from repositories.users import SupabaseIdentity
 
 
@@ -82,6 +83,12 @@ def update_subject(identity: SupabaseIdentity, subject_id: str, name: str) -> di
 
 
 def delete_subject(identity: SupabaseIdentity, subject_id: str) -> None:
+	_require_parent(identity, "subjects", subject_id)
+	topics = request_table(identity, "topics", f"?select=id&subject_id=eq.{subject_id}")
+	graphs = []
+	for topic in topics:
+		graphs.extend(request_table(identity, "graphs", f"?select=id&topic_id=eq.{topic['id']}"))
+	_delete_graph_files(identity, graphs)
 	request_table(identity, "subjects", f"?id=eq.{subject_id}", method="DELETE", prefer="return=minimal")
 
 
@@ -108,4 +115,29 @@ def update_topic(identity: SupabaseIdentity, topic_id: str, name: str) -> dict:
 
 
 def delete_topic(identity: SupabaseIdentity, topic_id: str) -> None:
+	_require_parent(identity, "topics", topic_id)
+	graphs = request_table(identity, "graphs", f"?select=id&topic_id=eq.{topic_id}")
+	_delete_graph_files(identity, graphs)
 	request_table(identity, "topics", f"?id=eq.{topic_id}", method="DELETE", prefer="return=minimal")
+
+
+def _require_parent(identity: SupabaseIdentity, table: str, parent_id: str) -> None:
+	# All reads and deletes use the caller's token and Supabase RLS.
+	if not request_table(identity, table, f"?select=id&id=eq.{parent_id}"):
+		raise HTTPException(status_code=404, detail="Item not found.")
+
+
+def _delete_graph_files(identity: SupabaseIdentity, graphs: list[dict]) -> None:
+	# Collect paths before deleting anything. Keep the database rows until file
+	# cleanup succeeds, so failures retain the paths needed for a retry.
+	documents = [document for graph in graphs
+		for document in list_graph_documents(identity, str(graph["id"]))]
+	delete_document_files(identity, documents)
+	# The parent DELETE cascades to graphs, documents, chunks and versions.
+	# Do not create deletion versions for graphs that are themselves going away.
+
+
+def delete_graph(identity: SupabaseIdentity, graph_id: str) -> None:
+	_require_parent(identity, "graphs", graph_id)
+	_delete_graph_files(identity, [{"id": graph_id}])
+	request_table(identity, "graphs", f"?id=eq.{graph_id}", method="DELETE", prefer="return=minimal")
