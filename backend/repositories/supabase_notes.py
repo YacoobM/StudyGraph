@@ -161,6 +161,7 @@ def update_note_section(identity: SupabaseIdentity, note_id: str, section_id: st
 
 
 async def plan_graph_note(identity: SupabaseIdentity, graph_id: str, document_ids: list[str], days: int | None = None) -> dict:
+    """Create a note plan from selected documents' provenance in the latest sealed graph version."""
     versions = list_graph_versions(identity, graph_id)
     if not versions:
         raise ValueError("This graph has no sealed version yet.")

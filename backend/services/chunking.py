@@ -3,6 +3,12 @@ from uuid import UUID, uuid5
 
 
 def build_document_chunks(pages, source, document_id=None, size=1024, overlap=150):
+	"""
+ 	Split page text into overlapping chunks while preserving spanned-page citations.
+
+	When a document ID is available, derive stable chunk IDs from it and each chunk's
+	content digest so reprocessing the same content keeps the same identifiers.
+	"""
 	full_text = ""
 	position_to_page = []
 	for page in pages:

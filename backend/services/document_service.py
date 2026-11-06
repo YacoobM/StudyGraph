@@ -21,6 +21,7 @@ MAX_CHUNKS_PER_BATCH = 4
 logger = get_logger(__name__)
 
 def make_extraction_batches(chunks):
+    """Group chunks without exceeding either the per-call count or estimated token budget."""
     batches, current, current_tokens = [], [], 0
     for chunk in chunks:
         chunk_tokens = estimate_tokens(chunk["text"])
@@ -35,6 +36,7 @@ def make_extraction_batches(chunks):
 
 
 async def extract_with_exp_backoff(engine, chunks, known_concepts_by_chunk=None, batch_index=None, total_batches=None, retries=5):
+    """Retry extraction only on rate limits, doubling the wait between attempts."""
     delay = 5
     started = time.perf_counter()
     for attempt in range(1, retries + 1):
@@ -97,6 +99,7 @@ async def extract_text(file_bytes, filename=None):
 
 
 async def extract_pdf(file_bytes):
+    """Extract native PDF text and OCR-render pages that contain almost no selectable text."""
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     pages = []
 
@@ -227,6 +230,7 @@ def extract_pptx(file_bytes: bytes):
     return pages
 
 async def extract_image_ocr(file_bytes):
+    """Use EasyOCR when detection is confident, otherwise fall back to Gemini transcription."""
     # Decode image from input bytes
     np_arr = np.frombuffer(file_bytes, np.uint8)
     image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -276,4 +280,3 @@ async def extract_image_ocr(file_bytes):
             "source": "gemini-flash"
         }
     ]
-

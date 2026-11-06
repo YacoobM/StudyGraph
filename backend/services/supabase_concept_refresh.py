@@ -6,6 +6,7 @@ from services.evolution_data import _call_with_retry
 
 
 async def refresh_degraded_concept_definitions(identity: SupabaseIdentity, graph_id: str, client) -> dict:
+	"""Regenerate definitions from saved provenance and seal a new version without mutating history."""
 	if client is None:
 		raise HTTPException(status_code=503, detail="The language model is not configured.")
 	versions = list_graph_versions(identity, graph_id)

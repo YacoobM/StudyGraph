@@ -78,6 +78,7 @@ def _restore_engine(
 	chunks_by_document: dict[str, list[dict]],
 	latest_snapshot: dict | None,
 ):
+	"""Rebuild in-memory graph evidence and alias state from persisted chunks and a snapshot."""
 	documents_by_id = {str(document["id"]): document for document in documents}
 	chunks_by_id = {
 		str(chunk["id"]): chunk

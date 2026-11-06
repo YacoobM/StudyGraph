@@ -246,6 +246,7 @@ def _keep(s: str) -> bool:
 
 
 def _textrank(emb: np.ndarray, damping: float = 0.85, iters: int = 60) -> np.ndarray:
+    """Score sentence centrality on a cosine-similarity graph using PageRank updates."""
     sim = np.clip(emb @ emb.T, 0, None)
     np.fill_diagonal(sim, 0)
     rows = sim.sum(1, keepdims=True)

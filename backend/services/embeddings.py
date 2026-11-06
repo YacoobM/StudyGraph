@@ -27,6 +27,7 @@ def get_embedding_client() -> OpenAI:
 
 
 def encode_texts(texts: Sequence[str]) -> list[list[float]]:
+    """Embed unique uncached texts, then restore request order and validate the vectors."""
     if not texts:
         return []
 

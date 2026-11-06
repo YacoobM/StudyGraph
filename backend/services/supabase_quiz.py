@@ -52,6 +52,11 @@ async def regenerate_graph_quiz(identity: SupabaseIdentity, graph_id: str) -> di
 
 
 async def _generate_graph_quiz(identity: SupabaseIdentity, graph_id: str, version: dict) -> dict:
+    """Generate questions for one sealed version, falling back to graph-derived questions.
+
+    Regenerating replaces attempts and questions for that version only; older versions remain
+    available as historical quizzes.
+    """
     version_id = str(version["id"])
 
     loaded = load_graph_version(identity, graph_id, version_id)
