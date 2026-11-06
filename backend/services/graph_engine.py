@@ -80,7 +80,7 @@ class StudyGraphEngine:
         # it isn't among that document's own top seed entities.
         self.known_concepts = set()
         self.known_concept_embeddings = (
-            None  # np.ndarray aligned with sorted(known_concepts), rebuilt on update
+            None
         )
         self._known_concepts_list = (
             []
@@ -131,6 +131,7 @@ class StudyGraphEngine:
         overlap=DEFAULT_CHUNK_OVERLAP,
         week_key=None,
     ):
+        """Create overlapping text chunks and retain their page/source provenance for retrieval."""
         chunks = []
 
         for p in pages:
@@ -226,6 +227,14 @@ class StudyGraphEngine:
         return result
 
     async def extract_knowledge_batch(self, chunks, known_concepts_by_chunk=None):
+        """
+        Extract concepts and relationships, rejecting relationships tied to unknown chunks.
+        Does it batchwise at once.
+
+        Malformed model output is logged and treated as an empty extraction
+        
+        -rate limits and API configuration errors remain visible to the caller
+        """
         raw_data = None  # so except blocks can always reference it
         known_concepts_by_chunk = known_concepts_by_chunk or {}
 
@@ -366,6 +375,7 @@ Respond with ONLY this exact JSON structure:
     def add_to_graph(
         self, raw_data, doc_name, week_key, max_nodes_per_doc=None, pages=None
     ):
+        """Append extracted evidence with its source and week, then mark changed edges stale."""
         if not raw_data:
             return
         mutated = False
@@ -621,8 +631,10 @@ Respond with ONLY this exact JSON structure:
         return {"matched": len(restored), "restored": restored}
 
     def fuse_graph(self):
-        """Fuse extracted concepts and edges; replaces canonical_nodes (keeping restored aliases)
-        and fused_edges."""
+        """
+        Fuse extracted concepts and edges; replaces canonical_nodes (keeping restored aliases)
+        and fused_edges.
+        """
         logger.info(
             "graph_fusion_started concepts=%d edges=%d",
             len(self.concepts),
@@ -777,6 +789,11 @@ Respond with ONLY this exact JSON structure:
         )
 
     def find_best_node(self, query):
+        """
+        Return the closest concept name only when its embedding similarity exceeds 0.7.
+        It was initially used by rag to get closest neighbours, but we moved to a multi-hop
+        appraoch
+        """
         if not self.concepts:
             return None
         node_names = [c["name"] for c in self.concepts]
@@ -905,7 +922,12 @@ Respond with ONLY this exact JSON structure:
 
     def multi_hop_search(self, query, depth=2):
         """
-        Multi-hop graph search: Find related concepts via graph traversal.
+        Expand query-matching seed concepts through graph edges up to the requested depth.
+
+        If no concept clears the seed similarity cutoff, traversal starts from the single
+        closest concept instead.
+        
+        It is used now inRAG query to supply the graph as context
         """
         if not self.concepts:
             return {"nodes": [], "edges": []}
@@ -995,7 +1017,12 @@ Respond with ONLY this exact JSON structure:
         self.graph_status = "needs_regeneration"
 
     def index_chunks(self, chunks, week_key=None):
-        # store into the vector database
+        """
+        Store chunk embeddings and provenance metadata in the graph-scoped vector collection.
+        
+        note: this is the local version using chromadb, eventually we moved this to supabase
+        to use pgvectors stored within the postgres table.
+        """
         texts = [chunk["text"] for chunk in chunks]
 
         embeddings = np.asarray(encode_texts(texts))
@@ -1024,6 +1051,7 @@ Respond with ONLY this exact JSON structure:
         )
 
     def retrieve_chunks(self, query, top_k=5, graph_id=None):
+        """Retrieve the nearest chunks, optionally restricting vector search to one graph."""
         target_graph_id = self.graph_id if graph_id is None else graph_id
         query_embedding = np.asarray(encode_texts([query.lower()]))
 
@@ -1053,8 +1081,7 @@ Respond with ONLY this exact JSON structure:
             )
         ]
 
-    # --- Evolution-only chunk store ---
-
+    #Evolution-only chunk store
     def index_chunks_for_week(self, chunks, week_key, doc_name):
         """Persist embedded chunks under `week_key`, additively (never wiped
         on later uploads), so concept-evolution summaries can retrieve

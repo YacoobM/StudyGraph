@@ -52,7 +52,7 @@ class FusionLog:
         self.call_failures = {"step3": {}, "step5": {}}   # step -> {reason: count}
         self.result = {}
 
-    # -- sections -----------------------------------------------------------
+    # Sections
 
     def _header(self, out):
         out += [
@@ -178,8 +178,7 @@ class FusionLog:
         out += [f"    {frm} -[{rel}]-> {to}" for frm, to, rel in self.bridge_edges]
         out.append("")
 
-    # -- output -------------------------------------------------------------
-
+    # Output
     def render(self):
         out = []
         for section in (self._header, self._step1, self._step2,

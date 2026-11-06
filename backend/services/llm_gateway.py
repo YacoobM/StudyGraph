@@ -1,3 +1,7 @@
+"""
+There are concurrency issues when multiple users/processes access the llm key at the same time.
+This file and functions are to handle the acquiring and provuisioning of the LLM calls.
+"""
 import asyncio
 import logging
 import threading
@@ -26,6 +30,7 @@ class SharedTokenLimiter:
         self.workload = workload
 
     def _available_wait(self, input_tokens, output_tokens):
+        """Reserve both token budgets together, or return the wait until this window resets."""
         if input_tokens > self.input_limit or output_tokens > self.output_limit:
             raise ValueError(
                 f"LLM reservation exceeds per-minute budget: "

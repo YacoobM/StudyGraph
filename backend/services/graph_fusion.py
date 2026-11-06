@@ -1130,6 +1130,7 @@ def _collect_nodes(engine):
 
 
 def merge_graph(engine, client, log=print):
+    """Resolve concept identity and relation evidence into canonical nodes and fused edges."""
     workers = fusion_workers()
     logger.info(
         "fusion_concurrency workers=%d global_slots=%d verdict_batch=%d max_singles=%d "

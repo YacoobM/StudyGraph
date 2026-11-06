@@ -20,6 +20,9 @@ logger = get_logger(__name__)
 
 
 def get_week_color_map(engine):
+    """
+    Get colour to show a particular graph
+    """
     sorted_weeks = sorted(
         engine.uploads_by_week.keys(),
         key=lambda w: int(w.split(' ')[1]) if ' ' in w else 0,
@@ -28,6 +31,9 @@ def get_week_color_map(engine):
 
 
 def get_graph_data(engine, week=None):
+    """
+    Build the evolution view, linking concepts that appear in at least one same week.
+    """
     if not engine or not engine.concepts:
         return {"nodes": [], "edges": [], "legend": {}}
 
@@ -120,6 +126,7 @@ def _batches(items, size):
 
 
 async def _call_and_parse_json(client, system_prompt, user_prompt, max_tokens):
+    """Parse keyed model results, retrying malformed JSON before returning an empty mapping."""
     for attempt in range(5):
         raw = await _call_with_retry(client, system_prompt, user_prompt, json_mode=False, max_tokens=max_tokens)
         if not raw:
