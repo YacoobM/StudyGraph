@@ -1,0 +1,9 @@
+-r ../requirements.txt
+
+httpx
+chromadb
+datasets
+langchain-core
+langchain-openai
+ragas[all]
+tqdm

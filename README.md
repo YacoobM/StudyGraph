@@ -60,4 +60,17 @@ src/
 
 ## Getting started
 
-See [SETUP.md](SETUP.md) for step by step instructions on Windows and macOS.
+See [SETUP.md](SETUP.md) for step by step instructions.
+
+## System overview
+
+See [OVERVIEW.md](OVERVIEW.md) for an explanation of how StudyGraph works.
+
+## Future work
+
+- **Automated quality checks:** The current setup for concept extraction is largely dependent on manual verification. In the future, this could be extended to create our own synthetic datasets/data as well as a comprehensive gold label dataset to allow automatic validation instead of double checking.
+- **Student corrections:** Let students manually correct inaccurate concepts and links, and save those
+  corrections.
+- **Cross-subject maps:** Connect concepts across subjects, such as FIT1008, FIT2004, and FIT3155,
+  in one map.
+- **Class-wide graph:** Explore a shared graph for an entire class (collaboration features).
