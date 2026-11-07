@@ -29,7 +29,7 @@ def retry_async(
     def decorator(func: Callable):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-             attempt = 0
+            attempt = 0
             wait_time = 1.0
             
             while attempt < max_attempts:
